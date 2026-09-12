@@ -500,6 +500,13 @@ export const AUDIT_ACTIONS = [
   // sai para o WhatsApp sem aprovação humana — auditável porque muda o que sai
   // do número da clínica.
   "ai.modo_sombra_changed",
+
+  // Nicho da organização (`app/api/v1/settings/nicho/route.ts`) — liga/desliga
+  // os dois freios clínicos determinísticos (`lerNichoDaOrg`/`nichoEhSaude`,
+  // `lib/agent-engine/guardrails/camadas-da-org.ts`). Auditável porque muda o
+  // que a IA pode afirmar no WhatsApp da organização (diagnóstico, prescrição,
+  // urgência médica) sem passar por migration nenhuma.
+  "org.nicho_changed",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

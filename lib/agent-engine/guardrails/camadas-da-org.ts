@@ -28,6 +28,8 @@
  */
 import type pg from 'pg';
 
+import { NICHO_SAUDE } from '@/lib/organizacoes/nicho';
+
 /**
  * O vocabulário vive AQUI, não num CHECK do banco.
  *
@@ -124,8 +126,13 @@ export async function lerNichoDaOrg(
   }
 }
 
-/** O único valor de nicho que liga os freios clínicos hoje. */
-export const NICHO_SAUDE = "saude";
+/**
+ * Reexportado por compatibilidade — quem já importa `NICHO_SAUDE` daqui não
+ * quebra. A declaração vive em `lib/organizacoes/nicho.ts`, que é também de
+ * onde a rota `app/api/v1/settings/nicho/route.ts` valida o vocabulário
+ * fechado: uma constante só, nunca duas cópias que podem divergir.
+ */
+export { NICHO_SAUDE };
 
 /** Função pura, testável sem banco — separa a leitura (`lerNichoDaOrg`) da regra. */
 export function nichoEhSaude(nicho: string | null): boolean {
