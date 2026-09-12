@@ -14,7 +14,10 @@ import { AttachMenu } from "@/components/inbox/composer/AttachMenu";
 import { AttachmentPreviewDialog } from "@/components/inbox/composer/AttachmentPreviewDialog";
 import { ContactPickerDialog } from "@/components/inbox/composer/ContactPickerDialog";
 import { AudioRecorder } from "@/components/inbox/composer/AudioRecorder";
-import { ReplyReviewPanel } from "@/components/inbox/composer/ReplyReviewPanel";
+import {
+  ReplyReviewPanel,
+  type ReplyReviewPanelHandle,
+} from "@/components/inbox/composer/ReplyReviewPanel";
 import { EmojiButton } from "@/components/inbox/composer/EmojiButton";
 import { resolveSlash, TemplateMenu } from "@/components/inbox/composer/TemplateMenu";
 import { useCreateNote } from "@/hooks/inbox/useCreateNote";
@@ -28,6 +31,8 @@ import { cn } from "@/lib/utils";
 
 export interface ComposerHandle {
   focus: () => void;
+  /** Leva o foco ao rascunho pendente do agente — usado pela bolha "Editar" no fim do fio. */
+  focusSuggestion: () => void;
 }
 
 interface Props {
@@ -80,6 +85,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const [menuDismissed, setMenuDismissed] = useState(false);
   const [mode, setMode] = useState<"reply" | "note">("reply");
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const replyReviewRef = useRef<ReplyReviewPanelHandle | null>(null);
   const send = useSendMessage();
   const upload = useUploadMedia();
   const createNote = useCreateNote();
@@ -89,6 +95,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   useImperativeHandle(ref, () => ({
     focus: () => taRef.current?.focus(),
+    focusSuggestion: () => {
+      // "Nota interna" desmonta o ReplyReviewPanel — troca de modo primeiro e só
+      // então foca, no próximo frame, quando o painel já existe no DOM.
+      setMode("reply");
+      requestAnimationFrame(() => replyReviewRef.current?.focus());
+    },
   }));
 
   // send/createNote fora do disable: o texto some na hora do envio; travar o campo
@@ -205,7 +217,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         )}
       >
         {mode === "reply" && (
-          <ReplyReviewPanel conversationId={conversationId} disabled={isDisabled} />
+          <ReplyReviewPanel
+            ref={replyReviewRef}
+            conversationId={conversationId}
+            disabled={isDisabled}
+          />
         )}
         <TemplateMenu
           open={menuOpen}
