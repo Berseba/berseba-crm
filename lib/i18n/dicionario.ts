@@ -851,6 +851,22 @@ export const DICIONARIO: Traducoes = {
     es: "Abre la acción correspondiente en el CRM o en el calendario para confirmar.",
   },
   "Feedback para a próxima sugestão": { es: "Comentarios para la próxima sugerencia" },
+  // Nicho da organização (`lib/organizacoes/nicho.ts`) — liga os freios clínicos
+  "Nicho da organização": { es: "Nicho de la organización" },
+  "Nicho salvo.": { es: "Nicho guardado." },
+  // Valores de NICHO_LABELS (`lib/organizacoes/nicho.ts`); "Saúde" já existia acima
+  "E-commerce": { es: "E-commerce" },
+  Imobiliária: { es: "Inmobiliaria" },
+  Infoproduto: { es: "Infoproducto" },
+  Serviços: { es: "Servicios" },
+  "Escolher Saúde liga dois freios: urgência médica relatada pelo contato vai para uma pessoa na hora, com orientação de emergência; e a IA nunca afirma diagnóstico, receita remédio ou promete cura.":
+    {
+      es: "Elegir Salud activa dos frenos: una urgencia médica relatada por el contacto pasa a una persona de inmediato, con orientación de emergencia; y la IA nunca afirma un diagnóstico, receta medicamentos ni promete cura.",
+    },
+  "Para os outros nichos, hoje isso não muda nada — o valor fica reservado para uso futuro.":
+    {
+      es: "Para los demás nichos, hoy esto no cambia nada — el valor queda reservado para uso futuro.",
+    },
   "Aprovar e enviar": { es: "Aprobar y enviar" },
   Rejeitar: { es: "Rechazar" },
   "Confira a configuração do agente e tente gerar novamente.": {
