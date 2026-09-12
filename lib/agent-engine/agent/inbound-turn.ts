@@ -168,7 +168,9 @@ import {
   type JailbreakClassifierKnobs,
   type JailbreakLevel,
 } from '../guardrails/jailbreak/classifier';
-import { camadaLigada, lerCamadasDaOrg } from '../guardrails/camadas-da-org';
+import { camadaLigada, lerCamadasDaOrg, lerNichoDaOrg, nichoEhSaude } from '../guardrails/camadas-da-org';
+import { checkG4Medical } from '@/lib/ai/handoff/triggers';
+import { ORIENTACAO_DE_EMERGENCIA_MEDICA } from '@/lib/escalacao/aviso-ao-lead';
 import { fusoDaOrganizacao } from './fuso-da-org';
 import { renderAgora } from '@/lib/tempo/agora';
 import { decidirElegibilidadeDaConversa } from '@/lib/ai/elegibilidade/consulta-pg';
@@ -1718,6 +1720,65 @@ async function executarTurnoDoAgente(
         ...(await lerModoSombra(pool, { organizationId: tenantId, channelSessionId: input.channelSessionId })),
         agente: agentConfig?.operationMode === 'assisted',
       });
+
+  // FREIO CLÍNICO 1 (ramo SOMBRA/ASSISTIDO) — urgência médica relatada pelo
+  // contato, opt-in por `organizations.settings->>'nicho' = 'saude'` (sem
+  // migration — `lerNichoDaOrg`/`nichoEhSaude`, `camadas-da-org.ts`). Roda ANTES
+  // do `return` de baixo que desvia o turno inteiro para `generateReplyDraft`:
+  // se essa checagem morasse depois dele, uma organização em sombra NUNCA a
+  // alcançaria.
+  //
+  // A condição é `decisaoSombra.sombra`, não só `operationMode === 'assisted'`:
+  // com o cinto ligado por org/canal, o ramo AUTOMÁTICO (mais abaixo, junto de
+  // F4-06, que manda a orientação de verdade e aciona o handoff) nunca é
+  // alcançado — então a triagem médica precisa morar aqui, no ramo de sombra.
+  // Sombra = a orientação vira RASCUNHO, nunca envio (é o próprio contrato do
+  // modo: nada sai sem um humano decidir) — por isso é um alerta CRÍTICO com o
+  // texto sugerido, não um `avisarLeadDaEscalacao`. Aqui, mais cedo no turno,
+  // só o texto pinado a ESTE job (o histórico completo ainda não foi carregado).
+  if (
+    !preview &&
+    decisaoSombra.sombra &&
+    job?.kind === 'inbound_turn' &&
+    input.inboundMessageId !== undefined
+  ) {
+    const textoPinadoParaTriagem = await loadInboundBodyForJob(pool, {
+      tenantId,
+      conversationId: input.conversationId,
+      inboundMessageId: input.inboundMessageId,
+    });
+    if (
+      textoPinadoParaTriagem !== null &&
+      checkG4Medical(textoPinadoParaTriagem) &&
+      nichoEhSaude(await lerNichoDaOrg(pool, tenantId))
+    ) {
+      await insertInboxItem(
+        pool,
+        tenantId,
+        {
+          kind: 'handoff',
+          severity: 'critical',
+          title: 'Possível urgência médica relatada pelo contato',
+          body:
+            'A mensagem do contato parece relatar uma emergência médica. Orientação sugerida ' +
+            `(revise e envie o quanto antes): "${ORIENTACAO_DE_EMERGENCIA_MEDICA}"`,
+          refKind: 'conversation',
+          refId: input.conversationId,
+        },
+        'kind_e_ref',
+      ).catch((err) => {
+        runLog.warn('alerta de urgência médica (modo assistido) falhou (best-effort)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+      runLog.info(
+        'urgência médica detectada no inbound — modo assistido, rascunho aberto sem envio',
+        { kind: liveJob().kind },
+      );
+      return;
+    }
+  }
+
   if (!preview && decisaoSombra.sombra && job?.kind === 'inbound_turn' && agentConfig) {
     const { generateReplyDraft } = await import('./reply-drafts');
     await generateReplyDraft(pool, deps, {
@@ -2001,6 +2062,45 @@ async function executarTurnoDoAgente(
   const mensagemDoJob =
     currentInboundText ?? latestInboundSignal(openingContext.context.messages);
   const inboundsPendentes = inboundsNaoRespondidos(openingContext.context.messages);
+
+  // FREIO CLÍNICO 1 (ramo AUTOMÁTICO) — urgência médica relatada pelo contato,
+  // opt-in por nicho='saude'. Roda ANTES do F4-06 (pedido explícito de
+  // humano): uma emergência relatada não espera a vez do "quero falar com
+  // atendente", e cobre TODOS os `inboundsPendentes` (não só a mensagem
+  // pinada deste job) — mesma razão do F4-06/F4-07 logo abaixo, que leem da
+  // mesma lista para não perder sinal coalescido numa rajada.
+  //
+  // Se a org está em modo assistido, o TURNO INTEIRO já foi desviado para
+  // `generateReplyDraft` (ou para o alerta crítico do bloco acima, se o
+  // regex tivesse batido na mensagem pinada) antes de chegar aqui — então,
+  // daqui pra baixo, `agentConfig?.operationMode === 'assisted'` nunca é
+  // verdadeiro, e este bloco só executa para organizações em modo automático.
+  if (
+    !preview &&
+    inboundsPendentes.some((texto) => checkG4Medical(texto)) &&
+    nichoEhSaude(await lerNichoDaOrg(pool, tenantId))
+  ) {
+    const aviso = await avisarLeadDaEscalacao(pool, avisoDaEscalacao().ids, {
+      ...avisoDaEscalacao().base,
+      motivo: 'urgencia_medica',
+    });
+    await performHumanHandoff(
+      pool,
+      { tenantId, leadId, conversationId: input.conversationId },
+      {
+        reason: 'medical_emergency',
+        conversationSummary: buildHandoffSummary(previous),
+        avisoAoLead: aviso,
+        log: runLog,
+      },
+    );
+    runLog.info('urgência médica detectada no inbound — handoff acionado (detecção determinística)', {
+      kind: liveJob().kind,
+      lead_avisado: aviso.avisado,
+    });
+    return; // bot silencia: a orientação já saiu, e nada mais sai neste turno
+  }
+
   if (
     !preview &&
     inboundsPendentes.some(
