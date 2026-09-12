@@ -58,7 +58,17 @@ function setup(a: PublishedAgentConfig, b: PublishedAgentConfig, sticky: boolean
   // These remain valid alternatives; returning B here would hide the original bypass.
   mocks.bySession.mockResolvedValue(a);
   mocks.conversationAgent.mockResolvedValue(a);
-  const query = vi.fn(async (_sql: string, values: unknown[]) => {
+  const query = vi.fn(async (sql: string, values: unknown[]) => {
+    // Modo sombra (`lib/ai/modo-sombra/leitura.ts`, caminho `viaPg`) faz uma
+    // consulta própria — org+canal, não org+conversa — antes ou depois da
+    // resolução do turno, dependendo do agente. Não é o que este arquivo
+    // testa (seleção do router), então responde "nenhum dos dois ligado" e
+    // deixa a asserção estrita abaixo só para a consulta que este teste
+    // realmente cobre.
+    if (sql.includes('org_modo_sombra')) {
+      expect(values).toEqual([ids.org, ids.channel]);
+      return { rows: [{ org_modo_sombra: null, canal_modo_sombra: null }] };
+    }
     expect(values).toEqual([ids.org, ids.conversation]);
     return { rows: [{ active_ai_agent_id: sticky ? 'A' : null, active_intent: sticky ? 'vendas' : null,
       body: 'Agora preciso de suporte técnico' }] };

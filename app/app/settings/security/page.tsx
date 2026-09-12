@@ -23,6 +23,7 @@ export default async function SecurityPage() {
   const enrolled = await isMfaEnrolled();
 
   let empresaExige = false;
+  let modoSombra = false;
   if (org) {
     const { data } = await createAdminClient()
       .from("organizations")
@@ -30,6 +31,7 @@ export default async function SecurityPage() {
       .eq("id", org.orgId)
       .maybeSingle();
     empresaExige = empresaExigeMfa(data?.settings);
+    modoSombra = (data?.settings as Record<string, unknown> | null)?.modo_sombra === true;
   }
 
   // A mesma função que o layout usa para decidir o bloqueio — a tela não pode
@@ -55,6 +57,8 @@ export default async function SecurityPage() {
         obrigatorio={obrigatorio}
         podeExigirDaEquipe={org?.role === "admin"}
         empresaExige={empresaExige}
+        podeLigarModoSombra={org?.role === "admin"}
+        modoSombra={modoSombra}
       />
     </div>
   );

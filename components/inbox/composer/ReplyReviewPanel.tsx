@@ -16,6 +16,7 @@ type Draft = {
   error_code: string | null;
   proposals: Array<{ tool: string; arguments: unknown }>;
 };
+type ModoSombra = { ligado: boolean; origem: "organizacao" | "canal" | null };
 export function ReplyReviewPanel({
   conversationId,
   disabled,
@@ -29,12 +30,13 @@ export function ReplyReviewPanel({
   const query = useQuery({
     queryKey: key,
     queryFn: () =>
-      apiClient.get<{ data: { drafts: Draft[] } }>(
+      apiClient.get<{ data: { drafts: Draft[]; modo_sombra: ModoSombra } }>(
         `/api/v1/conversations/${conversationId}/draft-reply`,
       ),
     refetchInterval: 4000,
     retry: false,
   });
+  const modoSombra = query.data?.data.modo_sombra;
   const [edits, setEdits] = useState<Record<string, string>>({}),
     [feedback, setFeedback] = useState(""),
     [busy, setBusy] = useState(false),
@@ -106,6 +108,14 @@ export function ReplyReviewPanel({
       className="mb-3 space-y-2 rounded-md border bg-muted/30 p-3"
       aria-label={t("Assistência do agente")}
     >
+      {modoSombra?.ligado && (
+        <p
+          role="status"
+          className="rounded-md border border-amber-500/40 bg-amber-50/60 px-2 py-1 text-xs dark:bg-amber-900/10"
+        >
+          {t("Modo sombra ligado — a IA só sugere")}
+        </p>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium">
           {t(draft ? (statuses[draft.status] ?? "Assistência do agente") : "Assistência do agente")}
