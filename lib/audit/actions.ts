@@ -966,6 +966,13 @@ export const AUDIT_ACTIONS = [
   // "Enviar vendas pelo canal da conversa" (doc 76, PR #1819): ligar faz o
   // valor da venda e o telefone do cliente saírem para o provedor do canal.
   "conversions.report_via_channel_updated",
+
+  // Nicho da organização (`app/api/v1/settings/nicho/route.ts`) — liga/desliga
+  // os dois freios clínicos determinísticos (`lerNichoDaOrg`/`nichoEhSaude`,
+  // `lib/agent-engine/guardrails/camadas-da-org.ts`). Auditável porque muda o
+  // que a IA pode afirmar no WhatsApp da organização (diagnóstico, prescrição,
+  // urgência médica) sem passar por migration nenhuma.
+  "org.nicho_changed",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
