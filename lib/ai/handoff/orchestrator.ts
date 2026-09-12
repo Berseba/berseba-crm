@@ -61,6 +61,14 @@ export type HandoffReason =
   | "legal_mention"
   | "refund_mention"
   /**
+   * Freio clínico 1 — urgência médica relatada pelo CONTATO (`checkG4Medical`,
+   * `lib/ai/handoff/triggers.ts`), opt-in por `organizations.settings->>'nicho'
+   * = 'saude'`. `motivoDoAviso`/`textoDoAviso` (`lib/escalacao/aviso-ao-lead.ts`)
+   * traduzem este motivo para a orientação FIXA de emergência — não a frase
+   * genérica de escalação.
+   */
+  | "medical_emergency"
+  /**
    * O teto de gasto com IA parou o atendimento automático. NÃO é pedido do lead —
    * quem lê `last_handoff_reason` precisa distinguir, porque a primeira frase que
    * o humano digita depende disso.
@@ -130,6 +138,13 @@ const MOTIVO_DA_PASSAGEM = {
   legal_mention: "legal_mention",
   refund_mention: "refund_mention",
   orcamento_de_ia: "orcamento_de_ia",
+  // Freio clínico 1 (Berseba): `medical_emergency` NÃO existe no vocabulário do
+  // banco (CHECK de `passagens_de_atendimento.motivo`), e acrescentá-lo seria
+  // migration + apêndice do baseline — superfície de conflito a cada
+  // sincronização com o fornecedor. Vai como `critical_stage` ("uma etapa que
+  // pede uma pessoa"), e quem chama passa `motivoTexto` dizendo que foi
+  // urgência médica: o cartão da Central e a linha da passagem ficam honestos.
+  medical_emergency: "critical_stage",
 } satisfies Record<HandoffReason, MotivoDaPassagem>;
 
 function motivoDaPassagem(reason: HandoffReason): MotivoDaPassagem {

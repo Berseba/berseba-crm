@@ -69,6 +69,8 @@ import { escalateLgpdVeto, isLegalBasisValid } from './lgpd/legal-basis';
 import type { LgpdInput } from './lgpd/legal-basis';
 import { detectHumanPromise } from './human-promise';
 import { detectarVazamentoInterno, renderVetoDeVazamento } from './vazamento-interno';
+import { detectarEscopoClinicoIndevido, renderVetoDeEscopoClinico } from './escopo-clinico';
+import { lerNichoDaOrg, nichoEhSaude } from './camadas-da-org';
 // Módulo PURO de propósito (`capabilities`, não `index`): o seam não arrasta o
 // adapter — e com ele o cliente HTTP do canal — para dentro do worker.
 import { capabilitiesOf, DEFAULT_CHANNEL_PROVIDER } from '@/lib/channels/capabilities';
@@ -257,6 +259,20 @@ export interface GateContext {
    * site, que é quem monta as tools).
    */
   agenda?: { active: boolean; ferramentas: readonly string[]; toolCalledThisTurn: boolean };
+  /**
+   * Arma o `clinicalScopeGate` (freio clínico 2 — nunca diagnóstico, nunca
+   * prescrição). True quando `organizations.settings->>'nicho' = 'saude'`
+   * (`camadas-da-org.ts`, `lerNichoDaOrg`/`nichoEhSaude`).
+   *
+   * Ausente/false = no-op — mesma direção segura de `internalVocabularyEnforced`
+   * e `agenda`: todo teste que hoje monta `GateContext` na mão (e são vários)
+   * continua passando sem conhecer este campo. Diferente DAQUELES dois campos,
+   * porém, `runBeforeSend` carrega o valor de VERDADE sozinho (por ponteiro,
+   * sob o lock — a mesma leitura que arma o freio 1 no inbound): não é opt-in
+   * por chamador, é propriedade da ORGANIZAÇÃO, e ninguém que monte um turno
+   * deveria poder "esquecer" de armar um guardrail de segurança do paciente.
+   */
+  nichoSaude?: boolean;
 }
 
 /**
@@ -647,6 +663,46 @@ export const agendaStallGate: Gate = {
 };
 
 /**
+ * Gate de ESCOPO CLÍNICO (freio clínico 2 — "dois guardrails clínicos
+ * determinísticos", opt-in por organização) — a garantia DURA de que o
+ * assistente de uma clínica/consultório NUNCA diagnostica, NUNCA prescreve
+ * medicamento e NUNCA promete cura no lugar do profissional. Desarmado
+ * (`nichoSaude` ausente/false) = no-op — mesmo default seguro de
+ * `internalVocabularyEnforced`/`agenda`; a org só liga isto ao declarar
+ * `settings->>'nicho' = 'saude'` (sem migration, ver `camadas-da-org.ts`).
+ *
+ * Detecção pura em `escopo-clinico.ts` (`detectarEscopoClinicoIndevido`):
+ * diagnóstico ("você tem/está com <condição>", "isso é <condição>", "seu
+ * problema/diagnóstico é"), prescrição (nome de analgésico/anti-inflamatório
+ * comum, dose numérica, ou "tome"/"use" perto de remédio) ou promessa de
+ * resultado clínico ("vai curar", "garantimos que a dor some"). Permitido:
+ * falar de avaliação presencial, sessão, exercício, preço.
+ *
+ * Posição 11 de 12 em `BEFORE_SEND_GATES` (v8) — confira com
+ * `BEFORE_SEND_GATES.map(g => g.name).indexOf('clinical_scope')` em vez de
+ * confiar neste número (o array só cresce): DEPOIS do `agendaStallGate` e
+ * ANTES do `disclosureGate` — mesma razão do `internalVocabularyGate`/
+ * `agendaStallGate` acima: o disclosure pode EMENDAR o corpo, e o que se
+ * quer inspecionar é o texto que o MODELO escreveu.
+ */
+export const clinicalScopeGate: Gate = {
+  name: 'clinical_scope',
+  evaluate: (ctx) => {
+    if (ctx.nichoSaude !== true) return { pass: true, skipped: 'not_applicable' };
+    const achado = detectarEscopoClinicoIndevido(ctx.body);
+    if (!achado.achou) return { pass: true };
+    return {
+      pass: false,
+      code: 'clinical_scope_violation',
+      reason: renderVetoDeEscopoClinico(achado.categorias),
+      // detail é LOGADO: só o rótulo da(s) categoria(s), nunca o corpo (sem PII) —
+      // mesma disciplina do internalVocabularyGate.
+      detail: { clinical_kinds: achado.categorias.join(',') },
+    };
+  },
+};
+
+/**
  * Gate de disclosure (F4-05; blueprint 5.7) — garante que a PRIMEIRA mensagem outbound a um
  * lead novo se apresenta como assistente virtual (template versionado por org). Decisão de
  * produto que blinda hoje (CDC) e amanhã (PL 2338), não exigência da Meta. Sem template
@@ -799,9 +855,14 @@ const spinningGate: Gate = {
  * a instrução presente e por último no prompt). Nasce DESARMADO por default (ver
  * `GateContext.agenda`): só o caminho do agente o arma quando o agente publicado tem
  * `crm_book_appointment` nas tools, então a v7 também não muda o destino de nenhum envio que
- * já existia fora desse caso — muda o TRACE e passa a medir/impedir a promessa vazia.
+ * já existia fora desse caso — muda o TRACE e passa a medir/impedir a promessa vazia. v8 = insere
+ * `clinicalScopeGate` entre `agenda_stall` e `disclosure` — o freio clínico 2 ("nunca diagnóstico,
+ * nunca prescrição"), opt-in por organização via `organizations.settings->>'nicho' = 'saude'`. Nasce
+ * DESARMADO por default para toda organização que não declarou o nicho (ver
+ * `GateContext.nichoSaude`), então a v8 não muda o destino de nenhum envio de clone existente — muda
+ * o TRACE e passa a medir/impedir diagnóstico e prescrição nas organizações de saúde que ligarem o nicho.
  */
-export const BEFORE_SEND_CHAIN_VERSION = 7;
+export const BEFORE_SEND_CHAIN_VERSION = 8;
 
 /**
  * Ordem FINAL da cadeia (F4-08/F4-09; edge-contract §before_send / blueprint órgão 5) — DADO
@@ -818,6 +879,8 @@ export const BEFORE_SEND_CHAIN_VERSION = 7;
  *         `separacao-fala-e-operacao.md`); antes do disclosure porque ele pode emendar o corpo;
  *   (6.9) agenda_stall — "vou verificar/confirmar horário" sem ter chamado a ferramenta de
  *         agenda neste turno; antes do disclosure pelo mesmo motivo do internal_vocabulary;
+ *   (7) clinical_scope — nunca diagnóstico, nunca prescrição, nunca promessa de cura; opt-in
+ *       por `organizations.settings->>'nicho' = 'saude'`; antes do disclosure pelo mesmo motivo;
  *   (8) disclosure — 1ª mensagem se apresenta como assistente virtual (F4-05).
  * (O anti-jailbreak F4-04 é INBOUND advisório, não gate de before_send — não entra aqui.)
  */
@@ -832,6 +895,7 @@ export const BEFORE_SEND_GATES: readonly Gate[] = [
   casePromiseGate,
   internalVocabularyGate,
   agendaStallGate,
+  clinicalScopeGate,
   disclosureGate,
 ];
 
@@ -1169,6 +1233,9 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
     );
     // org de fonte confiável (RunBeforeSendArgs.tenantId = organization_id do row do job) — regra dura nº 1.
     const promise = await loadPromiseTable(client, args.tenantId);
+    // Freio clínico 2 (`clinicalScopeGate`): propriedade da ORG, carregada por ponteiro sob o
+    // lock, igual à tabela de preço — nenhum chamador precisa "lembrar" de armar isto.
+    const nichoSaude = nichoEhSaude(await lerNichoDaOrg(client, args.tenantId));
     // Camada semântica (F4-02): recebe o MESMO corpo final de estilo que os gates
     // determinísticos receberão. Se classificasse `args.body`, a cadeia julgaria
     // uma frase diferente da que efetivamente pode chegar ao cliente.
@@ -1226,6 +1293,7 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
         : {}),
       internalVocabularyEnforced: args.enforceInternalVocabulary ?? false,
       ...(args.agenda !== undefined ? { agenda: args.agenda } : {}),
+      ...(nichoSaude ? { nichoSaude: true as const } : {}),
     };
 
     const { body: evaluatedBody, trace: traceDaCadeia, veto, throttleWaitMs } = evaluateBeforeSend(ctx, gates);

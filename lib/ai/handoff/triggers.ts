@@ -21,7 +21,9 @@ import { logger } from "@/lib/logger";
 import {
   G1_REGEX,
   G4_LEGAL_REGEX,
+  G4_MEDICAL_REGEX,
   containsUncertaintyMarkers,
+  normalizeForG4Medical,
 } from "@/lib/ai/handoff/regex";
 
 export function checkG1(body: string): boolean {
@@ -32,6 +34,20 @@ export function checkG1(body: string): boolean {
 export function checkG4Legal(body: string): boolean {
   if (!body) return false;
   return G4_LEGAL_REGEX.test(body);
+}
+
+/**
+ * G4_MEDICAL — urgência médica relatada pelo contato (freio clínico 1, opt-in
+ * por `organizations.settings->>'nicho' = 'saude'` — o CALLER decide se este
+ * check roda; a função em si é pura e nicho-agnóstica, como `checkG4Legal`).
+ *
+ * Normaliza (minúsculas, sem acento) antes de testar — ver o comentário de
+ * `G4_MEDICAL_REGEX` em `regex.ts` para o porquê de esta camada, sozinha
+ * entre as G1-G4, precisar de normalização.
+ */
+export function checkG4Medical(body: string): boolean {
+  if (!body) return false;
+  return G4_MEDICAL_REGEX.test(normalizeForG4Medical(body));
 }
 
 export interface CheckG3Input {
