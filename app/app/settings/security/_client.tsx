@@ -4,6 +4,13 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { RecoveryCodesPanel } from "@/components/auth/RecoveryCodesPanel";
 import { MfaEnrollModal } from "@/components/auth/MfaEnrollModal";
 import { regenerateRecoveryCodes } from "@/app/actions/settings/regenerateRecoveryCodes";
@@ -14,7 +21,10 @@ import {
 } from "@/app/actions/auth/politicaDeMfa";
 import { PainelDeChamadaDeVoz } from "@/components/voice/PainelDeChamadaDeVoz";
 import { apiClient } from "@/lib/api/client";
+import { NICHOS, NICHO_LABELS, type Nicho } from "@/lib/organizacoes/nicho";
 import { useT } from "@/hooks/i18n/useT";
+
+const NENHUM_NICHO = "__nenhum__";
 
 export function SecurityClient({
   mfaEnrolled,
@@ -23,6 +33,8 @@ export function SecurityClient({
   empresaExige,
   podeLigarModoSombra,
   modoSombra,
+  podeConfigurarNicho,
+  nicho,
 }: {
   mfaEnrolled: boolean;
   /** A política obriga esta pessoa a ter a verificação? */
@@ -33,6 +45,9 @@ export function SecurityClient({
   /** Só admin liga/desliga o modo sombra da organização. */
   podeLigarModoSombra: boolean;
   modoSombra: boolean;
+  /** Só admin escolhe o nicho da organização. */
+  podeConfigurarNicho: boolean;
+  nicho: Nicho | null;
 }) {
   const t = useT();
   const [codes, setCodes] = useState<string[] | null>(null);
@@ -42,6 +57,8 @@ export function SecurityClient({
   const [mexendo, startMexer] = useTransition();
   const [sombraLigada, setSombraLigada] = useState(modoSombra);
   const [mexendoSombra, startMexerSombra] = useTransition();
+  const [nichoAtual, setNichoAtual] = useState<Nicho | null>(nicho);
+  const [mexendoNicho, startMexerNicho] = useTransition();
 
   function handleRegenerate() {
     if (
@@ -213,6 +230,52 @@ export function SecurityClient({
               </span>
             </span>
           </label>
+        </Card>
+      ) : null}
+
+      {podeConfigurarNicho ? (
+        <Card className="space-y-3 p-6">
+          <h2 className="text-sm font-semibold">{t("Nicho da organização")}</h2>
+          <div className="space-y-2">
+            <Select
+              value={nichoAtual ?? NENHUM_NICHO}
+              disabled={mexendoNicho}
+              onValueChange={(valor) => {
+                const novoNicho = valor === NENHUM_NICHO ? null : (valor as Nicho);
+                startMexerNicho(async () => {
+                  try {
+                    await apiClient.patch("/api/v1/settings/nicho", { nicho: novoNicho });
+                    setNichoAtual(novoNicho);
+                    toast.success(t("Nicho salvo."));
+                  } catch {
+                    toast.error(t("Não foi possível salvar. Tente de novo."));
+                  }
+                });
+              }}
+            >
+              <SelectTrigger className="w-64">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NENHUM_NICHO}>{t("Nenhum")}</SelectItem>
+                {NICHOS.map((valorNicho) => (
+                  <SelectItem key={valorNicho} value={valorNicho}>
+                    {t(NICHO_LABELS[valorNicho])}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "Escolher Saúde liga dois freios: urgência médica relatada pelo contato vai para uma pessoa na hora, com orientação de emergência; e a IA nunca afirma diagnóstico, receita remédio ou promete cura.",
+              )}
+              <span className="mt-1 block">
+                {t(
+                  "Para os outros nichos, hoje isso não muda nada — o valor fica reservado para uso futuro.",
+                )}
+              </span>
+            </p>
+          </div>
         </Card>
       ) : null}
 

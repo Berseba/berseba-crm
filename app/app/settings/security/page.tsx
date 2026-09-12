@@ -1,6 +1,7 @@
 import { requireAuth, isMfaEnrolled, resolveActiveOrg, requiresMfa } from "@/lib/auth/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { empresaExigeMfa } from "@/lib/auth/politica-mfa";
+import { nichoSchema, type Nicho } from "@/lib/organizacoes/nicho";
 import { SecurityClient } from "./_client";
 import { traduzir } from "@/lib/i18n/dicionario";
 
@@ -24,6 +25,7 @@ export default async function SecurityPage() {
 
   let empresaExige = false;
   let modoSombra = false;
+  let nicho: Nicho | null = null;
   if (org) {
     const { data } = await createAdminClient()
       .from("organizations")
@@ -31,7 +33,9 @@ export default async function SecurityPage() {
       .eq("id", org.orgId)
       .maybeSingle();
     empresaExige = empresaExigeMfa(data?.settings);
-    modoSombra = (data?.settings as Record<string, unknown> | null)?.modo_sombra === true;
+    const settings = data?.settings as Record<string, unknown> | null;
+    modoSombra = settings?.modo_sombra === true;
+    nicho = nichoSchema.catch(null).parse(settings?.nicho ?? null);
   }
 
   // A mesma função que o layout usa para decidir o bloqueio — a tela não pode
@@ -59,6 +63,8 @@ export default async function SecurityPage() {
         empresaExige={empresaExige}
         podeLigarModoSombra={org?.role === "admin"}
         modoSombra={modoSombra}
+        podeConfigurarNicho={org?.role === "admin"}
+        nicho={nicho}
       />
     </div>
   );
