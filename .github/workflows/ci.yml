@@ -35,6 +35,11 @@ jobs:
         timeout-minutes: 5
 
       - name: Typecheck
+        # O runner tem 7 GB; o heap padrão do Node (~4 GB) estourou em 134 no
+        # fork quando o modo sombra e os freios clínicos entraram — o `tsc`
+        # deste repo já andava no limite. Local também só passa com heap maior.
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
         run: pnpm typecheck
 
       - name: Lint
