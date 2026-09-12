@@ -27,6 +27,9 @@ export const ReplyReviewPanel = forwardRef<ReplyReviewPanelHandle, {
   useImperativeHandle(ref, () => ({
     focus: () => textareaRef.current?.focus(),
   }));
+  // A mesma resposta do polling traz o estado do interruptor de sombra
+  // (org/canal) — a tarja abaixo lê daqui, sem segunda chamada.
+  const modoSombra = query.modoSombra;
   const [edits, setEdits] = useState<Record<string, string>>({}),
     [feedback, setFeedback] = useState(""),
     [busy, setBusy] = useState(false),
@@ -97,6 +100,14 @@ export const ReplyReviewPanel = forwardRef<ReplyReviewPanelHandle, {
       className="mb-3 space-y-2 rounded-md border bg-muted/30 p-3"
       aria-label={t("Assistência do agente")}
     >
+      {modoSombra?.ligado && (
+        <p
+          role="status"
+          className="rounded-md border border-amber-500/40 bg-amber-50/60 px-2 py-1 text-xs dark:bg-amber-900/10"
+        >
+          {t("Modo sombra ligado — a IA só sugere")}
+        </p>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-medium">
           {t(draft ? (statuses[draft.status] ?? "Assistência do agente") : "Assistência do agente")}

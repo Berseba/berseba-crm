@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 import { requestTurnDeps } from "@/lib/agent-engine/agent/request-deps";
 import { generateReplyDraft } from "@/lib/agent-engine/agent/reply-drafts";
+import { decidirModoSombra, lerModoSombra } from "@/lib/ai/modo-sombra";
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { traduzir } from "@/lib/i18n/dicionario";
@@ -31,13 +32,35 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
   const requestId = randomUUID(),
     c = await context(ctx, requestId);
   if ("response" in c) return c.response;
-  const { rows } = await getRequestPool().query(
+  const pool = getRequestPool();
+  const { rows } = await pool.query(
     `select id,revision::text,original_body,edited_body,approved_body,proposals,feedback,error_code,created_at,
  case when status in ('generating','pending','approved') and not fn_reply_context_current(organization_id,id) then 'stale' else status end as status
  from ai_reply_drafts where organization_id=$1 and conversation_id=$2 order by created_at desc limit 5`,
     [c.auth.org.orgId, c.conversation.id],
   );
-  return ok({ drafts: rows }, { requestId });
+  // Sinal do CINTO DE SEGURANÇA (org/canal — invariante 6, sistema vivo): a
+  // tarja do composer é sobre a organização/canal terem LIGADO o modo sombra,
+  // não sobre um agente individual estar 'assisted' — esse caso já é visível
+  // pelo próprio painel de rascunho aparecendo. `agente: false` de propósito.
+  let modoSombra: { ligado: boolean; origem: "organizacao" | "canal" | null } = {
+    ligado: false,
+    origem: null,
+  };
+  try {
+    const decisao = decidirModoSombra({
+      ...(await lerModoSombra(pool, {
+        organizationId: c.auth.org.orgId,
+        channelSessionId: c.conversation.channel_session_id,
+      })),
+      agente: false,
+    });
+    modoSombra = { ligado: decisao.sombra, origem: decisao.origem as "organizacao" | "canal" | null };
+  } catch {
+    // Falha de leitura não pode derrubar a tela de rascunhos — a tarja só
+    // informa; quem BLOQUEIA o envio é o gate no turno, não este sinal de UI.
+  }
+  return ok({ drafts: rows, modo_sombra: modoSombra }, { requestId });
 }
 export async function POST(_req: NextRequest, ctx: Ctx) {
   const denied = await requireSupportWrite();

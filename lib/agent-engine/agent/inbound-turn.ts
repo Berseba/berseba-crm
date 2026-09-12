@@ -172,6 +172,7 @@ import { camadaLigada, lerCamadasDaOrg } from '../guardrails/camadas-da-org';
 import { fusoDaOrganizacao } from './fuso-da-org';
 import { renderAgora } from '@/lib/tempo/agora';
 import { decidirElegibilidadeDaConversa } from '@/lib/ai/elegibilidade/consulta-pg';
+import { decidirModoSombra, lerModoSombra, type DecisaoDeModoSombra } from '@/lib/ai/modo-sombra';
 
 /**
  * Superfície ESTÁTICA das tools do agente (description + inputSchema) — parte do
@@ -1704,7 +1705,20 @@ async function executarTurnoDoAgente(
         inbound: liveJob().kind === 'inbound_turn',
       }, { log: runLog });
   const agentConfig = routed.config;
-  if (!preview && agentConfig?.operationMode === 'assisted' && job?.kind === 'inbound_turn') {
+  // MODO SOMBRA (cinto de segurança acima do agente — `lib/ai/modo-sombra/`):
+  // org, canal OU o próprio agente já em 'assisted' — qualquer um ligado vale
+  // como "este turno se comporta como assistido". `decidirModoSombra` já dobra
+  // o `operationMode === 'assisted'` para dentro do OR, então as duas guardas
+  // abaixo (que antes liam só `agentConfig?.operationMode`) continuam corretas
+  // para quem nunca ligou o cinto (org/canal falso ⇒ mesma decisão de sempre)
+  // e passam a valer também para quem ligou.
+  const decisaoSombra: DecisaoDeModoSombra = preview
+    ? { sombra: false, origem: null }
+    : decidirModoSombra({
+        ...(await lerModoSombra(pool, { organizationId: tenantId, channelSessionId: input.channelSessionId })),
+        agente: agentConfig?.operationMode === 'assisted',
+      });
+  if (!preview && decisaoSombra.sombra && job?.kind === 'inbound_turn' && agentConfig) {
     const { generateReplyDraft } = await import('./reply-drafts');
     await generateReplyDraft(pool, deps, {
       organizationId: tenantId,
@@ -1716,8 +1730,17 @@ async function executarTurnoDoAgente(
     });
     return;
   }
-  if (!preview && agentConfig && (agentConfig.pausedAt || agentConfig.operationMode === 'assisted'))
+  // Sombra sem agente publicado (nada para rascunhar) e sombra em turno que
+  // não é `inbound_turn` (follow-up/case-reply — o par SEM draft, igual ao que
+  // 'assisted' isolado já fazia) caem aqui: no-op, nada sai.
+  if (!preview && decisaoSombra.sombra) {
+    runLog.info('turno pulado — modo sombra ligado', {
+      kind: liveJob().kind,
+      origem: decisaoSombra.origem,
+    });
     return;
+  }
+  if (!preview && agentConfig?.pausedAt) return;
   const agentOperation =
     !preview && agentConfig?.operationRevision
       ? {
@@ -3994,7 +4017,27 @@ export function createInboundTurnHandler(deps: InboundTurnDeps) {
       inbound: true,
     }, { log: deps.log });
     const operationAgent = resolvedAgent.config;
-    if (operationAgent?.operationMode === 'assisted') {
+    // MODO SOMBRA: mesmo cinto de segurança do funil (`executarTurnoDoAgente`),
+    // antecipado aqui pela MESMA razão que o `assisted` isolado já era
+    // antecipado — evitar `runAgentTurn` inteiro (handoff + elegibilidade já
+    // refeitos lá embaixo) quando o desfecho vai ser rascunho de qualquer jeito.
+    // Só computa quando há agente resolvido: sem agente não há o que rascunhar
+    // aqui, e o funil (que roda de qualquer forma via `runAgentTurn` abaixo)
+    // pega esse caso sozinho.
+    const decisaoSombraDoInbound: DecisaoDeModoSombra = operationAgent
+      ? decidirModoSombra({
+          ...(await lerModoSombra(pool, {
+            organizationId: job.organization_id,
+            channelSessionId: payload.channel_session_id,
+          })),
+          agente: operationAgent.operationMode === 'assisted',
+        })
+      : { sombra: false, origem: null };
+    // `&& operationAgent`: redundante em valor (só chega aqui `sombra: true`
+    // quando `operationAgent` existia — ver o ternário acima), mas necessário
+    // para o TypeScript — `decisaoSombraDoInbound` é outra variável, e o
+    // narrowing de `operationAgent` não atravessa essa fronteira sozinho.
+    if (decisaoSombraDoInbound.sombra && operationAgent) {
       // O GATE VALE TAMBÉM NO ASSISTIDO, e é aqui que ele precisa estar.
       //
       // O drain desliga a checagem antes de enfileirar quando a org tem agente

@@ -13,6 +13,7 @@ import {
   desativarMfaDaConta,
 } from "@/app/actions/auth/politicaDeMfa";
 import { PainelDeChamadaDeVoz } from "@/components/voice/PainelDeChamadaDeVoz";
+import { apiClient } from "@/lib/api/client";
 import { useT } from "@/hooks/i18n/useT";
 
 export function SecurityClient({
@@ -20,6 +21,8 @@ export function SecurityClient({
   obrigatorio,
   podeExigirDaEquipe,
   empresaExige,
+  podeLigarModoSombra,
+  modoSombra,
 }: {
   mfaEnrolled: boolean;
   /** A política obriga esta pessoa a ter a verificação? */
@@ -27,6 +30,9 @@ export function SecurityClient({
   /** Só admin muda a regra da empresa. */
   podeExigirDaEquipe: boolean;
   empresaExige: boolean;
+  /** Só admin liga/desliga o modo sombra da organização. */
+  podeLigarModoSombra: boolean;
+  modoSombra: boolean;
 }) {
   const t = useT();
   const [codes, setCodes] = useState<string[] | null>(null);
@@ -34,6 +40,8 @@ export function SecurityClient({
   const [isSigningOut, startSignOut] = useTransition();
   const [ativando, setAtivando] = useState(false);
   const [mexendo, startMexer] = useTransition();
+  const [sombraLigada, setSombraLigada] = useState(modoSombra);
+  const [mexendoSombra, startMexerSombra] = useTransition();
 
   function handleRegenerate() {
     if (
@@ -165,6 +173,42 @@ export function SecurityClient({
               <span className="mt-1 block text-xs text-muted-foreground">
                 {t(
                   "Quando ligado, quem administra vê uma tela pedindo a configuração antes de usar o sistema. Ligue se a sua equipe mexe com dados de clientes — é a diferença entre uma senha vazada virar um susto ou virar um vazamento.",
+                )}
+              </span>
+            </span>
+          </label>
+        </Card>
+      ) : null}
+
+      {podeLigarModoSombra ? (
+        <Card className="space-y-3 p-6">
+          <h2 className="text-sm font-semibold">{t("Modo sombra")}</h2>
+          <label className="flex items-start gap-2 text-sm">
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={sombraLigada}
+              disabled={mexendoSombra}
+              onChange={(e) => {
+                const marcar = e.target.checked;
+                startMexerSombra(async () => {
+                  try {
+                    await apiClient.patch("/api/v1/settings/modo-sombra", { modo_sombra: marcar });
+                    setSombraLigada(marcar);
+                    toast.success(
+                      marcar ? t("Modo sombra ligado.") : t("Modo sombra desligado."),
+                    );
+                  } catch {
+                    toast.error(t("Não foi possível salvar. Tente de novo."));
+                  }
+                });
+              }}
+            />
+            <span>
+              {t("Modo sombra — a IA sugere, nunca envia")}
+              <span className="mt-1 block text-xs text-muted-foreground">
+                {t(
+                  "Com o modo sombra ligado, toda resposta da IA vira rascunho para um humano revisar antes de sair. Vale para a organização inteira, mesmo que um agente esteja configurado como automático.",
                 )}
               </span>
             </span>

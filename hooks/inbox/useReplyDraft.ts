@@ -15,6 +15,14 @@ export type ReplyDraft = {
 export type ReplyDraftDecision = "approve" | "reject";
 
 /**
+ * Estado do interruptor de sombra que a rota `draft-reply` devolve junto com
+ * os rascunhos (`lib/ai/modo-sombra/`): a IA sugere e nunca envia quando a
+ * organização ou o canal ligou o modo. Vem no mesmo GET para não abrir um
+ * segundo polling.
+ */
+export type ModoSombra = { ligado: boolean; origem: "organizacao" | "canal" | null };
+
+/**
  * Chave compartilhada do polling de rascunho de resposta.
  *
  * `ReplyReviewPanel` (painel do composer) e `SuggestionBubble` (bolha no fim
@@ -35,7 +43,7 @@ export function useReplyDraft(conversationId: string | null) {
   const query = useQuery({
     queryKey: chaveDoRascunho(conversationId ?? ""),
     queryFn: () =>
-      apiClient.get<{ data: { drafts: ReplyDraft[] } }>(
+      apiClient.get<{ data: { drafts: ReplyDraft[]; modo_sombra?: ModoSombra } }>(
         `/api/v1/conversations/${conversationId}/draft-reply`,
       ),
     enabled: !!conversationId,
@@ -46,7 +54,11 @@ export function useReplyDraft(conversationId: string | null) {
   // envelope combinado (`{ data: [] }`, corpo vazio…) não pode virar exceção
   // de render — mesmo cuidado de `useEtapasDeGatilho` com resposta fora do
   // contrato.
-  return { ...query, draft: query.data?.data?.drafts?.[0] };
+  return {
+    ...query,
+    draft: query.data?.data?.drafts?.[0],
+    modoSombra: query.data?.data?.modo_sombra,
+  };
 }
 
 /**

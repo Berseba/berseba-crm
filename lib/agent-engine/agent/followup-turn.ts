@@ -39,6 +39,7 @@ import {
   type LeadCheckpointRow,
 } from './inbound-turn';
 import { isLeadInHandoff } from './human-handoff';
+import { decidirModoSombra, lerModoSombra } from '@/lib/ai/modo-sombra';
 import { fusoDaOrganizacao } from './fuso-da-org';
 import type { LeadStateRow } from './lead-state';
 import { loadReentryTemplate, pickReentryVariant } from './reentry-template';
@@ -547,6 +548,24 @@ async function sendFixedOutbound(
 ): Promise<"sent" | "deferred" | "skipped"> {
   const { tenantId, leadId, channelSessionId, conversationId } = target;
   const runLog = withFields(deps.log, { job_id: job.id, tenant_id: tenantId, lead_id: leadId });
+
+  // MODO SOMBRA — este envio é DETERMINÍSTICO (sem LLM, ver o cabeçalho da
+  // função), mas é o mesmo "follow-up automático" que o cinto de segurança
+  // existe para calar: nem o texto escolhido pelo fluxo, nem o template de
+  // re-entrada, saem sozinhos enquanto a organização ou o canal estiverem em
+  // sombra. Sem agente nesta decisão (`agente: false`) — não há
+  // `operation_mode` de agente aqui, é o motor de fluxo quem decidiu o corpo.
+  const decisaoSombra = decidirModoSombra({
+    ...(await lerModoSombra(pool, { organizationId: tenantId, channelSessionId })),
+    agente: false,
+  });
+  if (decisaoSombra.sombra) {
+    runLog.info('envio fixo pulado — modo sombra ligado', {
+      kind: job.kind,
+      origem: decisaoSombra.origem,
+    });
+    return "skipped";
+  }
 
   if (await isLeadInHandoff(pool, tenantId, leadId)) {
     runLog.info('envio fixo pulado — lead silenciado (handoff/opt-out)', { kind: job.kind });

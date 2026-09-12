@@ -40,6 +40,7 @@ import { renderSystemPrompt } from "@/lib/ai/render-system-prompt";
 import { triggerHandoff } from "@/lib/ai/handoff/orchestrator";
 import { decidirElegibilidadeDaConversaViaSupabase } from "@/lib/ai/elegibilidade/consulta-supabase";
 import { ttlDaAutorizacaoMs } from "@/lib/ai/elegibilidade/gate";
+import { decidirModoSombra, lerModoSombra } from "@/lib/ai/modo-sombra";
 import { checkG1, checkG3, checkG4Legal, checkG4Stage } from "@/lib/ai/handoff/triggers";
 import type {
   BotContext,
@@ -733,7 +734,7 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
   const { data: candidatos } = await admin
     .from("ai_agents")
     .select(
-      "id, organization_id, model, system_prompt, config, guardrails, active_kb_version_id, is_active, is_default, kind, published_version_id, archived_at, paused_at",
+      "id, organization_id, model, system_prompt, config, guardrails, active_kb_version_id, is_active, is_default, kind, published_version_id, archived_at, paused_at, operation_mode",
     )
     .eq("organization_id", input.organizationId)
     .eq("is_active", true)
@@ -779,6 +780,37 @@ async function buildContext(input: BuildContextInput): Promise<GuardDecision> {
     .limit(1)
     .maybeSingle();
   if (publicado) return skip("engine_owns_reply");
+
+  // MODO SOMBRA — cinto de segurança acima do agente (org ou canal), que este
+  // caminho legado TAMBÉM precisa respeitar.
+  //
+  // Sem rascunho estruturado possível aqui: `ai_reply_drafts`/`generateReplyDraft`
+  // exigem `agent_version_id`, e quem cai neste worker é justamente quem NÃO
+  // tem versão publicada (`engine_owns_reply` acima). A única resposta segura
+  // é não inserir a outbound (`persistAndDispatch` grava `status='sending'`,
+  // que dispara o envio real) — nada de rascunho a meio caminho.
+  //
+  // Fail-closed na leitura, mesma régua do gate de elegibilidade logo acima
+  // neste arquivo: erro ao consultar `modo_sombra` é exatamente quando NÃO se
+  // quer a IA solta, então vira skip em vez de "segue sem checar".
+  try {
+    const leituraSombra = await lerModoSombra(admin, {
+      organizationId: input.organizationId,
+      channelSessionId: c.channel_session_id,
+    });
+    const decisaoSombra = decidirModoSombra({
+      ...leituraSombra,
+      agente: agent.operation_mode === "assisted",
+    });
+    if (decisaoSombra.sombra) {
+      return skip("modo_sombra", `origem=${decisaoSombra.origem}`);
+    }
+  } catch (err) {
+    return skip(
+      "modo_sombra",
+      `leitura indeterminada: ${err instanceof Error ? err.message.slice(0, 120) : "erro"}`,
+    );
+  }
 
   // Base de conhecimento ausente NÃO cala mais o bot.
   //
