@@ -128,10 +128,11 @@ describe("painel de segurança — o que se confere antes de enviar", () => {
     renderPainel();
 
     const fixas = CONFERENCIAS_DE_SAIDA.filter((c) => c.escolha === null);
-    // 10 das 11 hoje (subiu de 9/10 quando `agenda_stall` entrou na cadeia — ver
+    // 11 das 12 hoje (subiu de 10/11 quando `clinical_scope` entrou na cadeia — o
+    // freio clínico é ligado pelo nicho da organização, não por escolha na lista; ver
     // `before-send.ts`). A contagem entra na asserção de propósito: se alguém tornar
     // uma delas "configurável", este número muda e a mudança tem de ser deliberada.
-    expect(fixas).toHaveLength(10);
+    expect(fixas).toHaveLength(11);
     for (const c of fixas) {
       const linha = screen.getByTestId(`conferencia-${c.nome}-fixa`);
       expect(linha.textContent).toContain("não se desliga");

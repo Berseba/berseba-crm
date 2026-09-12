@@ -106,7 +106,13 @@ export async function lerCamadasDaOrg(db: pg.Pool, organizationId: string): Prom
  * acidente. O preço é um freio que não arma numa falha rara — nunca o
  * inverso (armar um gate que a organização não pediu, numa falha rara).
  */
-export async function lerNichoDaOrg(db: pg.Pool, organizationId: string): Promise<string | null> {
+// `Pool | PoolClient`: o `before-send.ts` chama sob o lock da conversa, com o
+// client já aberto — os dois expõem o mesmo `.query`, e pedir `Pool` ali
+// obrigaria uma conexão nova fora da transação.
+export async function lerNichoDaOrg(
+  db: pg.Pool | pg.PoolClient,
+  organizationId: string,
+): Promise<string | null> {
   try {
     const { rows } = await db.query<{ nicho: string | null }>(
       `select settings->>'nicho' as nicho from organizations where id = $1`,
