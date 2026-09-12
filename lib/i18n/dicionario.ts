@@ -115,6 +115,17 @@ export const DICIONARIO: Traducoes = {
       es: "Con el modo sombra activado, toda respuesta de la IA en este canal se convierte en borrador para revisión humana. Vale aunque el agente esté configurado como automático.",
     },
   "Modo sombra ligado — a IA só sugere": { es: "Modo sombra activado — la IA solo sugiere" },
+  // Nicho da organização (`lib/organizacoes/nicho.ts`) — liga os freios clínicos
+  "Nicho da organização": { es: "Nicho de la organización" },
+  "Nicho salvo.": { es: "Nicho guardado." },
+  "Escolher Saúde liga dois freios: urgência médica relatada pelo contato vai para uma pessoa na hora, com orientação de emergência; e a IA nunca afirma diagnóstico, receita remédio ou promete cura.":
+    {
+      es: "Elegir Salud activa dos frenos: una urgencia médica relatada por el contacto pasa a una persona de inmediato, con orientación de emergencia; y la IA nunca afirma un diagnóstico, receta medicamentos ni promete cura.",
+    },
+  "Para os outros nichos, hoje isso não muda nada — o valor fica reservado para uso futuro.":
+    {
+      es: "Para los demás nichos, hoy esto no cambia nada — el valor queda reservado para uso futuro.",
+    },
   "Aprovar e enviar": { es: "Aprobar y enviar" },
   Rejeitar: { es: "Rechazar" },
   "Confira a configuração do agente e tente gerar novamente.": {
