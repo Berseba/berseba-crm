@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { MessageBubble } from "./MessageBubble";
 import { NoteCard } from "./NoteCard";
+import { SuggestionBubble } from "./SuggestionBubble";
 import { useMessagesRealtime } from "@/hooks/inbox/useMessagesRealtime";
 import { useConversationNotes } from "@/hooks/inbox/useConversationNotes";
 import { useDeleteNote } from "@/hooks/inbox/useDeleteNote";
@@ -22,6 +23,8 @@ interface Props {
   conversationId: string | null;
   /** Escolher uma mensagem para responder. Sobe até o composer. */
   onResponder?: (m: Message) => void;
+  /** "Editar" na bolha de sugestão — leva o foco ao rascunho no composer. */
+  onEditarSugestao?: () => void;
 }
 
 /** Onda 5.2: union de item do thread — mensagem real ou nota interna (nunca vai ao cliente). */
@@ -47,7 +50,7 @@ function dayLabel(d: Date, t: (texto: string) => string = (texto) => texto, loca
   return format(d, "dd/MM/yyyy", { locale: locale });
 }
 
-export function ChatThread({ conversationId, onResponder }: Props) {
+export function ChatThread({ conversationId, onResponder, onEditarSugestao }: Props) {
   const localeDaData = useLocaleDeData();
   const t = useT();
   const q = useMessagesRealtime(conversationId);
@@ -181,11 +184,11 @@ export function ChatThread({ conversationId, onResponder }: Props) {
 
   if (items.length === 0) {
     return (
-      <div
-        {...sinalDoCanal}
-        className="flex h-full items-center justify-center text-sm text-muted-foreground"
-      >
-        {t("Nenhuma mensagem nesta conversa.")}
+      <div {...sinalDoCanal} className="flex h-full flex-col">
+        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+          {t("Nenhuma mensagem nesta conversa.")}
+        </div>
+        <SuggestionBubble conversationId={conversationId} onEditar={onEditarSugestao} />
       </div>
     );
   }
@@ -256,6 +259,16 @@ export function ChatThread({ conversationId, onResponder }: Props) {
             )}
           </div>
         ))}
+
+        {/*
+          A SUGESTÃO DA IA, DEPOIS DA ÚLTIMA MENSAGEM — o rascunho `pending`/
+          `generating` que hoje só aparecia no `ReplyReviewPanel`, acima do
+          composer. Quem lê a conversa agora vê a proposta no lugar em que ela
+          faz sentido: no fim do fio, como uma bolha (e some sozinha quando o
+          atendente aprova — a mensagem real chega pelo Realtime de sempre —
+          ou rejeita).
+        */}
+        <SuggestionBubble conversationId={conversationId} onEditar={onEditarSugestao} />
 
         <div ref={bottomRef} />
       </div>

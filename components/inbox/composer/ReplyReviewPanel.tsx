@@ -1,40 +1,32 @@
 "use client";
-import { useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { forwardRef, useImperativeHandle, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { apiClient } from "@/lib/api/client";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useT } from "@/hooks/i18n/useT";
-type Draft = {
-  id: string;
-  revision: string;
-  status: string;
-  original_body: string | null;
-  edited_body: string | null;
-  error_code: string | null;
-  proposals: Array<{ tool: string; arguments: unknown }>;
-};
-export function ReplyReviewPanel({
-  conversationId,
-  disabled,
-}: {
+import { chaveDoRascunho, useDecideReplyDraft, useReplyDraft } from "@/hooks/inbox/useReplyDraft";
+
+export interface ReplyReviewPanelHandle {
+  /** Leva o foco ao campo de edição do rascunho — usado pela bolha do fio ("Editar"). */
+  focus: () => void;
+}
+
+export const ReplyReviewPanel = forwardRef<ReplyReviewPanelHandle, {
   conversationId: string;
   disabled?: boolean;
-}) {
+}>(function ReplyReviewPanel({ conversationId, disabled }, ref) {
   const t = useT(),
     qc = useQueryClient(),
-    key = ["reply-drafts", conversationId];
-  const query = useQuery({
-    queryKey: key,
-    queryFn: () =>
-      apiClient.get<{ data: { drafts: Draft[] } }>(
-        `/api/v1/conversations/${conversationId}/draft-reply`,
-      ),
-    refetchInterval: 4000,
-    retry: false,
-  });
+    key = chaveDoRascunho(conversationId);
+  const query = useReplyDraft(conversationId);
+  const decideMutation = useDecideReplyDraft(conversationId);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  useImperativeHandle(ref, () => ({
+    focus: () => textareaRef.current?.focus(),
+  }));
   const [edits, setEdits] = useState<Record<string, string>>({}),
     [feedback, setFeedback] = useState(""),
     [busy, setBusy] = useState(false),
@@ -43,7 +35,7 @@ export function ReplyReviewPanel({
       message: string;
       kind: "success" | "error";
     } | null>(null);
-  const draft = query.data?.data.drafts[0];
+  const draft = query.draft;
   const body = draft ? (edits[draft.id] ?? draft.edited_body ?? draft.original_body ?? "") : "";
   async function generate() {
     setNotice(null);
@@ -62,9 +54,10 @@ export function ReplyReviewPanel({
     setBusy(true);
     setNotice(null);
     try {
-      await apiClient.post(`/api/v1/ai/replies/${draft.id}`, {
-        action,
+      await decideMutation.mutateAsync({
+        draftId: draft.id,
         revision: draft.revision,
+        action,
         body,
         feedback,
       });
@@ -76,7 +69,6 @@ export function ReplyReviewPanel({
             ? t("Resposta aprovada. Acompanhe o envio aqui.")
             : t("Sugestão rejeitada. O feedback será usado na próxima sugestão."),
       });
-      await qc.invalidateQueries({ queryKey: key });
     } catch (e) {
       showApiError(e);
       setNotice({
@@ -86,7 +78,6 @@ export function ReplyReviewPanel({
           "Sua edição foi preservada. Confira se a conversa mudou antes de aprovar novamente.",
         ),
       });
-      await qc.invalidateQueries({ queryKey: key });
     } finally {
       setBusy(false);
     }
@@ -129,6 +120,7 @@ export function ReplyReviewPanel({
           </p>
           {body && (
             <Textarea
+              ref={textareaRef}
               aria-label={t("Resposta sugerida")}
               value={body}
               onChange={(e) => setEdits({ ...edits, [draft.id]: e.target.value })}
@@ -195,4 +187,4 @@ export function ReplyReviewPanel({
         )}
     </section>
   );
-}
+});
