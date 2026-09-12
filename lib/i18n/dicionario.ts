@@ -97,6 +97,8 @@ export const DICIONARIO: Traducoes = {
     es: "Abre la acción correspondiente en el CRM o en el calendario para confirmar.",
   },
   "Feedback para a próxima sugestão": { es: "Comentarios para la próxima sugerencia" },
+  "Sugestão da IA — não enviada": { es: "Sugerencia de la IA — no enviada" },
+  "Gerando sugestão…": { es: "Generando sugerencia…" },
   "Aprovar e enviar": { es: "Aprobar y enviar" },
   Rejeitar: { es: "Rechazar" },
   "Confira a configuração do agente e tente gerar novamente.": {
