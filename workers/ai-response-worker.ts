@@ -40,7 +40,13 @@ import { renderSystemPrompt } from "@/lib/ai/render-system-prompt";
 import { triggerHandoff } from "@/lib/ai/handoff/orchestrator";
 import { decidirElegibilidadeDaConversaViaSupabase } from "@/lib/ai/elegibilidade/consulta-supabase";
 import { ttlDaAutorizacaoMs } from "@/lib/ai/elegibilidade/gate";
-import { checkG1, checkG3, checkG4Legal, checkG4Stage } from "@/lib/ai/handoff/triggers";
+import {
+  checkG1,
+  checkG3,
+  checkG4Legal,
+  checkG4Medical,
+  checkG4Stage,
+} from "@/lib/ai/handoff/triggers";
 import type {
   BotContext,
   BotResponse,
@@ -143,6 +149,27 @@ export async function processMessageReceived(row: EventRow): Promise<ProcessResu
       metadata: { message_id: ctx.message_id, source: "g4_legal_regex" },
     });
     return { status: "skipped", reason: "handoff_g4_legal" };
+  }
+
+  // Freio clínico 1 — urgência médica relatada pelo contato, opt-in por
+  // `organizations.settings->>'nicho' = 'saude'` (sem migration). O regex é
+  // barato e roda primeiro; a leitura de nicho (banco) só acontece se ele
+  // bateu, para não pagar uma query por mensagem em organizações que não são
+  // clínica. `triggerHandoff` já grava `bot_silenced_until='infinity'`
+  // (silêncio permanente, mesma consequência do G4 legal) e envia a
+  // orientação FIXA (`ORIENTACAO_DE_EMERGENCIA_MEDICA`) via `avisarLeadDoCrm`
+  // — `motivoDoAviso("medical_emergency")` mapeia para o motivo cujo texto
+  // não varia (`lib/escalacao/aviso-ao-lead.ts`).
+  if (checkG4Medical(ctx.inbound_body) && (await organizacaoTemNichoSaude(ctx.organization_id))) {
+    await triggerHandoff({
+      conversationId: ctx.conversation_id,
+      serviceBoundary: ctx.serviceBoundary,
+      organizationId: ctx.organization_id,
+      reason: "medical_emergency",
+      leadId,
+      metadata: { message_id: ctx.message_id, source: "g4_medical_regex" },
+    });
+    return { status: "skipped", reason: "handoff_g4_medical" };
   }
 
   const stageRequiresHuman = await checkG4Stage(leadId, ctx.organization_id);
@@ -871,6 +898,35 @@ async function resolveLeadId(organizationId: string, contactId: string): Promise
       error: err instanceof Error ? err.message : String(err),
     });
     return null;
+  }
+}
+
+/**
+ * Freio clínico 1 (`checkG4Medical`) — a org ligou o nicho de saúde? Mesma
+ * chave que `lib/agent-engine/guardrails/camadas-da-org.ts` lê via `pg`
+ * (`lerNichoDaOrg`/`nichoEhSaude`), reimplementada aqui via `supabase-js`
+ * porque este worker é LEGADO e não tem `pg.Pool` — é o admin client que ele
+ * já usa em toda leitura (`resolveLeadId`, acima). Falha ABERTA para
+ * "desligado": erro de leitura nunca liga um gate de segurança clínica por
+ * acidente (mesma escolha e mesmo motivo de `lerNichoDaOrg`).
+ */
+async function organizacaoTemNichoSaude(organizationId: string): Promise<boolean> {
+  try {
+    const admin = createAdminClient();
+    const { data, error } = await admin
+      .from("organizations")
+      .select("settings")
+      .eq("id", organizationId)
+      .maybeSingle();
+    if (error || !data) return false;
+    const settings = (data as { settings: Record<string, unknown> | null }).settings;
+    return settings?.["nicho"] === "saude";
+  } catch (err) {
+    logger.warn("[ai-response-worker] organizacaoTemNichoSaude failed", {
+      organization_id: organizationId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
   }
 }
 

@@ -70,6 +70,13 @@ export type MotivoDoAviso =
   | "suspeita_de_opt_out"
   /** O teto de gasto com IA parou o atendimento automático. */
   | "orcamento_de_ia"
+  /**
+   * Freio clínico 1 (`checkG4Medical`) — o contato relatou algo que parece
+   * uma urgência médica. Único motivo cuja frase é FIXA (`textoDoAviso` a
+   * devolve direto, sem sorteio nem fecho de disponibilidade) — ver o
+   * cabeçalho de `ORIENTACAO_DE_EMERGENCIA_MEDICA` abaixo para o porquê.
+   */
+  | "urgencia_medica"
   /** O sistema decidiu escalar (sentimento, baixa confiança, etapa, termo jurídico…). */
   | "outro";
 
@@ -81,8 +88,25 @@ export function motivoDoAviso(reason: string): MotivoDoAviso {
   if (reason === "requested_human") return "pediu_humano";
   if (reason === "suspected_optout") return "suspeita_de_opt_out";
   if (reason === "orcamento_de_ia") return "orcamento_de_ia";
+  if (reason === "medical_emergency") return "urgencia_medica";
   return "outro";
 }
+
+/**
+ * A ORIENTAÇÃO FIXA de emergência médica — o freio clínico 1 exige texto que
+ * NÃO varia por sorteio (diferente de `ABERTURAS`/`FECHOS` abaixo) nem por
+ * disponibilidade da equipe: é uma instrução de segurança, não uma frase de
+ * atendimento, e uma instrução de segurança que muda de redação a cada
+ * disparo é mais difícil de reconhecer sob pânico do que uma frase repetida
+ * (o oposto do motivo pelo qual `ABERTURAS` varia — lá o risco é o
+ * `spinningGate`; aqui o risco de manter fixo é menor que o de variar).
+ * `avisarLeadDaEscalacao`/`avisarLeadDoCrm` desarmam o `spinningGate` para
+ * este envio (mesmo `enforceSpinning: false` de todo aviso de escalação),
+ * então repetir o texto não esbarra no anti-spam.
+ */
+export const ORIENTACAO_DE_EMERGENCIA_MEDICA =
+  "Isso pode ser uma emergência. Ligue 192 (SAMU) ou procure o pronto-socorro mais próximo " +
+  "agora. Uma pessoa da equipe vai falar com você em seguida.";
 
 /**
  * ═══ POR QUE HÁ VARIANTES, E POR QUE ELAS SÃO SORTEADAS PELO LEAD ═══
@@ -127,6 +151,10 @@ const ABERTURAS: Record<MotivoDoAviso, readonly string[]> = {
     "A partir daqui quem continua com você é alguém do time.",
     "Estou transferindo esta conversa para um atendente humano.",
   ],
+  // Nunca lida: `textoDoAviso` retorna `ORIENTACAO_DE_EMERGENCIA_MEDICA` antes
+  // de consultar `ABERTURAS`. A entrada existe só para o tipo
+  // `Record<MotivoDoAviso, readonly string[]>` continuar exaustivo.
+  urgencia_medica: [ORIENTACAO_DE_EMERGENCIA_MEDICA],
   outro: [
     "Esse caso é melhor resolvido por uma pessoa. Já acionei o time.",
     "Prefiro não arriscar aqui: passei seu pedido para um atendente humano.",
@@ -187,6 +215,12 @@ export function textoDoAviso(
   quem: QuemPodeAssumir | null,
   leadId: string,
 ): string {
+  // Freio clínico 1: orientação FIXA, sem sorteio e sem fecho de
+  // disponibilidade — ver o cabeçalho de `ORIENTACAO_DE_EMERGENCIA_MEDICA`.
+  // Retorna ANTES de tocar `ABERTURAS`/`quem`, então nem a leitura de
+  // disponibilidade (`quem`) precisa ter dado certo para esta frase sair certa.
+  if (motivo === "urgencia_medica") return ORIENTACAO_DE_EMERGENCIA_MEDICA;
+
   const abertura = variante(leadId, ABERTURAS[motivo]);
 
   if (motivo === "suspeita_de_opt_out") {

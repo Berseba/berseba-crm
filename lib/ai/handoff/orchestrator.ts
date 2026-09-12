@@ -42,6 +42,14 @@ export type HandoffReason =
   | "legal_mention"
   | "refund_mention"
   /**
+   * Freio clínico 1 — urgência médica relatada pelo CONTATO (`checkG4Medical`,
+   * `lib/ai/handoff/triggers.ts`), opt-in por `organizations.settings->>'nicho'
+   * = 'saude'`. `motivoDoAviso`/`textoDoAviso` (`lib/escalacao/aviso-ao-lead.ts`)
+   * traduzem este motivo para a orientação FIXA de emergência — não a frase
+   * genérica de escalação.
+   */
+  | "medical_emergency"
+  /**
    * O teto de gasto com IA parou o atendimento automático. NÃO é pedido do lead —
    * quem lê `last_handoff_reason` precisa distinguir, porque a primeira frase que
    * o humano digita depende disso.

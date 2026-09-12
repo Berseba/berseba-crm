@@ -167,6 +167,19 @@ export const CONFERENCIAS_DE_SAIDA: readonly ConferenciaDeSaida[] = [
     camada: null,
   },
   {
+    nome: "clinical_scope",
+    rotulo: "Não diagnosticar nem prescrever no lugar do profissional",
+    oQueProtege:
+      "Barra a mensagem em que o assistente afirma um diagnóstico, indica remédio ou promete " +
+      "cura — coisa que só o profissional pode dar, e só depois de avaliar a pessoa.",
+    escolha: null,
+    porQueNaoSeDesliga:
+      "Liga sozinha quando o seu negócio está cadastrado como da área da saúde — não é opção " +
+      "de configurar, porque diagnosticar ou indicar remédio pelo chat é risco para quem está " +
+      "do outro lado. Fora da área da saúde, ela nem entra em ação.",
+    camada: null,
+  },
+  {
     nome: "disclosure",
     rotulo: "Dizer que é um assistente quando perguntam",
     oQueProtege: "Se o cliente pergunta se está falando com um robô, a resposta não pode enganar.",

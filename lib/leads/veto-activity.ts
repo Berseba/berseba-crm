@@ -59,6 +59,8 @@ export function vetoReason(gate: string, code: string): string {
     promise: "Não enviei: a mensagem prometia algo que não posso garantir",
     internal_vocabulary:
       "Não enviei: a mensagem usava termos internos do sistema que o cliente não deve ler",
+    clinical_scope:
+      "Não enviei: a mensagem diagnosticava, prescrevia remédio ou prometia cura — reescrevi antes de mandar",
   };
   return porGate[gate] ?? `Não enviei: bloqueado pela regra "${gate}" (${code})`;
 }

@@ -26,6 +26,7 @@ import { describe, expect, it } from "vitest";
 import {
   motivoDoAviso,
   textoDoAviso,
+  ORIENTACAO_DE_EMERGENCIA_MEDICA,
   type MotivoDoAviso,
 } from "@/lib/escalacao/aviso-ao-lead";
 import type { QuemPodeAssumir } from "@/lib/escalacao/disponibilidade";
@@ -67,6 +68,40 @@ describe("motivoDoAviso traduz o que o banco grava", () => {
     expect(motivoDoAviso("legal_mention")).toBe("outro");
     expect(motivoDoAviso("preciso que o financeiro veja isso")).toBe("outro");
     expect(motivoDoAviso("")).toBe("outro");
+  });
+
+  it("mapeia o freio clínico 1 (urgência médica)", () => {
+    expect(motivoDoAviso("medical_emergency")).toBe("urgencia_medica");
+  });
+});
+
+describe("urgência médica — a orientação é FIXA, de propósito", () => {
+  it("textoDoAviso devolve a frase exata, não uma variante", () => {
+    expect(textoDoAviso("urgencia_medica", null, LEAD)).toBe(ORIENTACAO_DE_EMERGENCIA_MEDICA);
+    expect(ORIENTACAO_DE_EMERGENCIA_MEDICA).toMatch(/192/);
+    expect(ORIENTACAO_DE_EMERGENCIA_MEDICA).toMatch(/pronto-socorro/i);
+  });
+
+  it("NÃO varia por lead nem por disponibilidade da equipe — o oposto dos demais motivos", () => {
+    // Diferente de "todo motivo produz ao menos 3 redações entre leads" (abaixo):
+    // aqui a propriedade é a INVERSA — uma orientação de segurança que muda de
+    // redação a cada disparo é mais difícil de reconhecer sob pânico.
+    for (const estado of ESTADOS) {
+      const textos = new Set(
+        Array.from({ length: 20 }, () =>
+          textoDoAviso("urgencia_medica", estado.quem, randomUUID()),
+        ),
+      );
+      expect(textos.size, estado.rotulo).toBe(1);
+      expect([...textos][0]).toBe(ORIENTACAO_DE_EMERGENCIA_MEDICA);
+    }
+  });
+
+  it("mesmo assim não é curta o bastante para a isenção automática do spinningGate", () => {
+    // A razão de precisar do `enforceSpinning: false` continua valendo mesmo
+    // com texto fixo: o aviso não cabe no isento por tamanho.
+    const t = normalizeCopy(ORIENTACAO_DE_EMERGENCIA_MEDICA);
+    expect(t.length).toBeGreaterThan(SPINNING_DEFAULTS.allowlistMaxLength);
   });
 });
 
