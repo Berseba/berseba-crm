@@ -97,6 +97,22 @@ export const DICIONARIO: Traducoes = {
     es: "Abre la acción correspondiente en el CRM o en el calendario para confirmar.",
   },
   "Feedback para a próxima sugestão": { es: "Comentarios para la próxima sugerencia" },
+  // Modo sombra por organização/canal (`lib/ai/modo-sombra/`)
+  "Modo sombra": { es: "Modo sombra" },
+  "Modo sombra ligado.": { es: "Modo sombra activado." },
+  "Modo sombra desligado.": { es: "Modo sombra desactivado." },
+  "Modo sombra — a IA sugere, nunca envia": { es: "Modo sombra — la IA sugiere, nunca envía" },
+  "Com o modo sombra ligado, toda resposta da IA vira rascunho para um humano revisar antes de sair. Vale para a organização inteira, mesmo que um agente esteja configurado como automático.":
+    {
+      es: "Con el modo sombra activado, toda respuesta de la IA se convierte en borrador para que una persona lo revise antes de salir. Vale para toda la organización, aunque un agente esté configurado como automático.",
+    },
+  "Modo sombra ligado neste canal.": { es: "Modo sombra activado en este canal." },
+  "Modo sombra desligado neste canal.": { es: "Modo sombra desactivado en este canal." },
+  "Com o modo sombra ligado, toda resposta da IA neste canal vira rascunho para revisão humana. Vale mesmo com o agente configurado como automático.":
+    {
+      es: "Con el modo sombra activado, toda respuesta de la IA en este canal se convierte en borrador para revisión humana. Vale aunque el agente esté configurado como automático.",
+    },
+  "Modo sombra ligado — a IA só sugere": { es: "Modo sombra activado — la IA solo sugiere" },
   "Aprovar e enviar": { es: "Aprobar y enviar" },
   Rejeitar: { es: "Rechazar" },
   "Confira a configuração do agente e tente gerar novamente.": {
