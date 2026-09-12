@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": { "title": "Modo sombra", "subtitle": "Cinto de segurança acima do agente — org e canal, OR entre as três origens", "output": "modo-sombra.html", "quality_profile": "standard" },
+  "lanes": [
+    { "id": "operador", "label": "Operação" },
+    { "id": "servidor", "label": "Servidor" },
+    { "id": "banco", "label": "Persistência" }
+  ],
+  "mainPath": ["tela_org", "api_org", "config", "regra", "gate", "draft", "inbox"],
+  "nodes": [
+    { "id": "tela_org", "lane": "operador", "col": 1, "type": "frontend", "label": "Configurações › Segurança (toggle org, admin)" },
+    { "id": "tela_canal", "lane": "operador", "col": 1, "type": "frontend", "label": "ChannelAiAccess (toggle canal, manager+)" },
+    { "id": "api_org", "lane": "servidor", "col": 2, "type": "route", "label": "GET/PATCH settings/modo-sombra" },
+    { "id": "api_canal", "lane": "servidor", "col": 2, "type": "route", "label": "GET/PATCH channel-sessions/:id/modo-sombra" },
+    { "id": "config", "lane": "banco", "col": 3, "type": "database", "label": "organizations.settings.modo_sombra / channel_sessions.metadata.modo_sombra" },
+    { "id": "regra", "lane": "servidor", "col": 4, "type": "lib", "label": "lerModoSombra + decidirModoSombra (OR puro, fail-closed)" },
+    { "id": "gate", "lane": "servidor", "col": 5, "type": "lib", "label": "hook em inbound-turn / followup-turn / ai-response-worker / enviar-texto-fixo" },
+    { "id": "draft", "lane": "banco", "col": 6, "type": "database", "label": "ai_reply_drafts pending (generateReplyDraft)" },
+    { "id": "skip", "lane": "servidor", "col": 6, "type": "lib", "label": "no-op — sem agente publicado (worker legado) ou envio fixo do follow-up" },
+    { "id": "inbox", "lane": "operador", "col": 7, "type": "frontend", "label": "ReplyReviewPanel — tarja 'modo sombra ligado'" },
+    { "id": "sink", "lane": "servidor", "col": 7, "type": "service", "label": "approved_reply — aprovação humana continua enviando" },
+    { "id": "audit", "lane": "banco", "col": 5, "type": "database", "label": "api_audit_log / ai.modo_sombra_changed" },
+    { "id": "auditTela", "lane": "operador", "col": 6, "type": "frontend", "label": "Audit Log / registro da operação" }
+  ],
+  "edges": [
+    { "id": "e1", "from": "tela_org", "to": "api_org", "label": "admin liga/desliga (organização)" },
+    { "id": "e2", "from": "tela_canal", "to": "api_canal", "label": "manager+ liga/desliga (canal)" },
+    { "id": "e3", "from": "api_org", "to": "config", "label": "UPDATE organizations.settings (merge não-destrutivo)" },
+    { "id": "e4", "from": "api_canal", "to": "config", "label": "UPDATE channel_sessions.metadata (merge não-destrutivo)" },
+    { "id": "e5", "from": "config", "to": "tela_org", "label": "estado lido ao abrir a tela" },
+    { "id": "e6", "from": "config", "to": "tela_canal", "label": "estado lido ao abrir o painel do canal" },
+    { "id": "e7", "from": "config", "to": "regra", "label": "lerModoSombra (pg pool ou supabase-js, por transporte)" },
+    { "id": "e8", "from": "regra", "to": "gate", "label": "sombra = org OU canal OU agente 'assisted'" },
+    { "id": "e9", "from": "gate", "to": "draft", "label": "inbound_turn com agente publicado → rascunho" },
+    { "id": "e10", "from": "gate", "to": "skip", "label": "sem agente publicado / follow-up fixo / turno não-inbound → no-op" },
+    { "id": "e11", "from": "draft", "to": "inbox", "label": "rascunho pendente aparece no composer" },
+    { "id": "e12", "from": "config", "to": "inbox", "label": "GET draft-reply também devolve modo_sombra para a tarja" },
+    { "id": "e13", "from": "inbox", "to": "sink", "label": "humano aprova o rascunho (approved_reply)" },
+    { "id": "e14", "from": "sink", "to": "inbox", "label": "mensagem enviada, visível na conversa" },
+    { "id": "e15", "from": "api_org", "to": "audit", "label": "ai.modo_sombra_changed (escopo organizacao, antes/depois)" },
+    { "id": "e16", "from": "api_canal", "to": "audit", "label": "ai.modo_sombra_changed (escopo canal, antes/depois)" },
+    { "id": "e17", "from": "audit", "to": "auditTela", "label": "consulta de auditoria existente" }
+  ]
+}

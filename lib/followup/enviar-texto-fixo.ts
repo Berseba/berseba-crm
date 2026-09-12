@@ -10,6 +10,7 @@ import { sendMessageHandler } from "@/app/api/v1/messages/_handler";
 import { ApiError } from "@/lib/api/types";
 import { decidirElegibilidadeDaConversaViaSupabase } from "@/lib/ai/elegibilidade/consulta-supabase";
 import { ttlDaAutorizacaoMs } from "@/lib/ai/elegibilidade/gate";
+import { decidirModoSombra, lerModoSombra } from "@/lib/ai/modo-sombra";
 import { createSupabaseAdminClient, type FollowupJobRequest } from "@/lib/followup/engine";
 import type { EnrollmentRow } from "@/lib/followup/node-handlers";
 import { completeTurnForEnrollment, type TurnBridgeAdminClient } from "@/lib/followup/turn-bridge";
@@ -117,6 +118,35 @@ export async function enviarTextoFixoPendente(
           organization_id: job.organization_id,
           conversation_id: conversationId,
           motivo: elegib.motivo,
+        });
+        await settle(job.organization_id,job.id,jobClaim.acquired_at,true);
+        continue;
+      }
+
+      // MODO SOMBRA — este atalho BYPASSA `executarTurnoDoAgente` (mesma razão
+      // do comentário acima sobre elegibilidade), então também bypassa o cinto
+      // de segurança que vive lá. Sem agente nesta decisão: quem escolheu o
+      // corpo foi o motor de fluxo (`fixed_body`), não um `ai_agents.operation_mode`.
+      // Erro de leitura propaga pro catch do laço — mesmo fail-closed do resto
+      // do arquivo: job não conclui, settle marca falha, nada sai sem confirmar.
+      const { data: convRow } = await admin
+        .from("conversations")
+        .select("channel_session_id")
+        .eq("organization_id", job.organization_id as string)
+        .eq("id", conversationId)
+        .maybeSingle();
+      const decisaoSombra = decidirModoSombra({
+        ...(await lerModoSombra(admin, {
+          organizationId: job.organization_id as string,
+          channelSessionId: (convRow as { channel_session_id: string } | null)?.channel_session_id ?? null,
+        })),
+        agente: false,
+      });
+      if (decisaoSombra.sombra) {
+        logger.info("[followup] texto fixo não enviado — modo sombra ligado", {
+          organization_id: job.organization_id,
+          conversation_id: conversationId,
+          origem: decisaoSombra.origem,
         });
         await settle(job.organization_id,job.id,jobClaim.acquired_at,true);
         continue;

@@ -72,7 +72,16 @@ export type SkipReason =
    * fail-closed, porque schema pela metade é exatamente quando não se quer a IA
    * solta.
    */
-  | "nao_elegivel_para_ia";
+  | "nao_elegivel_para_ia"
+  /**
+   * MODO SOMBRA (`organizations.settings.modo_sombra` ou
+   * `channel_sessions.metadata.modo_sombra`) está ligado, e este caminho legado
+   * não tem versão publicada para montar um rascunho estruturado
+   * (`ai_reply_drafts` exige `agent_version_id`) — a única resposta segura é
+   * NÃO inserir a outbound. Fail-closed também na leitura: erro ao consultar o
+   * modo sombra vira este mesmo skip, nunca "segue sem checar".
+   */
+  | "modo_sombra";
 
 export interface BotContext {
   serviceBoundary?: ServiceBoundary;
