@@ -23,7 +23,9 @@
 ## 1. Clonar e configurar
 
 ```bash
-git clone https://github.com/melgarafael/DeskcommCRM.git && cd DeskcommCRM
+git clone https://github.com/samuelnishioka/jo-atende-crm.git && cd jo-atende-crm
+# repositório PRIVADO: exige autenticação (deploy key SSH ou token) já
+# configurada na VPS antes de clonar
 cp .env.hostgator.example .env   # o template de produção (o .env.example é o de dev)
 ```
 

@@ -142,7 +142,7 @@ Agora escolha um dos dois caminhos:
 1. Conecte no servidor por SSH e **abra o Claude Code lá dentro** (na VPS, não no seu PC).
 2. Escreva pra ele exatamente isto:
 
-   > *"Clone https://github.com/melgarafael/DeskcommCRM e me instale o DeskcommCRM
+   > *"Clone https://github.com/samuelnishioka/jo-atende-crm e me instale o DeskcommCRM
    > seguindo o `hostgator-setup-kit/install.sh`. Me pergunte as chaves uma por uma e
    > resolva os erros você mesmo."*
 
@@ -150,16 +150,18 @@ Agora escolha um dos dois caminhos:
    pedindo o domínio, as chaves do Supabase e da Anthropic, e o e-mail/senha do admin
    **uma de cada vez**, e resolvendo qualquer tropeço.
 
-> Não precisa baixar nem enviar nenhum arquivo `.zip`: o projeto é público e o Claude
-> Code baixa direto do GitHub, sempre na versão mais recente.
+> **Este repositório é PRIVADO.** Diferente do upstream público, o clone exige
+> autenticação (deploy key SSH read-only, ou token de acesso via `GIT_ASKPASS`/
+> credential helper) já configurada na VPS antes deste passo — sem isso o
+> `git clone` recusa a conexão.
 
 ### Caminho manual: um comando
 
 No servidor, baixe o projeto e rode o instalador:
 
 ```bash
-git clone https://github.com/melgarafael/DeskcommCRM.git
-cd DeskcommCRM
+git clone https://github.com/samuelnishioka/jo-atende-crm.git
+cd jo-atende-crm
 bash hostgator-setup-kit/install.sh
 ```
 
