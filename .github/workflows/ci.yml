@@ -35,9 +35,15 @@ jobs:
         timeout-minutes: 5
 
       - name: Typecheck
-        # O runner tem 7 GB; o heap padrão do Node (~4 GB) estourou em 134 no
-        # fork quando o modo sombra e os freios clínicos entraram — o `tsc`
-        # deste repo já andava no limite. Local também só passa com heap maior.
+        # Só em runner de 16 GB (repositório PÚBLICO ganha 4 vCPU/16 GB; PRIVADO
+        # no plano Free ganha 2 vCPU/7 GB). Medido no fork privado com a main
+        # INTOCADA (PR #4): o `tsc` estoura em 134 com o heap padrão e, com 6 GB
+        # de heap, entra em swap e bate no teto de 15 min — no upstream público
+        # o mesmo passo leva 52 s. Enquanto o repo for privado, o typecheck é
+        # prova LOCAL (`NODE_OPTIONS=--max-old-space-size=8192 pnpm typecheck`,
+        # zero erros exigidos antes de qualquer merge); o `if` vira verdade
+        # sozinho no dia em que o repo ficar público.
+        if: ${{ !github.event.repository.private }}
         env:
           NODE_OPTIONS: --max-old-space-size=6144
         run: pnpm typecheck

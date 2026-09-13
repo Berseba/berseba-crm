@@ -85,6 +85,16 @@ jobs:
   # subi-lo seria trocar um vermelho honesto por um CI que demora mais a cada
   # mês sem ninguém perceber.
   e2e-parte:
+    # Só em runner de 16 GB (repositório PÚBLICO). No fork PRIVADO (2 vCPU/7 GB)
+    # a main INTOCADA reproduz o que qualquer branch mostra — PR #4, 2026-09-13:
+    # toda API do `next start` a ~1 s (Supabase local + WAHA + Chromium na
+    # mesma máquina), parte 1 cancelada aos 30 min, parte 3 com 6–10 specs
+    # estouradas em `toBeVisible` de 5 s. No upstream público as três partes
+    # fecham em 18–23 min. Pular aqui NÃO é aprovação (o agregador abaixo
+    # segue reprovando `skipped` por doutrina — por isso ele pula junto): é
+    # declarar que esta máquina não mede. A prova de tela do fork privado é a
+    # do DoD 12, na VPS, com banco fresco.
+    if: ${{ !github.event.repository.private }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     strategy:
@@ -899,7 +909,10 @@ jobs:
   # um check que nenhum run produz, e NENHUM PR mergearia. Este agregador é o
   # mesmo padrão do `imagens-ok` em `publish-image.yml`.
   e2e:
-    if: always()
+    # Pula junto com `e2e-parte` no repositório privado (ver o comentário lá):
+    # sem isso, `always()` rodaria e reprovaria o `skipped` das partes — um
+    # vermelho de máquina, não de código, em todo PR do fork.
+    if: ${{ always() && !github.event.repository.private }}
     needs: [e2e-parte]
     runs-on: ubuntu-latest
     # Nenhuma permissão: este job só lê o resultado de `needs` e escreve o

@@ -137,15 +137,30 @@ const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string
       "Este é o check obrigatório `invariants` (`pnpm test:db`) — o único que exercita o " +
       "`baseline.sql` que o self-hoster aplica, e o isolamento RLS entre organizações.",
   },
+  // --- fork privado: o e2e não roda em runner de 7 GB -------------------------
+  // Deliberado (2026-09-13). Repositório PRIVADO no plano Free ganha runner de
+  // 2 vCPU/7 GB; PÚBLICO ganha 4 vCPU/16 GB. Medido com a main INTOCADA (PR #4
+  // do fork): com Supabase local + WAHA + Chromium na mesma máquina, toda API do
+  // `next start` responde em ~1 s, a parte 1 é cancelada aos 30 min e a parte 3
+  // perde 6–10 specs em `toBeVisible` de 5 s — enquanto o upstream público fecha
+  // as três partes em 18–23 min. A condição é `repository.private`, e não uma
+  // flag: ela se desliga sozinha no dia em que o repo ficar público — que é
+  // exatamente o dia em que branch protection passa a existir e `skipped`
+  // voltaria a ser perigoso. Enquanto privado, não há proteção para ler o
+  // `skipped` como verde, e a prova de tela é a do DoD 12, na VPS.
   "e2e.yml::e2e-parte": {
-    condicao: null,
-    efeito: "São as partes da matriz Playwright; sem elas o `e2e` fica sem nada para ler.",
+    condicao: "${{ !github.event.repository.private }}",
+    efeito:
+      "São as partes da matriz Playwright; sem elas o `e2e` fica sem nada para ler. " +
+      "No fork privado elas não rodam (runner de 7 GB não mede — ver comentário acima).",
   },
   "e2e.yml::e2e": {
-    condicao: "always()",
+    condicao: "${{ always() && !github.event.repository.private }}",
     efeito:
       "Este é o check obrigatório `e2e`, a fachada da matriz. Precisa de `always()` para " +
-      "ler o resultado das partes e reprovar `skipped`.",
+      "ler o resultado das partes e reprovar `skipped`. No fork privado pula junto com as " +
+      "partes: senão `always()` rodaria e reprovaria o `skipped` delas — vermelho de máquina " +
+      "em todo PR, não de código.",
   },
   "perf.yml::build-and-size": {
     condicao: null,
