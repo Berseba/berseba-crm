@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": { "title": "Sugestão de etapa", "subtitle": "A IA sugere, o humano confirma — três níveis de confiança no funil", "output": "sugestao-de-etapa.html", "quality_profile": "standard" },
+  "lanes": [
+    { "id": "operador", "label": "Operação" },
+    { "id": "servidor", "label": "Servidor" },
+    { "id": "banco", "label": "Persistência" }
+  ],
+  "mainPath": ["knob", "sync", "regra", "tabela", "timeline", "decisao", "aplicar"],
+  "nodes": [
+    { "id": "tela_knob", "lane": "operador", "col": 1, "type": "frontend", "label": "Configurações (admin) — auto | suggest" },
+    { "id": "knob", "lane": "servidor", "col": 2, "type": "route", "label": "GET/PATCH settings/ai-stage-moves" },
+    { "id": "config", "lane": "banco", "col": 3, "type": "database", "label": "organizations.settings.crm.ai_stage_moves" },
+    { "id": "sync", "lane": "servidor", "col": 4, "type": "lib", "label": "sincronizaEstagioDoAgente (o portão)" },
+    { "id": "regra", "lane": "servidor", "col": 4, "type": "lib", "label": "decideStageMove (regra pura: is_won/is_lost vence o knob)" },
+    { "id": "move", "lane": "banco", "col": 5, "type": "database", "label": "crm_leads.stage_id (nível 1 — automático)" },
+    { "id": "tabela", "lane": "banco", "col": 5, "type": "database", "label": "crm_stage_move_suggestions (nível 2/3 — pendente)" },
+    { "id": "timeline", "lane": "operador", "col": 6, "type": "frontend", "label": "Timeline do negócio — stage_move_suggested" },
+    { "id": "decisao", "lane": "operador", "col": 7, "type": "frontend", "label": "Humano decide: aplicar ou recusar" },
+    { "id": "aplicar", "lane": "servidor", "col": 8, "type": "route", "label": "POST .../apply (reusa moveLeadHandler)" },
+    { "id": "recusar", "lane": "servidor", "col": 8, "type": "route", "label": "POST .../reject" },
+    { "id": "laco", "lane": "operador", "col": 9, "type": "frontend", "label": "Resumo de aceite por etapa (summary)" }
+  ],
+  "edges": [
+    { "id": "e1", "from": "tela_knob", "to": "knob", "label": "admin escolhe auto/suggest" },
+    { "id": "e2", "from": "knob", "to": "config", "label": "UPDATE organizations.settings.crm (merge não-destrutivo)" },
+    { "id": "e3", "from": "config", "to": "sync", "label": "lerAiStageMovesFailClosed (fail-closed: erro = suggest)" },
+    { "id": "e4", "from": "sync", "to": "regra", "label": "decideStageMove({mode, targetStage})" },
+    { "id": "e5", "from": "regra", "to": "move", "label": "action = move → UPDATE stage_id (OCC pelo estágio de origem)" },
+    { "id": "e6", "from": "regra", "to": "tabela", "label": "action = suggest → marca anterior stale, insere pendente" },
+    { "id": "e7", "from": "tabela", "to": "timeline", "label": "emitLeadActivity stage_move_suggested" },
+    { "id": "e8", "from": "timeline", "to": "decisao", "label": "card mostra a sugestão pendente" },
+    { "id": "e9", "from": "decisao", "to": "aplicar", "label": "aceitar" },
+    { "id": "e10", "from": "decisao", "to": "recusar", "label": "recusar" },
+    { "id": "e11", "from": "aplicar", "to": "move", "label": "moveLeadHandler — mesmo código do card arrastado à mão" },
+    { "id": "e12", "from": "aplicar", "to": "tabela", "label": "status=applied, decided_by, decided_at" },
+    { "id": "e13", "from": "recusar", "to": "tabela", "label": "status=rejected — o sinal do laço (spec 17 passo 5)" },
+    { "id": "e14", "from": "tabela", "to": "laco", "label": "GET stage-suggestions/summary — taxa de aceite por etapa" },
+    { "id": "e15", "from": "laco", "to": "tela_knob", "label": "decide promover a etapa para automático" }
+  ]
+}

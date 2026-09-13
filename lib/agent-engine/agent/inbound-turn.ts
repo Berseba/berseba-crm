@@ -3000,10 +3000,19 @@ async function executarTurnoDoAgente(
                 : {}),
             });
             if (!mirror.ok) {
-              runLog.warn('espelho de stage no CRM falhou — harness mantido', {
-                to_stage: update.transition.to,
-                reason: mirror.reason,
-              });
+              // 'suggested' NÃO é falha: é o nível 2/3 do modelo de confiança
+              // funcionando (`lib/leads/stage-move-policy.ts`) — a sugestão foi
+              // gravada e espera confirmação humana. Chamar isto de "falhou"
+              // mentiria sobre o que aconteceu, para quem só lê o log.
+              runLog.warn(
+                mirror.reason === 'suggested'
+                  ? 'espelho de stage no CRM virou sugestão — harness mantido'
+                  : 'espelho de stage no CRM falhou — harness mantido',
+                {
+                  to_stage: update.transition.to,
+                  reason: mirror.reason,
+                },
+              );
               if (mirror.reason === 'fora_do_escopo') {
                 // Aviso PRÓPRIO, e não o de falha: nada quebrou — a regra
                 // funcionou. Dizer "falhou" aqui mandaria o dono procurar um

@@ -23992,6 +23992,54 @@ create trigger trg_org_voice_calls_set_updated_at
 
 notify pgrst, 'reload schema';
 
+-- ---- crm_stage_move_suggestions (migration 0239) ----
+--
+-- Sugestão de etapa (a IA sugere, o humano confirma) — ver o cabeçalho da
+-- migration 0239 para o racional completo. Idempotente: `create table if not
+-- exists`, `create index if not exists`, `drop policy/trigger if exists` antes
+-- de recriar.
+create table if not exists public.crm_stage_move_suggestions (
+  id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  lead_id uuid not null references public.crm_leads(id) on delete cascade,
+  contact_id uuid references public.contacts(id) on delete set null,
+  from_stage_id uuid not null references public.crm_stages(id),
+  to_stage_id uuid not null references public.crm_stages(id),
+  agent_id uuid references public.ai_agents(id) on delete set null,
+  source text not null default 'agent_turn' check (source in ('agent_turn')),
+  reason text,
+  status text not null default 'pending' check (status in ('pending', 'applied', 'rejected', 'stale')),
+  decided_by uuid references auth.users(id),
+  decided_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create unique index if not exists uniq_crm_stage_move_suggestions_pending
+  on public.crm_stage_move_suggestions (lead_id)
+  where status = 'pending';
+
+create index if not exists crm_stage_move_suggestions_org_status
+  on public.crm_stage_move_suggestions (organization_id, status, created_at desc);
+
+alter table public.crm_stage_move_suggestions enable row level security;
+
+revoke all on public.crm_stage_move_suggestions from anon, authenticated;
+grant select on public.crm_stage_move_suggestions to authenticated;
+grant all on public.crm_stage_move_suggestions to service_role;
+
+drop policy if exists tenant_isolation_crm_stage_move_suggestions_all on public.crm_stage_move_suggestions;
+create policy tenant_isolation_crm_stage_move_suggestions_all on public.crm_stage_move_suggestions
+  for select to authenticated
+  using (organization_id in (select public.fn_user_org_ids()));
+
+drop trigger if exists trg_crm_stage_move_suggestions_set_updated_at on public.crm_stage_move_suggestions;
+create trigger trg_crm_stage_move_suggestions_set_updated_at
+  before update on public.crm_stage_move_suggestions
+  for each row execute function public.fn_set_updated_at();
+
+notify pgrst, 'reload schema';
+
 -- ---- VARREDURA anon: função nova nasce exposta em quem ATUALIZA (migration 0116) ----
 --
 -- ⚠️ ESTE BLOCO É, DE PROPÓSITO, O ÚLTIMO DO ARQUIVO. Apêndice novo entra ANTES

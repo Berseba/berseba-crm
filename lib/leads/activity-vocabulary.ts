@@ -149,7 +149,24 @@ export type ActivityType =
    * doutrina de migrations), então o banco aceitaria a divergência calado e a
    * timeline cairia no fallback.
    */
-  | "contacts_merged";
+  | "contacts_merged"
+  /**
+   * SUGESTÃO DE ETAPA (a IA sugere, o humano confirma). Emitida por
+   * `sincronizaEstagioDoAgente` quando `decideStageMove` devolve `"suggest"` —
+   * em vez de mover o card sozinho, o agente registra a sugestão em
+   * `crm_stage_move_suggestions` e deixa a linha aqui contando o que ele
+   * QUIS fazer. Sem esta linha, "sugerido" seria um card parado sem nenhuma
+   * explicação visível na timeline do negócio.
+   *
+   * As DUAS DECISÕES humanas sobre ela — aplicar ou recusar — são o mesmo par
+   * de `next_action_approved`/`next_action_dismissed`: a recusa é sinal, não
+   * ausência de sinal, e `stage_move_suggestion_rejected` é também o sinal do
+   * laço de aprendizado (spec 17 passo 5, o mesmo que `agent_move_corrected`
+   * já registra para o card movido sozinho).
+   */
+  | "stage_move_suggested"
+  | "stage_move_suggestion_applied"
+  | "stage_move_suggestion_rejected";
 
 export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   lead_created: "Entrou pelo WhatsApp",
@@ -248,6 +265,12 @@ export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   // cadastros da mesma pessoa viraram um — e é por isso que este negócio pode
   // ter mudado de contato sem ninguém tê-lo movido.
   contacts_merged: "Contatos duplicados juntados",
+  // "sugeriu", não "moveu": o card não andou — é isto que distingue esta linha
+  // de `stage_changed`, e é a diferença que a organização em modo "suggest"
+  // precisa ver na timeline para não achar que o assistente ignorou o avanço.
+  stage_move_suggested: "O assistente sugeriu mudar de etapa",
+  stage_move_suggestion_applied: "Sugestão de etapa aplicada",
+  stage_move_suggestion_rejected: "Sugestão de etapa recusada",
 };
 
 /** Quando o tipo é legado/desconhecido, a linha ainda é honesta — sem jargão. */

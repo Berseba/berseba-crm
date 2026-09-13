@@ -507,6 +507,13 @@ export const AUDIT_ACTIONS = [
   // que a IA pode afirmar no WhatsApp da organização (diagnóstico, prescrição,
   // urgência médica) sem passar por migration nenhuma.
   "org.nicho_changed",
+
+  // Sugestão de etapa (a IA sugere, o humano confirma): o knob que decide se o
+  // agente move o card sozinho ou pede confirmação, e o laço de aceite/recusa
+  // que mede quando promover uma etapa de "sugere" para "automático".
+  "crm.ai_stage_moves_changed",
+  "crm.stage_suggestion_applied",
+  "crm.stage_suggestion_rejected",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

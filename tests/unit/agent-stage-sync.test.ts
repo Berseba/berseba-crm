@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { emitLeadActivity } from "@/lib/leads/activity-emitter";
+import { lerAiStageMovesFailClosed } from "@/lib/organizacoes/ai-stage-moves";
 import {
   razaoDaMudancaPeloAgente,
   resolveDestinoDoAgente,
@@ -11,6 +12,14 @@ import {
 vi.mock("@/lib/leads/activity-emitter", async (orig) => ({
   ...(await orig<typeof import("@/lib/leads/activity-emitter")>()),
   emitLeadActivity: vi.fn(async () => ({ ok: true })),
+}));
+
+// Fail-closed é testado sozinho em `lib/organizacoes/ai-stage-moves.test.ts`
+// (leitura nos dois transportes). Aqui o knob é mockado para controlar o modo
+// sem simular `organizations.settings` no fake do supabase-js abaixo.
+vi.mock("@/lib/organizacoes/ai-stage-moves", async (orig) => ({
+  ...(await orig<typeof import("@/lib/organizacoes/ai-stage-moves")>()),
+  lerAiStageMovesFailClosed: vi.fn(async () => "auto"),
 }));
 
 /**
@@ -296,5 +305,139 @@ describe("sincronizaEstagioDoAgente — o evento que aciona automação e follow
   it("o rastro pode falhar sem desfazer o movimento — o card andou, e isso não se retira", async () => {
     const { r } = await sincronizaObservando(cenario({ rpcError: { message: "event_log indisponível" } }));
     expect(r).toMatchObject({ moveu: true, motivo: "movido" });
+  });
+});
+
+/* ────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * O PORTÃO: sugestão de etapa (a IA sugere, o humano confirma).
+ *
+ * `lerAiStageMovesFailClosed` é mockado por teste (o transporte duplo e o
+ * fail-closed em si têm teste próprio em `lib/organizacoes/ai-stage-moves.test.ts`).
+ * O fake aqui cobre só as três tabelas que o portão toca:
+ * `crm_leads`/`crm_stages` (leitura, como acima) e `crm_stage_move_suggestions`
+ * (o UPDATE que marca `stale` e o INSERT da sugestão nova).
+ */
+const STAGES_COM_TERMINAL = [
+  { id: "s1", name: "Primeiro contato", agent_stage_hint: "contacted", is_archived: false, is_won: false, is_lost: false },
+  { id: "s2", name: "Proposta enviada", agent_stage_hint: "negotiating", is_archived: false, is_won: false, is_lost: false },
+  { id: "s3", name: "Fechado (ganho)", agent_stage_hint: "won", is_archived: false, is_won: true, is_lost: false },
+];
+
+interface CenarioSugestao {
+  leads: Resposta;
+  stages: Resposta;
+  staleUpdate: Resposta;
+  insert: Resposta;
+}
+
+function cenarioSugestao(over: Partial<CenarioSugestao> = {}): CenarioSugestao {
+  return {
+    leads: { data: [LEAD], error: null },
+    stages: { data: STAGES_COM_TERMINAL, error: null },
+    staleUpdate: { data: null, error: null },
+    insert: { data: null, error: null },
+    ...over,
+  };
+}
+
+function fakeAdminSugestao(c: CenarioSugestao) {
+  return {
+    // O caminho "move normalmente" (nível 1) chega até o emit_event de
+    // lead.stage_changed — sem isto o teste desse ramo quebraria por motivo
+    // errado (rpc ausente), não pela regra que está sendo testada.
+    rpc: () => Promise.resolve({ data: null, error: null }),
+    from(tabela: string) {
+      const b = {
+        _isUpdate: false,
+        _isInsert: false,
+        select: () => b,
+        update: () => {
+          b._isUpdate = true;
+          return b;
+        },
+        insert: () => {
+          b._isInsert = true;
+          return b;
+        },
+        eq: () => b,
+        maybeSingle: () => Promise.resolve({ data: { name: "Primeiro contato" }, error: null }),
+        then(onF: (v: unknown) => unknown, onR?: (e: unknown) => unknown) {
+          const r =
+            tabela === "crm_leads"
+              ? c.leads
+              : tabela === "crm_stages"
+                ? c.stages
+                : b._isInsert
+                  ? c.insert
+                  : c.staleUpdate;
+          return Promise.resolve(r).then(onF, onR);
+        },
+      };
+      return b;
+    },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+}
+
+const sincronizaSugestao = (passo: string, c: CenarioSugestao) =>
+  sincronizaEstagioDoAgente(fakeAdminSugestao(c), {
+    organizationId: ORG,
+    contactId: CONTATO,
+    passo,
+    agentId: "agente-1",
+  });
+
+describe("sincronizaEstagioDoAgente — sugestão de etapa (nível 2/3 de confiança)", () => {
+  beforeEach(() => {
+    vi.mocked(emitLeadActivity).mockClear();
+    vi.mocked(lerAiStageMovesFailClosed).mockReset().mockResolvedValue("auto");
+  });
+
+  it("organização em 'suggest': NÃO move, grava sugestão e emite stage_move_suggested", async () => {
+    vi.mocked(lerAiStageMovesFailClosed).mockResolvedValue("suggest");
+    const r = await sincronizaSugestao("negotiating", cenarioSugestao());
+    expect(r).toMatchObject({ moveu: false, motivo: "sugerido", stageName: "Proposta enviada" });
+    expect(vi.mocked(emitLeadActivity)).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(emitLeadActivity).mock.calls[0]![1]).toMatchObject({
+      type: "stage_move_suggested",
+      payload: expect.objectContaining({ to_stage_id: "s2", policy_reason: "suggest_mode" }),
+    });
+  });
+
+  it("destino fecha o negócio (is_won): SEMPRE sugestão, mesmo com o knob em 'auto'", async () => {
+    vi.mocked(lerAiStageMovesFailClosed).mockResolvedValue("auto");
+    const r = await sincronizaSugestao("won", cenarioSugestao());
+    expect(r).toMatchObject({ moveu: false, motivo: "sugerido", stageName: "Fechado (ganho)" });
+    expect(vi.mocked(emitLeadActivity).mock.calls[0]![1]).toMatchObject({
+      payload: expect.objectContaining({ to_stage_id: "s3", policy_reason: "terminal_stage" }),
+    });
+  });
+
+  it("organização em 'auto' e destino NÃO terminal: move normalmente (nível 1)", async () => {
+    vi.mocked(lerAiStageMovesFailClosed).mockResolvedValue("auto");
+    const r = await sincronizaSugestao("negotiating", cenarioSugestao());
+    expect(r).toMatchObject({ moveu: true, motivo: "movido", stageName: "Proposta enviada" });
+  });
+
+  it("falha ao invalidar a sugestão pendente anterior: INDISPONÍVEL, não 'sugerido' silencioso", async () => {
+    vi.mocked(lerAiStageMovesFailClosed).mockResolvedValue("suggest");
+    const r = await sincronizaSugestao(
+      "negotiating",
+      cenarioSugestao({ staleUpdate: { data: null, error: { message: "deadlock" } } }),
+    );
+    expect(r.motivo).toBe("indisponivel");
+    expect(vi.mocked(emitLeadActivity)).not.toHaveBeenCalled();
+  });
+
+  it("falha ao gravar a sugestão: INDISPONÍVEL", async () => {
+    vi.mocked(lerAiStageMovesFailClosed).mockResolvedValue("suggest");
+    const r = await sincronizaSugestao(
+      "negotiating",
+      cenarioSugestao({ insert: { data: null, error: { message: "unique_violation" } } }),
+    );
+    expect(r.motivo).toBe("indisponivel");
+    expect(vi.mocked(emitLeadActivity)).not.toHaveBeenCalled();
   });
 });

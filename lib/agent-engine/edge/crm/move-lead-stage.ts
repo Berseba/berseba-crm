@@ -29,6 +29,14 @@ export type MirrorReason =
    * uma proteção num fato compreensível.
    */
   | 'fora_do_escopo'
+  /**
+   * Nível 2/3 do modelo de confiança (`lib/leads/stage-move-policy.ts`): a IA
+   * SUGERIU o avanço em vez de mover — organização em `ai_stage_moves =
+   * "suggest"`, ou destino que fecha o negócio (sempre sugestão). DENTRO de
+   * MIRROR_WARN_ONLY: não é incidente, é a regra funcionando. Chamar isto de
+   * falha mandaria o dono procurar um defeito que não existe.
+   */
+  | 'suggested'
   | 'crm_error'
   | 'crm_unavailable';
 
@@ -43,6 +51,7 @@ export type MirrorResult = { ok: true } | { ok: false; reason: MirrorReason; det
 export const MIRROR_WARN_ONLY: ReadonlySet<MirrorReason> = new Set<MirrorReason>([
   'not_configured',
   'human_conflict',
+  'suggested',
 ]);
 
 /** Injetável só para teste — em produção é sempre a implementação real. */
@@ -65,6 +74,9 @@ export async function mirrorLeadStageToCrm(
       organizationId: input.tenantId,
       contactId: input.leadId,
       passo: input.toStage,
+      // Autoria da sugestão, quando houver uma: `crm_stage_move_suggestions.agent_id`
+      // precisa saber QUAL agente sugeriu, para o resumo de aceite por agente.
+      ...(cfg.agentActorId !== undefined ? { agentId: cfg.agentActorId } : {}),
     });
 
     if (r.moveu || r.motivo === 'ja_esta_la') return { ok: true };
@@ -101,6 +113,13 @@ export async function mirrorLeadStageToCrm(
       indisponivel: {
         reason: 'crm_unavailable',
         detail: `o banco do CRM não respondeu: ${r.detalhe ?? 'sem detalhe'}`,
+      },
+      // Nível 2/3 do modelo de confiança: a sugestão foi GRAVADA
+      // (`crm_stage_move_suggestions`) e a timeline já tem `stage_move_suggested`
+      // — o card não andou de propósito, esperando confirmação humana.
+      sugerido: {
+        reason: 'suggested',
+        detail: r.detalhe ?? 'sugestão de etapa registrada — aguardando confirmação humana',
       },
     };
     const t = traduz[r.motivo];

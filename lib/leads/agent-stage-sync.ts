@@ -1,5 +1,7 @@
 import { observeServiceOrigin } from "@/lib/atendimento/origem";
 import type { RiskBucket } from "@/lib/leads/risk-radar";
+import { lerAiStageMovesFailClosed } from "@/lib/organizacoes/ai-stage-moves";
+import { decideStageMove } from "@/lib/leads/stage-move-policy";
 
 /**
  * O funil do AGENTE movendo o card no funil do TENANT (wave 8, cenários 25/26).
@@ -19,6 +21,15 @@ export interface EstagioCandidato {
   name: string;
   agent_stage_hint: string | null;
   is_archived: boolean;
+  /**
+   * Opcionais aqui porque `resolveDestinoDoAgente` (a busca por hint) não
+   * precisa deles — só quem decide MOVER x SUGERIR (`decideStageMove`,
+   * abaixo em `sincronizaEstagioDoAgente`) precisa saber se o destino fecha o
+   * negócio. Tornar obrigatório forçaria todo chamador existente a buscar
+   * colunas que não usa.
+   */
+  is_won?: boolean;
+  is_lost?: boolean;
 }
 
 export type DestinoDoAgente =
@@ -111,6 +122,16 @@ export interface ResultadoDaSincronizacao {
      * regra funcionou.
      */
     | "fora_do_escopo"
+    /**
+     * ESTADO LEGÍTIMO DO PRODUTO — o modelo de três níveis de confiança
+     * (ver `lib/leads/stage-move-policy.ts`) decidiu que este avanço precisa
+     * de confirmação humana: ou a organização está com
+     * `ai_stage_moves = "suggest"`, ou o destino fecha o negócio
+     * (`is_won`/`is_lost`, que é SEMPRE sugestão). O card NÃO andou, e
+     * ninguém errou — uma linha de sugestão foi gravada
+     * (`crm_stage_move_suggestions`) para um humano decidir.
+     */
+    | "sugerido"
     | "falha_de_escrita"
     | "indisponivel";
   leadId?: string;
@@ -147,6 +168,13 @@ export async function sincronizaEstagioDoAgente(
      * caminho que ainda não foi migrado, em silêncio.
      */
     escopoDeFunis?: readonly string[];
+    /**
+     * `ai_agents.id` de quem sugere, quando conhecido (vem de
+     * `CrmEdgeConfig.agentActorId` em `move-lead-stage.ts`). Vai para
+     * `crm_stage_move_suggestions.agent_id` — só decoração para o resumo de
+     * aceite por agente; ausente não impede a sugestão de nascer.
+     */
+    agentId?: string | null;
   },
 ): Promise<ResultadoDaSincronizacao> {
   // ⚠️ O erro do SELECT É LIDO, e isso não é zelo: o supabase-js NÃO LANÇA em
@@ -209,20 +237,115 @@ export async function sincronizaEstagioDoAgente(
 
   const { data: stageRows, error: erroStages } = await admin
     .from("crm_stages")
-    .select("id, name, agent_stage_hint, is_archived")
+    .select("id, name, agent_stage_hint, is_archived, is_won, is_lost")
     .eq("pipeline_id", lead.pipeline_id);
   // Mesmo motivo do SELECT acima: sem esta linha, banco fora = pipeline sem
   // hint nenhum = "sem_mapeamento", e o incidente se disfarça de configuração.
   if (erroStages) {
     return { moveu: false, motivo: "indisponivel", leadId: lead.id, detalhe: erroStages.message };
   }
+  const estagios = (stageRows ?? []) as EstagioCandidato[];
 
-  const destino = resolveDestinoDoAgente(
-    (stageRows ?? []) as EstagioCandidato[],
-    input.passo,
-    lead.stage_id,
-  );
+  const destino = resolveDestinoDoAgente(estagios, input.passo, lead.stage_id);
   if (!destino.move) return { moveu: false, motivo: destino.motivo, leadId: lead.id };
+
+  // ── O PORTÃO (modelo de três níveis de confiança) ────────────────────────
+  //
+  // DEPOIS de saber que há para onde mover — sugerir sem destino resolvido não
+  // faz sentido, e os dois primeiros `return` acima já cobrem essa ausência —
+  // e ANTES do UPDATE: se a decisão for "sugerir", o card não deve encostar.
+  //
+  // Fail-closed por PROPAGAÇÃO: `lerAiStageMovesFailClosed` nunca lança — erro
+  // de leitura já virou `"suggest"` lá dentro (ver o cabeçalho do módulo). Se
+  // o knob não pode ser confirmado, mover sozinho é a escolha errada.
+  const alvo = estagios.find((e) => e.id === destino.stageId);
+  const modo = await lerAiStageMovesFailClosed(admin, input.organizationId);
+  const decisao = decideStageMove({
+    mode: modo,
+    // Estágio ausente do array buscado (não deveria acontecer — veio do mesmo
+    // SELECT) trata como não-terminal: a regra dura de `is_won`/`is_lost` não
+    // pode inventar um `true` que a linha não confirmou.
+    targetStage: { is_won: alvo?.is_won ?? false, is_lost: alvo?.is_lost ?? false },
+  });
+
+  if (decisao.action === "suggest") {
+    // Uma sugestão PENDENTE por negócio (índice único parcial no banco): a
+    // anterior vira `stale` ANTES do insert, na mesma chamada — não em
+    // trigger com HTTP. A ordem importa (stale antes de insert) para o
+    // índice único nunca colidir com a própria sugestão que está nascendo.
+    const { error: erroStale } = await admin
+      .from("crm_stage_move_suggestions")
+      .update({ status: "stale" })
+      .eq("organization_id", input.organizationId)
+      .eq("lead_id", lead.id)
+      .eq("status", "pending");
+    if (erroStale) {
+      return {
+        moveu: false,
+        motivo: "indisponivel",
+        leadId: lead.id,
+        detalhe: `não foi possível invalidar a sugestão pendente anterior: ${erroStale.message}`,
+      };
+    }
+
+    const detalheDaSugestao =
+      decisao.reason === "terminal_stage"
+        ? `sugerido mover para "${destino.stageName}" — fecha o negócio, confirmação humana sempre exigida`
+        : `sugerido mover para "${destino.stageName}" — organização com sugestão de etapa ligada`;
+
+    const { error: erroInsert } = await admin.from("crm_stage_move_suggestions").insert({
+      organization_id: input.organizationId,
+      lead_id: lead.id,
+      contact_id: input.contactId,
+      from_stage_id: lead.stage_id,
+      to_stage_id: destino.stageId,
+      agent_id: input.agentId ?? null,
+      source: "agent_turn",
+      reason: detalheDaSugestao,
+    });
+    if (erroInsert) {
+      return {
+        moveu: false,
+        motivo: "indisponivel",
+        leadId: lead.id,
+        detalhe: `não foi possível gravar a sugestão: ${erroInsert.message}`,
+      };
+    }
+
+    const atividadeDaSugestao = await emitLeadActivity(admin, {
+      organizationId: input.organizationId,
+      leadId: lead.id,
+      contactId: input.contactId,
+      type: "stage_move_suggested",
+      sourceModule: "crm",
+      sourceId: lead.id,
+      actor: { type: "webhook_source", id: "agent-stage-sync" },
+      reason: detalheDaSugestao,
+      payload: {
+        from_stage_id: lead.stage_id,
+        to_stage_id: destino.stageId,
+        to_stage_name: destino.stageName,
+        policy_reason: decisao.reason,
+      },
+    });
+    if (!atividadeDaSugestao.ok) {
+      await registraFalhaDeAtividade(admin, {
+        organizationId: input.organizationId,
+        leadId: lead.id,
+        tipo: "stage_move_suggested",
+        origem: "lib/leads/agent-stage-sync",
+        erro: atividadeDaSugestao.error,
+      });
+    }
+
+    return {
+      moveu: false,
+      motivo: "sugerido",
+      leadId: lead.id,
+      stageName: destino.stageName,
+      detalhe: detalheDaSugestao,
+    };
+  }
 
   // O erro DESTE select é descartado de propósito — e a diferença para os dois de
   // cima (onde descartar produziu o defeito de tratar banco fora como rotina) é
