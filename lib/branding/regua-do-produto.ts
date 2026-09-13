@@ -42,7 +42,7 @@ export const REGUA_DO_PRODUTO: Regua = {
     base: [
       {
         chave: "--color-bg",
-        hex: "#faf9f6",
+        hex: "#f5f7f9",
       },
       {
         chave: "--color-surface",
@@ -50,7 +50,7 @@ export const REGUA_DO_PRODUTO: Regua = {
       },
       {
         chave: "--color-surface-elevated",
-        hex: "#f5f3ee",
+        hex: "#edf0f3",
       },
     ],
     tingidas: [
@@ -159,17 +159,17 @@ export const REGUA_DO_PRODUTO: Regua = {
       },
     ],
     neutros: [
-      "#faf9f6",
-      "#f3f1ec",
-      "#e7e3da",
-      "#d2cdbf",
-      "#a9a395",
-      "#7d786c",
-      "#5d594f",
-      "#46433b",
-      "#2e2c26",
-      "#1c1a16",
-      "#0e0d0a",
+      "#f5f7f9",
+      "#ecf0f3",
+      "#dae0e7",
+      "#c2ccd6",
+      "#97a6b4",
+      "#6e8091",
+      "#586674",
+      "#394756",
+      "#263340",
+      "#162431",
+      "#0c141d",
     ],
     indices: {
       accent: 6,
@@ -183,15 +183,15 @@ export const REGUA_DO_PRODUTO: Regua = {
     base: [
       {
         chave: "--color-bg",
-        hex: "#161510",
+        hex: "#0b1219",
       },
       {
         chave: "--color-surface",
-        hex: "#1d1c17",
+        hex: "#101a23",
       },
       {
         chave: "--color-surface-elevated",
-        hex: "#272620",
+        hex: "#1a242e",
       },
     ],
     tingidas: [
@@ -300,17 +300,17 @@ export const REGUA_DO_PRODUTO: Regua = {
       },
     ],
     neutros: [
-      "#f5f4ef",
-      "#e6e4dc",
-      "#bbb8ac",
-      "#8e8b7f",
-      "#605e54",
-      "#444239",
-      "#33312a",
-      "#272620",
-      "#1d1c17",
-      "#161510",
-      "#0c0b08",
+      "#edf0f3",
+      "#dce0e5",
+      "#b5bdc5",
+      "#9ba6b0",
+      "#657381",
+      "#3d4d5c",
+      "#212e3b",
+      "#1a242e",
+      "#101a23",
+      "#0b1219",
+      "#060a0e",
     ],
     indices: {
       accent: 4,

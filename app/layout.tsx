@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Atkinson_Hyperlegible, IBM_Plex_Mono } from "next/font/google";
+import { Epilogue, IBM_Plex_Mono, Urbanist } from "next/font/google";
 import { headers } from "next/headers";
 import { Toaster } from "sonner";
 import { coresDaBarraDoNavegador } from "@/lib/branding/barra-do-navegador";
@@ -25,11 +25,24 @@ import { Providers } from "./providers";
 import { PublicEnvScript } from "./public-env-script";
 import "./globals.css";
 
-const atkinson = Atkinson_Hyperlegible({
+// Epilogue (corpo) e Urbanist (títulos) — a mesma dupla que o Jo OS carrega
+// (produto-proprio/Jo OS/index.html: Google Fonts `Urbanist:wght@400;500;600;
+// 700;800` + `Epilogue:wght@300;400;500;600;700`), aqui via `next/font/google`
+// porque o fork resolve fonte em build time (self-host não tem rede de CDN
+// garantida) — mesmo padrão que já valia para a Atkinson Hyperlegible que
+// estas duas substituem.
+const epilogue = Epilogue({
   subsets: ["latin", "latin-ext"],
-  weight: ["400", "700"],
+  weight: ["300", "400", "500", "600", "700"],
   display: "swap",
-  variable: "--font-atkinson",
+  variable: "--font-epilogue",
+});
+
+const urbanist = Urbanist({
+  subsets: ["latin", "latin-ext"],
+  weight: ["400", "500", "600", "700", "800"],
+  display: "swap",
+  variable: "--font-urbanist",
 });
 
 const plexMono = IBM_Plex_Mono({
@@ -278,7 +291,7 @@ export default function RootLayout({
       lang="pt-BR"
       data-theme="light"
       suppressHydrationWarning
-      className={`${atkinson.variable} ${plexMono.variable}`}
+      className={`${epilogue.variable} ${urbanist.variable} ${plexMono.variable}`}
     >
       <head>
         {/* Primeiro de tudo: a cor da instalação, antes do CSS e do script de tema. */}
