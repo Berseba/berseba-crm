@@ -28,6 +28,8 @@
  */
 import type pg from 'pg';
 
+import { NICHO_SAUDE } from '@/lib/organizacoes/nicho';
+
 /**
  * O vocabulário vive AQUI, não num CHECK do banco.
  *
@@ -86,4 +88,53 @@ export async function lerCamadasDaOrg(db: pg.Pool, organizationId: string): Prom
   } catch {
     return { ...SEM_ESCOLHA };
   }
+}
+
+/**
+ * O NICHO DA ORGANIZAÇÃO — liga os dois freios clínicos determinísticos
+ * (urgência médica no inbound, escopo clínico no outbound), SEM MIGRATION.
+ *
+ * `organizations.settings` já existe como jsonb livre (é onde `llm`, `atrito`,
+ * `security` e outras chaves de configuração já moram — ver os outros
+ * `settings->` deste repo). `nicho` é mais uma chave dele: nenhuma tabela
+ * nova, nenhum `ALTER TABLE`. Padrão ausente = `null`, e os dois freios ficam
+ * DESLIGADOS — zero diferença para todo clone que já existe.
+ *
+ * Falha ABERTA para "desligado", não para "ligado": a mesma escolha de
+ * `lerCamadasDaOrg` (linha abaixo dela), mas na direção oposta por natureza —
+ * aqui não há "ambiente" para cair, só a org. Uma leitura que estourar (banco
+ * fora do ar por um instante, coluna ainda não migrada num clone antigo)
+ * devolve `null`, e `null` nunca liga um gate de segurança CLÍNICO por
+ * acidente. O preço é um freio que não arma numa falha rara — nunca o
+ * inverso (armar um gate que a organização não pediu, numa falha rara).
+ */
+// `Pool | PoolClient`: o `before-send.ts` chama sob o lock da conversa, com o
+// client já aberto — os dois expõem o mesmo `.query`, e pedir `Pool` ali
+// obrigaria uma conexão nova fora da transação.
+export async function lerNichoDaOrg(
+  db: pg.Pool | pg.PoolClient,
+  organizationId: string,
+): Promise<string | null> {
+  try {
+    const { rows } = await db.query<{ nicho: string | null }>(
+      `select settings->>'nicho' as nicho from organizations where id = $1`,
+      [organizationId],
+    );
+    return rows[0]?.nicho ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reexportado por compatibilidade — quem já importa `NICHO_SAUDE` daqui não
+ * quebra. A declaração vive em `lib/organizacoes/nicho.ts`, que é também de
+ * onde a rota `app/api/v1/settings/nicho/route.ts` valida o vocabulário
+ * fechado: uma constante só, nunca duas cópias que podem divergir.
+ */
+export { NICHO_SAUDE };
+
+/** Função pura, testável sem banco — separa a leitura (`lerNichoDaOrg`) da regra. */
+export function nichoEhSaude(nicho: string | null): boolean {
+  return nicho === NICHO_SAUDE;
 }

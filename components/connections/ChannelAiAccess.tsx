@@ -15,6 +15,7 @@ import { apiClient } from "@/lib/api/client";
 import { aiAccessUpdateSchema, type AiAccessMode } from "@/lib/ai/elegibilidade/pre-go-live";
 
 interface Access { mode: AiAccessMode; test_phone_numbers: string[] }
+interface ModoSombra { modo_sombra: boolean }
 
 /** Mesma porta em todos os tipos de conexão; telefones acessíveis só a administradores. */
 export function ChannelAiAccess({ channelId }: { channelId: string }) {
@@ -60,10 +61,64 @@ export function ChannelAiAccess({ channelId }: { channelId: string }) {
               <Button variant="outline" onClick={() => void query.refetch()}>{t("Tentar novamente")}</Button>
             </div>
           ) : open && query.data ? (
-            <AccessForm channelId={channelId} initial={query.data.data} onClose={() => setOpen(false)} />
+            <>
+              <AccessForm channelId={channelId} initial={query.data.data} onClose={() => setOpen(false)} />
+              <ModoSombraToggle channelId={channelId} open={open} />
+            </>
           ) : null}
         </SheetContent>
       </Sheet>
+    </div>
+  );
+}
+
+/** Cinto de segurança deste canal: enquanto ligado, a IA só rascunha aqui. */
+function ModoSombraToggle({ channelId, open }: { channelId: string; open: boolean }) {
+  const t = useT();
+  const qc = useQueryClient();
+  const query = useQuery({
+    queryKey: ["channel-modo-sombra", channelId],
+    queryFn: () => apiClient.get<{ data: ModoSombra }>(`/api/v1/channel-sessions/${channelId}/modo-sombra`),
+    enabled: open,
+  });
+  const [busy, setBusy] = useState(false);
+  if (query.isLoading || !query.data) return null;
+  const ligado = query.data.data.modo_sombra;
+
+  return (
+    <div className="flex flex-col gap-2 border-t pt-4">
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          className="mt-1"
+          checked={ligado}
+          disabled={busy}
+          onChange={async (e) => {
+            const marcar = e.target.checked;
+            setBusy(true);
+            try {
+              const saved = await apiClient.patch<{ data: ModoSombra }>(
+                `/api/v1/channel-sessions/${channelId}/modo-sombra`,
+                { modo_sombra: marcar },
+              );
+              qc.setQueryData(["channel-modo-sombra", channelId], saved);
+              toast.success(marcar ? t("Modo sombra ligado neste canal.") : t("Modo sombra desligado neste canal."));
+            } catch {
+              toast.error(t("Não foi possível salvar. Tente de novo."));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        />
+        <span>
+          {t("Modo sombra — a IA sugere, nunca envia")}
+          <span className="mt-1 block text-xs text-muted-foreground">
+            {t(
+              "Com o modo sombra ligado, toda resposta da IA neste canal vira rascunho para revisão humana. Vale mesmo com o agente configurado como automático.",
+            )}
+          </span>
+        </span>
+      </label>
     </div>
   );
 }

@@ -168,10 +168,13 @@ import {
   type JailbreakClassifierKnobs,
   type JailbreakLevel,
 } from '../guardrails/jailbreak/classifier';
-import { camadaLigada, lerCamadasDaOrg } from '../guardrails/camadas-da-org';
+import { camadaLigada, lerCamadasDaOrg, lerNichoDaOrg, nichoEhSaude } from '../guardrails/camadas-da-org';
+import { checkG4Medical } from '@/lib/ai/handoff/triggers';
+import { ORIENTACAO_DE_EMERGENCIA_MEDICA } from '@/lib/escalacao/aviso-ao-lead';
 import { fusoDaOrganizacao } from './fuso-da-org';
 import { renderAgora } from '@/lib/tempo/agora';
 import { decidirElegibilidadeDaConversa } from '@/lib/ai/elegibilidade/consulta-pg';
+import { decidirModoSombra, lerModoSombra, type DecisaoDeModoSombra } from '@/lib/ai/modo-sombra';
 
 /**
  * Superfície ESTÁTICA das tools do agente (description + inputSchema) — parte do
@@ -1704,7 +1707,79 @@ async function executarTurnoDoAgente(
         inbound: liveJob().kind === 'inbound_turn',
       }, { log: runLog });
   const agentConfig = routed.config;
-  if (!preview && agentConfig?.operationMode === 'assisted' && job?.kind === 'inbound_turn') {
+  // MODO SOMBRA (cinto de segurança acima do agente — `lib/ai/modo-sombra/`):
+  // org, canal OU o próprio agente já em 'assisted' — qualquer um ligado vale
+  // como "este turno se comporta como assistido". `decidirModoSombra` já dobra
+  // o `operationMode === 'assisted'` para dentro do OR, então as duas guardas
+  // abaixo (que antes liam só `agentConfig?.operationMode`) continuam corretas
+  // para quem nunca ligou o cinto (org/canal falso ⇒ mesma decisão de sempre)
+  // e passam a valer também para quem ligou.
+  const decisaoSombra: DecisaoDeModoSombra = preview
+    ? { sombra: false, origem: null }
+    : decidirModoSombra({
+        ...(await lerModoSombra(pool, { organizationId: tenantId, channelSessionId: input.channelSessionId })),
+        agente: agentConfig?.operationMode === 'assisted',
+      });
+
+  // FREIO CLÍNICO 1 (ramo SOMBRA/ASSISTIDO) — urgência médica relatada pelo
+  // contato, opt-in por `organizations.settings->>'nicho' = 'saude'` (sem
+  // migration — `lerNichoDaOrg`/`nichoEhSaude`, `camadas-da-org.ts`). Roda ANTES
+  // do `return` de baixo que desvia o turno inteiro para `generateReplyDraft`:
+  // se essa checagem morasse depois dele, uma organização em sombra NUNCA a
+  // alcançaria.
+  //
+  // A condição é `decisaoSombra.sombra`, não só `operationMode === 'assisted'`:
+  // com o cinto ligado por org/canal, o ramo AUTOMÁTICO (mais abaixo, junto de
+  // F4-06, que manda a orientação de verdade e aciona o handoff) nunca é
+  // alcançado — então a triagem médica precisa morar aqui, no ramo de sombra.
+  // Sombra = a orientação vira RASCUNHO, nunca envio (é o próprio contrato do
+  // modo: nada sai sem um humano decidir) — por isso é um alerta CRÍTICO com o
+  // texto sugerido, não um `avisarLeadDaEscalacao`. Aqui, mais cedo no turno,
+  // só o texto pinado a ESTE job (o histórico completo ainda não foi carregado).
+  if (
+    !preview &&
+    decisaoSombra.sombra &&
+    job?.kind === 'inbound_turn' &&
+    input.inboundMessageId !== undefined
+  ) {
+    const textoPinadoParaTriagem = await loadInboundBodyForJob(pool, {
+      tenantId,
+      conversationId: input.conversationId,
+      inboundMessageId: input.inboundMessageId,
+    });
+    if (
+      textoPinadoParaTriagem !== null &&
+      checkG4Medical(textoPinadoParaTriagem) &&
+      nichoEhSaude(await lerNichoDaOrg(pool, tenantId))
+    ) {
+      await insertInboxItem(
+        pool,
+        tenantId,
+        {
+          kind: 'handoff',
+          severity: 'critical',
+          title: 'Possível urgência médica relatada pelo contato',
+          body:
+            'A mensagem do contato parece relatar uma emergência médica. Orientação sugerida ' +
+            `(revise e envie o quanto antes): "${ORIENTACAO_DE_EMERGENCIA_MEDICA}"`,
+          refKind: 'conversation',
+          refId: input.conversationId,
+        },
+        'kind_e_ref',
+      ).catch((err) => {
+        runLog.warn('alerta de urgência médica (modo assistido) falhou (best-effort)', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+      runLog.info(
+        'urgência médica detectada no inbound — modo assistido, rascunho aberto sem envio',
+        { kind: liveJob().kind },
+      );
+      return;
+    }
+  }
+
+  if (!preview && decisaoSombra.sombra && job?.kind === 'inbound_turn' && agentConfig) {
     const { generateReplyDraft } = await import('./reply-drafts');
     await generateReplyDraft(pool, deps, {
       organizationId: tenantId,
@@ -1716,8 +1791,17 @@ async function executarTurnoDoAgente(
     });
     return;
   }
-  if (!preview && agentConfig && (agentConfig.pausedAt || agentConfig.operationMode === 'assisted'))
+  // Sombra sem agente publicado (nada para rascunhar) e sombra em turno que
+  // não é `inbound_turn` (follow-up/case-reply — o par SEM draft, igual ao que
+  // 'assisted' isolado já fazia) caem aqui: no-op, nada sai.
+  if (!preview && decisaoSombra.sombra) {
+    runLog.info('turno pulado — modo sombra ligado', {
+      kind: liveJob().kind,
+      origem: decisaoSombra.origem,
+    });
     return;
+  }
+  if (!preview && agentConfig?.pausedAt) return;
   const agentOperation =
     !preview && agentConfig?.operationRevision
       ? {
@@ -1978,6 +2062,45 @@ async function executarTurnoDoAgente(
   const mensagemDoJob =
     currentInboundText ?? latestInboundSignal(openingContext.context.messages);
   const inboundsPendentes = inboundsNaoRespondidos(openingContext.context.messages);
+
+  // FREIO CLÍNICO 1 (ramo AUTOMÁTICO) — urgência médica relatada pelo contato,
+  // opt-in por nicho='saude'. Roda ANTES do F4-06 (pedido explícito de
+  // humano): uma emergência relatada não espera a vez do "quero falar com
+  // atendente", e cobre TODOS os `inboundsPendentes` (não só a mensagem
+  // pinada deste job) — mesma razão do F4-06/F4-07 logo abaixo, que leem da
+  // mesma lista para não perder sinal coalescido numa rajada.
+  //
+  // Se a org está em modo assistido, o TURNO INTEIRO já foi desviado para
+  // `generateReplyDraft` (ou para o alerta crítico do bloco acima, se o
+  // regex tivesse batido na mensagem pinada) antes de chegar aqui — então,
+  // daqui pra baixo, `agentConfig?.operationMode === 'assisted'` nunca é
+  // verdadeiro, e este bloco só executa para organizações em modo automático.
+  if (
+    !preview &&
+    inboundsPendentes.some((texto) => checkG4Medical(texto)) &&
+    nichoEhSaude(await lerNichoDaOrg(pool, tenantId))
+  ) {
+    const aviso = await avisarLeadDaEscalacao(pool, avisoDaEscalacao().ids, {
+      ...avisoDaEscalacao().base,
+      motivo: 'urgencia_medica',
+    });
+    await performHumanHandoff(
+      pool,
+      { tenantId, leadId, conversationId: input.conversationId },
+      {
+        reason: 'medical_emergency',
+        conversationSummary: buildHandoffSummary(previous),
+        avisoAoLead: aviso,
+        log: runLog,
+      },
+    );
+    runLog.info('urgência médica detectada no inbound — handoff acionado (detecção determinística)', {
+      kind: liveJob().kind,
+      lead_avisado: aviso.avisado,
+    });
+    return; // bot silencia: a orientação já saiu, e nada mais sai neste turno
+  }
+
   if (
     !preview &&
     inboundsPendentes.some(
@@ -3994,7 +4117,27 @@ export function createInboundTurnHandler(deps: InboundTurnDeps) {
       inbound: true,
     }, { log: deps.log });
     const operationAgent = resolvedAgent.config;
-    if (operationAgent?.operationMode === 'assisted') {
+    // MODO SOMBRA: mesmo cinto de segurança do funil (`executarTurnoDoAgente`),
+    // antecipado aqui pela MESMA razão que o `assisted` isolado já era
+    // antecipado — evitar `runAgentTurn` inteiro (handoff + elegibilidade já
+    // refeitos lá embaixo) quando o desfecho vai ser rascunho de qualquer jeito.
+    // Só computa quando há agente resolvido: sem agente não há o que rascunhar
+    // aqui, e o funil (que roda de qualquer forma via `runAgentTurn` abaixo)
+    // pega esse caso sozinho.
+    const decisaoSombraDoInbound: DecisaoDeModoSombra = operationAgent
+      ? decidirModoSombra({
+          ...(await lerModoSombra(pool, {
+            organizationId: job.organization_id,
+            channelSessionId: payload.channel_session_id,
+          })),
+          agente: operationAgent.operationMode === 'assisted',
+        })
+      : { sombra: false, origem: null };
+    // `&& operationAgent`: redundante em valor (só chega aqui `sombra: true`
+    // quando `operationAgent` existia — ver o ternário acima), mas necessário
+    // para o TypeScript — `decisaoSombraDoInbound` é outra variável, e o
+    // narrowing de `operationAgent` não atravessa essa fronteira sozinho.
+    if (decisaoSombraDoInbound.sombra && operationAgent) {
       // O GATE VALE TAMBÉM NO ASSISTIDO, e é aqui que ele precisa estar.
       //
       // O drain desliga a checagem antes de enfileirar quando a org tem agente

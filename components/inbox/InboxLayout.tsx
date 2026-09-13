@@ -469,7 +469,11 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
           <>
             <ConversationHeader conversation={selectedConversation} />
             <div className="min-h-0 flex-1 overflow-hidden">
-              <ChatThread conversationId={selectedConversation.id} onResponder={setRespondendo} />
+              <ChatThread
+                conversationId={selectedConversation.id}
+                onResponder={setRespondendo}
+                onEditarSugestao={() => composerRef.current?.focusSuggestion()}
+              />
             </div>
             <RetentionNotice conversationId={selectedConversation.id} />
             {motivoDaJanela && (
