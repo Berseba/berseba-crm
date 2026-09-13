@@ -24,6 +24,7 @@ import { KanbanBoard } from "@/components/kanban/KanbanBoard";
 import { FilterBar } from "@/components/kanban/FilterBar";
 import { BulkActionBar } from "@/components/kanban/BulkActionBar";
 import { NewLeadDialog } from "@/components/kanban/NewLeadDialog";
+import { StageSuggestionsSummaryPanel } from "@/components/kanban/StageSuggestionsSummaryPanel";
 import { Button } from "@/components/ui/button";
 import { Plus } from "@/lib/ui/icons";
 import type { LeadFilters } from "@/lib/kanban/filters";
@@ -97,6 +98,7 @@ export function PipelinePageClient({
         />
       )}
       <FilterBar filters={filters} onChange={setFilters} leads={data?.leads ?? []} />
+      <StageSuggestionsSummaryPanel pipelineId={pipelineId} />
       {error ? (
         <div className="rounded-md border border-destructive/30 bg-destructive/10 p-4 text-sm">
           {t("Não consegui carregar este funil:")} {formatError(error, t)}

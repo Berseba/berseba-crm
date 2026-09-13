@@ -22,6 +22,7 @@ import {
 import { PainelDeChamadaDeVoz } from "@/components/voice/PainelDeChamadaDeVoz";
 import { apiClient } from "@/lib/api/client";
 import { NICHOS, NICHO_LABELS, type Nicho } from "@/lib/organizacoes/nicho";
+import { AiStageMovesCard } from "@/components/settings/AiStageMovesCard";
 import { useT } from "@/hooks/i18n/useT";
 
 const NENHUM_NICHO = "__nenhum__";
@@ -35,6 +36,7 @@ export function SecurityClient({
   modoSombra,
   podeConfigurarNicho,
   nicho,
+  podeConfigurarSugestaoDeEtapa,
 }: {
   mfaEnrolled: boolean;
   /** A política obriga esta pessoa a ter a verificação? */
@@ -48,6 +50,8 @@ export function SecurityClient({
   /** Só admin escolhe o nicho da organização. */
   podeConfigurarNicho: boolean;
   nicho: Nicho | null;
+  /** Só admin escolhe o modo de movimentação de etapa pela IA (WP-A/WP-B). */
+  podeConfigurarSugestaoDeEtapa: boolean;
 }) {
   const t = useT();
   const [codes, setCodes] = useState<string[] | null>(null);
@@ -278,6 +282,10 @@ export function SecurityClient({
           </div>
         </Card>
       ) : null}
+
+      {/* Logo abaixo do nicho (WP5) — mesma família de decisão de risco da
+          organização que mora nesta tela. */}
+      {podeConfigurarSugestaoDeEtapa ? <AiStageMovesCard /> : null}
 
       <Card className="space-y-3 p-6">
         <h2 className="text-sm font-semibold">{t("Códigos de recuperação")}</h2>

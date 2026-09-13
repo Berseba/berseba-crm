@@ -5968,6 +5968,31 @@ export const DICIONARIO: Traducoes = {
   "Retomar contato com este negócio": { es: "Retomar contacto con este negocio" },
   "Encerrar: não retomar este negócio": { es: "Cerrar: no retomar este negocio" },
   "Encerrar": { es: "Cerrar" },
+  // Sugestão de movimento de etapa (WP-A/WP-B) — chip do card e do dossiê.
+  "IA sugere:": { es: "La IA sugiere:" },
+  "Aplicar": { es: "Aplicar" },
+  "Aplicar sugestão:": { es: "Aplicar sugerencia:" },
+  "Recusar": { es: "Rechazar" },
+  "Recusar sugestão:": { es: "Rechazar sugerencia:" },
+  // Configurações › Segurança — seletor "Movimentação de etapa pela IA".
+  "Movimentação de etapa pela IA": { es: "Movimiento de etapa por la IA" },
+  "Automática": { es: "Automática" },
+  "o assistente move o negócio de etapa sozinho, conforme a conversa avança": {
+    es: "el asistente mueve el negocio de etapa solo, a medida que avanza la conversación",
+  },
+  "Sugerida": { es: "Sugerida" },
+  "o assistente sugere a etapa e uma pessoa confirma no funil": {
+    es: "el asistente sugiere la etapa y una persona confirma en el embudo",
+  },
+  "Ganhou e perdeu nunca são automáticos: são sempre sugeridos, em qualquer modo.": {
+    es: "Ganado y perdido nunca son automáticos: siempre se sugieren, en cualquier modo.",
+  },
+  "Preferência salva.": { es: "Preferencia guardada." },
+  // Medição mínima (item 4) — resumo por etapa na tela do funil.
+  "Sugestões de etapa pela IA": { es: "Sugerencias de etapa por la IA" },
+  "últimos 28 dias": { es: "últimos 28 días" },
+  "Sugestões:": { es: "Sugerencias:" },
+  "aceitas": { es: "aceptadas" },
   "Probabilidade": { es: "Probabilidad" },
   "Ver o porquê.": { es: "Ver el porqué." },
   "ver a mensagem": { es: "ver el mensaje" },
@@ -6538,6 +6563,7 @@ export const DICIONARIO: Traducoes = {
   "Organização não encontrada.": { es: "Organización no encontrada." },
   "Operação já processada.": { es: "Operación ya procesada." },
   "Outro atendente já assumiu.": { es: "Otro agente ya lo asumió." },
+  "Alguém já decidiu esta sugestão.": { es: "Alguien ya decidió esta sugerencia." },
   "Este caso já foi respondido ou fechado.": { es: "Este caso ya fue respondido o cerrado." },
   "Calma — muitas tentativas. Espere alguns segundos.": {
     es: "Calma — demasiados intentos. Espera unos segundos.",

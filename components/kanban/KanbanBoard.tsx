@@ -9,9 +9,11 @@ import { useMoveCard } from "@/hooks/kanban/useMoveCard";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 import { useAtRiskLeads } from "@/hooks/leads/useAtRiskLeads";
 import { useReactivations } from "@/hooks/leads/useReactivations";
+import { useStageSuggestions } from "@/hooks/kanban/useStageSuggestions";
 import { midpoint } from "@/lib/kanban/fractional-indexing";
 import type { Lead } from "@/lib/types/leads";
 import type { Pipeline, Stage } from "@/lib/kanban/types";
+import type { StageMoveSuggestion } from "@/lib/kanban/card-state";
 import { StageColumn } from "./StageColumn";
 import { LeadDossier } from "./LeadDossier";
 import { camposDoFunil } from "@/lib/leads/campos-do-funil";
@@ -102,6 +104,21 @@ export function KanbanBoard({
     }
     return m;
   }, [propostasVivas]);
+  // As sugestões de movimento de etapa (WP-A) vêm UMA vez por pipeline, como a
+  // retomada — cada card recebe só a fatia dele (ver o cabeçalho do hook).
+  const { data: sugestoesDeEtapa } = useStageSuggestions(pipelineId);
+  const stageSuggestions = useMemo(() => {
+    const m = new Map<string, StageMoveSuggestion>();
+    for (const s of sugestoesDeEtapa ?? []) {
+      m.set(s.lead_id, {
+        suggestionId: s.id,
+        toStageId: s.to_stage_id,
+        toStageName: s.to_stage_name,
+        reason: s.reason,
+      });
+    }
+    return m;
+  }, [sugestoesDeEtapa]);
   const coolingIds = useMemo(() => {
     const ids = new Set<string>();
     for (const item of atRisk?.items ?? []) {
@@ -255,6 +272,7 @@ export function KanbanBoard({
             ownerNames={ownerNames}
             coolingIds={coolingIds}
             reactivations={reactivations}
+            stageSuggestions={stageSuggestions}
             pulses={pulsesProp ?? queryResult.pulses}
             canonicalTags={canonicalTags}
             selectedLeadIds={selectedLeadIds}

@@ -11,6 +11,7 @@ import { ReactivationSlot } from "./ReactivationSlot";
 import { ConversaSlot } from "./ConversaSlot";
 import { ScoreSlot } from "./ScoreSlot";
 import { OwnerBadge } from "./OwnerBadge";
+import { StageSuggestionChip } from "./StageSuggestionChip";
 
 /** Os dois gestos de seleção que o card sabe relatar. */
 export type GestoDeSelecao = "alterna" | "intervalo";
@@ -251,8 +252,20 @@ export function KanbanCard({
             {value ?? "—"}
           </p>
 
-          {/* ③ a linha do agente — um slot, três estados, nunca três blocos. */}
+          {/* ③ a linha do agente — um slot, agora quatro estados possíveis, nunca
+              mais de um bloco por vez. */}
           <div className="mt-1.5 flex h-6 items-center gap-2 text-xs">
+            {state.slot.type === "stageSuggestion" && (
+              // A sugestão de movimento de etapa (WP-A/WP-B) vence os demais
+              // estados desta faixa — ver o comentário de precedência em
+              // `resolveCardState`. `pipelineId` já é prop do card.
+              <StageSuggestionChip
+                leadId={card.id}
+                suggestionId={state.slot.suggestionId}
+                toStageName={state.slot.toStageName}
+                pipelineId={pipelineId}
+              />
+            )}
             {state.slot.type === "awaiting" && (
               // A proposta do agente é a ÚNICA linha do card com ação: é o
               // ponto onde a decisão do humano entra. Sem os botões aqui, o

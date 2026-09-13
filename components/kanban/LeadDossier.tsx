@@ -6,12 +6,14 @@ import { useRef } from "react";
 import { useT } from "@/hooks/i18n/useT";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { useLeadTimeline } from "@/hooks/leads/useLeadTimeline";
+import { useLeadStageSuggestion } from "@/hooks/leads/useLeadStageSuggestion";
 import type { Lead } from "@/lib/types/leads";
 import { ConversaNoDossie } from "./ConversaNoDossie";
 import { LeadFieldsForm } from "./LeadFieldsForm";
 import { ScoreSlot } from "./ScoreSlot";
 import { LeadTimeline } from "./LeadTimeline";
 import { OwnerBadge } from "./OwnerBadge";
+import { StageSuggestionChip } from "./StageSuggestionChip";
 import { resolveLeadOwner } from "@/lib/kanban/owner";
 import type { CustomFieldDef } from "@/components/contacts/CustomFieldsEditor";
 
@@ -66,6 +68,7 @@ export function LeadDossier({
   const timeline = useLeadTimeline(open ? lead.id : null, lead.contact_id);
   const owner = resolveLeadOwner(lead, ownerNames);
   const score = lead.score ?? null;
+  const { data: sugestaoDeEtapa } = useLeadStageSuggestion(open ? lead.id : null);
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -90,6 +93,18 @@ export function LeadDossier({
             {formatBRL(lead.value_cents, lead.currency)}
           </span>
           <span className="text-text-muted">{stageName}</span>
+          {sugestaoDeEtapa && (
+            // MESMO chip do card — ver o cabeçalho de `StageSuggestionChip`
+            // para o porquê de `w-full`: aqui ele empurra a decisão para a
+            // própria linha, em vez de disputar espaço com os badges passivos
+            // ao lado.
+            <StageSuggestionChip
+              leadId={lead.id}
+              suggestionId={sugestaoDeEtapa.id}
+              toStageName={sugestaoDeEtapa.to_stage_name}
+              pipelineId={pipelineId}
+            />
+          )}
           <OwnerBadge
             ownerKind={owner.kind}
             ownerName={owner.name}

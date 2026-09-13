@@ -186,3 +186,49 @@ describe("resolveCardState · proposta de retomada", () => {
     expect(s.slot.type === "reactivation" && s.slot.expiresAt).toBe(proposta.expiresAt);
   });
 });
+
+/**
+ * A SUGESTÃO DE MOVIMENTO DE ETAPA (WP-A/WP-B) na faixa ③.
+ *
+ * Vence TUDO, inclusive `awaiting` — que até aqui era o topo da precedência.
+ * A razão está no comentário de `resolveCardState`: as duas são propostas do
+ * MESMO agente, e a de etapa é a mais estrutural das duas.
+ */
+describe("resolveCardState · sugestão de movimento de etapa", () => {
+  const sugestao = {
+    suggestionId: "sug-1",
+    toStageId: "stage-2",
+    toStageName: "Negociação",
+    reason: "Cliente confirmou orçamento no WhatsApp",
+  };
+
+  it("sugestão pendente vence a próxima ação — o antigo topo da precedência", () => {
+    const s = resolveCardState({
+      ...base,
+      stageSuggestion: sugestao,
+      nextAction: { label: "Ligar" },
+    });
+    expect(s.kind).toBe("suggestion");
+    expect(s.slot).toEqual({ type: "stageSuggestion", ...sugestao });
+  });
+
+  it("sugestão pendente vence esfriando e retomada também", () => {
+    const s = resolveCardState({
+      ...base,
+      stageSuggestion: sugestao,
+      isCooling: true,
+      reactivation: { proposalId: "p1", expiresAt: "2026-07-26T12:00:00Z" },
+    });
+    expect(s.slot.type).toBe("stageSuggestion");
+  });
+
+  it("borda neutra — a mesma família de 'Sugestão da IA' do inbox, não a de decisão aprovada", () => {
+    const s = resolveCardState({ ...base, stageSuggestion: sugestao });
+    expect(s.border).toBe("neutral");
+  });
+
+  it("sem sugestão, a precedência de sempre continua valendo", () => {
+    const s = resolveCardState({ ...base, stageSuggestion: null, nextAction: { label: "Ligar" } });
+    expect(s.kind).toBe("awaiting");
+  });
+});
