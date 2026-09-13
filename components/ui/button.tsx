@@ -18,7 +18,11 @@ import { cn } from "@/lib/utils";
 const buttonVariants = cva(
   [
     "inline-flex items-center justify-center gap-2 whitespace-nowrap",
-    "rounded-sm font-medium",
+    // `rounded-md` (não `-sm`): o botão do Jo OS (`src/components/ui/button.tsx`)
+    // usa `rounded-md`, que no `--radius: 0.85rem` dele dá ~9,6px — quase igual
+    // ao `--radius-md` deste fork (10px, mesma base). `rounded-sm` (6px) lia
+    // mais quadrado que o produto de referência.
+    "rounded-md font-medium",
     "transition-[background-color,border-color,color,box-shadow,transform]",
     "duration-fast ease-out",
     "focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent-500 focus-visible:ring-offset-2 focus-visible:ring-offset-bg",

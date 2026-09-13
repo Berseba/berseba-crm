@@ -46,18 +46,22 @@
   --color-border: #dae0e7;
   --color-border-strong: #bcc7d2;
 
-  /* Accent — Sage (11 stops) */
-  --color-accent-50:  #f3f6f1;
-  --color-accent-100: #e4ebe0;
-  --color-accent-200: #c8d6c1;
-  --color-accent-300: #a4ba9a;
-  --color-accent-400: #82a077;
-  --color-accent-500: #67885d;
-  --color-accent-600: #506d48;
-  --color-accent-700: #41573b;
-  --color-accent-800: #374731;
-  --color-accent-900: #2f3c2b;
-  --color-accent-950: #171f15;
+  /* Accent — azul-petróleo do Jo OS (11 stops).
+     Semente #1c2e3f = hsl(210 38% 18%), o `--primary` claro do Jo OS
+     (produto-proprio/Jo OS/src/index.css), derivada por `rampaDeSemente`
+     (lib/branding/rampa.ts) — o MESMO algoritmo que roda quando um revendedor
+     cola um hex em Configurações › Marca. Stop 600 = a semente, literal. */
+  --color-accent-50:  #f3f5f8;
+  --color-accent-100: #dee4e9;
+  --color-accent-200: #b8c3cd;
+  --color-accent-300: #8898a8;
+  --color-accent-400: #5c7185;
+  --color-accent-500: #3a5064;
+  --color-accent-600: #1c2e3f;
+  --color-accent-700: #1c2937;
+  --color-accent-800: #1b2631;
+  --color-accent-900: #1b242c;
+  --color-accent-950: #181d22;
   --color-accent: var(--color-accent-600);
   --color-accent-fg: #ffffff;
   --color-accent-soft: var(--color-accent-100);
@@ -345,21 +349,30 @@
   --color-border: #212e3b;
   --color-border-strong: #304255;
 
-  /* Accent stays same hex stops; default shifts up for dark contrast */
-  --color-accent-50:  #f3f6f1;
-  --color-accent-100: #e4ebe0;
-  --color-accent-200: #c8d6c1;
-  --color-accent-300: #a4ba9a;
-  --color-accent-400: #82a077;
-  --color-accent-500: #67885d;
-  --color-accent-600: #506d48;
-  --color-accent-700: #41573b;
-  --color-accent-800: #374731;
-  --color-accent-900: #2f3c2b;
-  --color-accent-950: #171f15;
+  /* Accent — mesma semente #1c2e3f, mas os 11 stops saem JÁ ANDADOS -1 grau:
+     `escolherAccent` (lib/branding/contraste.ts) mede que o stop 400 cru
+     (#5c7185) não fecha o piso de contraste 1.4.11 (3:1) num dos papéis do
+     tema escuro, e a caminhada de -1 grau resolve todos. É o MESMO deslocamento
+     que `declaracoesDoTema` (lib/branding/css.ts) aplicaria em runtime para
+     esta semente — aqui ele está pré-calculado e congelado no CSS, porque este
+     é o padrão do produto (sem override de banco/`.env`), e o caminho "sem
+     marca configurada" não passa pelo injetor de CSS. `--color-accent`/`-hover`/
+     `--ring` continuam nos MESMOS índices de sempre (400/300/400) — o que
+     mudou é o valor que mora em cada rótulo, não o rótulo escolhido. */
+  --color-accent-50:  #f3f5f8;
+  --color-accent-100: #f3f5f8;
+  --color-accent-200: #dee4e9;
+  --color-accent-300: #b8c3cd;
+  --color-accent-400: #8898a8;
+  --color-accent-500: #5c7185;
+  --color-accent-600: #3a5064;
+  --color-accent-700: #1c2e3f;
+  --color-accent-800: #1c2937;
+  --color-accent-900: #1b2631;
+  --color-accent-950: #1b242c;
   --color-accent: var(--color-accent-400);
-  --color-accent-fg: #161510;
-  --color-accent-soft: rgba(130, 160, 119, 0.16);
+  --color-accent-fg: #0b1219;
+  --color-accent-soft: rgba(136, 152, 168, 0.16);
   --color-accent-hover: var(--color-accent-300);
 
   /* Neutrals — petróleo (11 stops, dark) */
