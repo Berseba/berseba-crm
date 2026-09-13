@@ -3,6 +3,20 @@ import { resolveLeadOwner, type OwnerDisplay } from "@/lib/kanban/owner";
 import type { Lead } from "@/lib/types/leads";
 
 /**
+ * Uma sugestão de movimento de etapa PENDENTE, do jeito que o card precisa.
+ *
+ * O agente (WP-A) grava a linha quando o knob da org está em `suggest`, ou
+ * quando o destino é ganhou/perdeu (esses dois NUNCA são automáticos, em
+ * nenhum modo). `reason` é opcional — nem toda sugestão explica o porquê.
+ */
+export interface StageMoveSuggestion {
+  suggestionId: string;
+  toStageId: string;
+  toStageName: string;
+  reason: string | null;
+}
+
+/**
  * O que o card do Kanban precisa saber — e SÓ isso.
  *
  * Explicitamente não é `Lead`: o card responde quatro perguntas (quanto vale ·
@@ -59,6 +73,15 @@ export interface CardInput {
   canonicalTag?: string | null;
   /** Todas as tags — fora do card, acessíveis no hover. */
   tags: string[];
+  /**
+   * Sugestão de etapa VIVA (WP-A), aguardando um humano aplicar ou recusar.
+   *
+   * Só chega aqui a que está `pending` — decidida ou já aplicada é histórico
+   * (timeline), não pode ocupar a faixa de novo pelo mesmo motivo da
+   * retomada: um botão para algo que já foi resolvido é o que ensina a
+   * desconfiar do próprio botão.
+   */
+  stageSuggestion?: StageMoveSuggestion | null;
 }
 
 /**
@@ -92,6 +115,8 @@ export function buildCardInput(
     reactivations?: Map<string, { proposalId: string; expiresAt: string }>;
     /** `crm_pipelines.settings.canonical_tags` — só a primeira que o lead tiver. */
     canonicalTags?: string[];
+    /** Sugestões de etapa VIVAS (WP-A), por lead — só as `pending` chegam aqui. */
+    stageSuggestions?: Map<string, StageMoveSuggestion>;
     now?: Date;
   },
 ): CardInput {
@@ -128,11 +153,19 @@ export function buildCardInput(
     nextAction: lead.next_action ? { label: lead.next_action.label } : null,
     canonicalTag: (opts.canonicalTags ?? []).find((t) => lead.tags.includes(t)) ?? null,
     tags: lead.tags,
+    stageSuggestion: opts.stageSuggestions?.get(lead.id) ?? null,
   };
 }
 
 /** O conteúdo da faixa ③ — um por vez, nunca acumulado. */
 export type CardSlot =
+  | {
+      type: "stageSuggestion";
+      suggestionId: string;
+      toStageId: string;
+      toStageName: string;
+      reason: string | null;
+    }
   | { type: "awaiting"; label: string }
   | { type: "cooling"; label: string }
   | { type: "reactivation"; proposalId: string; expiresAt: string }
@@ -147,7 +180,7 @@ export type CardSlot =
   | { type: "idle" };
 
 export interface CardState {
-  kind: "awaiting" | "cooling" | "normal";
+  kind: "suggestion" | "awaiting" | "cooling" | "normal";
   /** Cor da borda de estado — a ÚNICA cor do card (Lei C). */
   border: "accent" | "warning" | "neutral";
   slot: CardSlot;
@@ -176,6 +209,42 @@ export function resolveCardState(
   input: CardInput,
   t: (texto: string) => string = (texto) => texto,
 ): CardState {
+  // A SUGESTÃO DE ETAPA VENCE TUDO, inclusive a próxima ação já aprovada de
+  // aparecer sozinha na faixa (cenário 24 continua valendo entre os outros
+  // três: reactivation > cooling > meter).
+  //
+  // O motivo de vencer especificamente `nextAction`, e não só coexistir com
+  // ele: as duas são propostas do MESMO agente sobre o MESMO negócio, e
+  // empilhar duas decisões de IA num slot de uma linha só é a pilha que o §5
+  // proíbe — a diferença de "esfriando + retomada" é que ali um dos dois
+  // (esfriando) é TELEMETRIA, não uma segunda proposta. Entre duas propostas,
+  // a de etapa ganha porque é a mais estrutural: mover o negócio de coluna
+  // muda o funil inteiro, aprovar uma próxima ação não muda nada além da
+  // conversa. Se o agente também tinha uma próxima ação pendente, ela não
+  // desaparece — fica perdida no meio-tempo até a sugestão de etapa ser
+  // decidida, e a próxima leitura do board volta a mostrá-la se ainda for
+  // válida.
+  //
+  // Borda NEUTRA de propósito, não `accent`: a cor aqui é a MESMA família de
+  // "Sugestão da IA — não enviada" do inbox (`SuggestionBubble`) — um
+  // conceito que o produto já tem (a IA propôs, ninguém confirmou, nada
+  // mudou de verdade ainda) — e não a cor de "há uma ação aprovada
+  // esperando envio" que `accent` carrega no resto deste arquivo.
+  if (input.stageSuggestion) {
+    return {
+      kind: "suggestion",
+      border: "neutral",
+      slot: {
+        type: "stageSuggestion",
+        suggestionId: input.stageSuggestion.suggestionId,
+        toStageId: input.stageSuggestion.toStageId,
+        toStageName: input.stageSuggestion.toStageName,
+        reason: input.stageSuggestion.reason,
+      },
+      showStageAge: true,
+    };
+  }
+
   if (input.nextAction?.label) {
     return {
       kind: "awaiting",

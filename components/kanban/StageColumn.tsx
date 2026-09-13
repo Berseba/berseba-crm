@@ -5,7 +5,7 @@ import { useT } from "@/hooks/i18n/useT";
 import { cn } from "@/lib/utils";
 import type { Lead } from "@/lib/types/leads";
 import type { Stage } from "@/lib/kanban/types";
-import { buildCardInput } from "@/lib/kanban/card-state";
+import { buildCardInput, type StageMoveSuggestion } from "@/lib/kanban/card-state";
 import { intervaloDaColuna } from "@/lib/kanban/selecao";
 import { KanbanCard, type GestoDeSelecao } from "./KanbanCard";
 
@@ -21,6 +21,8 @@ interface StageColumnProps {
   reactivations?: Map<string, { proposalId: string; expiresAt: string }>;
   /** `settings.canonical_tags` do pipeline — a única tag que fica no card. */
   canonicalTags?: string[];
+  /** Sugestões de movimento de etapa vivas (WP-A), por lead. */
+  stageSuggestions?: Map<string, StageMoveSuggestion>;
   selectedLeadIds?: Set<string>;
   /** leadId → quantos eventos remotos já chegaram (muda = pulsa de novo). */
   pulses?: Map<string, number>;
@@ -55,6 +57,7 @@ export function StageColumn({
   coolingIds,
   reactivations,
   canonicalTags,
+  stageSuggestions,
   selectedLeadIds,
   pulses,
   onSelectMany,
@@ -161,6 +164,7 @@ export function StageColumn({
                   coolingIds,
                   reactivations,
                   canonicalTags,
+                  stageSuggestions,
                 })}
                 lead={lead}
                 index={idx}

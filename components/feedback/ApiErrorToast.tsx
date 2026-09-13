@@ -61,6 +61,14 @@ const COPY: Record<string, { variant: Variant; msg?: string }> = {
     variant: "warning",
     msg: "Outro atendente já assumiu.",
   },
+  // A sugestão de movimento de etapa (WP-A/WP-B): outra pessoa aplicou ou
+  // recusou entre o render do chip e o clique. Mesmo tom de
+  // `conversation_already_claimed` — não é erro, é corrida ganha por outra
+  // pessoa, e o refetch do chamador já traz o estado real.
+  stage_suggestion_not_pending: {
+    variant: "warning",
+    msg: "Alguém já decidiu esta sugestão.",
+  },
   invalid_state: {
     variant: "warning",
     msg: "Este caso já foi respondido ou fechado.",

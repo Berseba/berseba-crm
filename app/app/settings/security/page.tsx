@@ -65,6 +65,7 @@ export default async function SecurityPage() {
         modoSombra={modoSombra}
         podeConfigurarNicho={org?.role === "admin"}
         nicho={nicho}
+        podeConfigurarSugestaoDeEtapa={org?.role === "admin"}
       />
     </div>
   );
