@@ -11,12 +11,12 @@ export interface StageSuggestionSummaryRow {
   applied: number;
   rejected: number;
   /**
-   * ⚠️ ASSUMIDO como fração 0–1 (convenção mais comum para campo `_rate`), não
-   * conferido contra o WP-A porque a rota ainda não existe neste worktree. Se
-   * a rota devolver 0–100, `StageSuggestionsSummaryPanel` mostra "4500%" em vez
-   * de "45%" — o primeiro sintoma visível seria esse. Ver relatório da tarefa.
+   * Fração 0–1 (`applied / (applied + rejected)`), conferida contra a rota
+   * `leads/stage-suggestions/summary`. `null` quando ninguém decidiu nada ainda
+   * — e isso NÃO é 0%: "nenhuma decisão" e "todas recusadas" são fatos
+   * diferentes, e o painel mostra um traço no primeiro caso.
    */
-  acceptance_rate: number;
+  acceptance_rate: number | null;
 }
 
 /**

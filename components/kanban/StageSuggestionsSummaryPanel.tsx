@@ -28,7 +28,8 @@ export function StageSuggestionsSummaryPanel({ pipelineId }: { pipelineId: strin
       {linhas.map((s) => (
         <span key={s.to_stage_id}>
           {s.to_stage_name}: {t("Sugestões:")} {s.suggested} ·{" "}
-          {t("aceitas")} {Math.round(s.acceptance_rate * 100)}%
+          {t("aceitas")}{" "}
+          {s.acceptance_rate === null ? "—" : `${Math.round(s.acceptance_rate * 100)}%`}
         </span>
       ))}
     </div>
