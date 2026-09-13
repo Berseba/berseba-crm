@@ -8,7 +8,9 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
       <input
         type={type}
         className={cn(
-          "flex h-10 w-full rounded-sm border border-border bg-bg px-4 py-2",
+          // `rounded-md`, mesmo motivo do Button: bate com o `rounded-md` do
+          // input do Jo OS (`src/components/ui/input.tsx`).
+          "flex h-10 w-full rounded-md border border-border bg-bg px-4 py-2",
           "text-sm text-text placeholder:text-text-muted",
           "transition-[border-color,box-shadow] duration-fast ease-out",
           "hover:border-border-strong",
