@@ -12,7 +12,7 @@ Razões:
 - **Duotone tem peso visual sem ruído.** A camada secundária (preenchimento ~20% opacity) dá presença sem competir com o texto. Regular fica pra contextos onde duotone seria excessivo (sidebar densa).
 - **5 weights disponíveis.** `thin`, `light`, `regular`, `bold`, `duotone`, `fill`. Permite hierarquia dentro do mesmo set sem trocar família.
 - **Cobertura grande e consistente.** ~9000 ícones. Cobre todos os domínios do produto (chat, comércio, dados, IA, gestão).
-- **Família humanista.** Curvas suaves combinam com Atkinson Hyperlegible. Lucide é mais geométrico, Heroicons é mais "clean SaaS"; Phosphor cabe no soft-tech.
+- **Família humanista.** Curvas suaves combinam com o par Urbanist/Epilogue. Lucide é mais geométrico, Heroicons é mais "clean SaaS"; Phosphor cabe no soft-tech.
 
 ## Instalação
 
