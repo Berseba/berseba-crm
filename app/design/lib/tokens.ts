@@ -1,11 +1,26 @@
 // Design tokens for DeskcommCRM showcase.
-// "Soft-tech / calmo" — neutros desaturados (greige/warm-gray), accent não-saturado.
+// "Soft-tech / calmo" — neutros desaturados, accent não-saturado, sem gradiente.
 // 5-Constraint Rule applied: Shape, Color (exact hex), Typography, Motion, Layout.
+//
+// A paleta `jo` é o tema "Marca Jo" que o produto pinta por padrão desde
+// 2026-09-13: todo hex dela foi LIDO de `app/globals.css` (blocos `:root` e
+// `[data-theme="dark"]`) — este arquivo não inventa cor, espelha. As outras
+// cinco paletas (Sage, a v1.0 upstream, e as quatro candidatas) ficam para
+// comparação lado a lado no showcase e não pintam mais nenhuma tela do produto.
 
-export type PaletteId = "sage" | "clay" | "mist" | "plum" | "olive";
-export type TypoId = "bricolage-jakarta" | "fraunces-manrope" | "atkinson" | "source-plex";
+export type PaletteId = "jo" | "sage" | "clay" | "mist" | "plum" | "olive";
+export type TypoId =
+  | "epilogue-urbanist"
+  | "bricolage-jakarta"
+  | "fraunces-manrope"
+  | "atkinson"
+  | "source-plex";
 export type DensityId = "aerada" | "equilibrada" | "compacta";
 export type ThemeId = "light" | "dark";
+
+/** O que o showcase abre quando não há escolha salva — o mesmo que o produto pinta. */
+export const DEFAULT_PALETTE: PaletteId = "jo";
+export const DEFAULT_TYPO: TypoId = "epilogue-urbanist";
 
 export type ColorScale = {
   50: string; 100: string; 200: string; 300: string; 400: string;
@@ -24,7 +39,15 @@ export type PaletteDef = {
   name: string;
   description: string;
   accent: ColorScale;
-  // Greige/warm-gray neutrals — explicitly NOT slate/zinc.
+  /**
+   * Os 11 stops que o tema ESCURO usa quando divergem dos do claro. O produto
+   * faz isso na `jo`: `escolherAccent` (lib/branding/contraste.ts) anda a rampa
+   * -1 grau porque o stop 400 cru não fecha 3:1 num dos papéis do escuro, e o
+   * CSS congela o resultado em `[data-theme="dark"]`. Ausente = mesma rampa.
+   */
+  accentDark?: ColorScale;
+  // Neutros desaturados — explicitly NOT slate/zinc. (Greige nas cinco paletas
+  // upstream; petróleo, tingido de azul, na `jo`.)
   neutralLight: ColorScale;
   neutralDark: ColorScale;
   states: { light: StateColors; dark: StateColors };
@@ -38,10 +61,53 @@ export type PaletteDef = {
 // ─── Palettes ──────────────────────────────────────────────────────────────
 
 export const PALETTES: Record<PaletteId, PaletteDef> = {
+  jo: {
+    id: "jo",
+    name: "Marca Jo",
+    description: "Azul-petróleo do Jo OS. Sóbrio, frio sem ser corporativo, sem gradiente.",
+    // Accent = `rampaDeSemente("#1c2e3f")` (lib/branding/rampa.ts) — o MESMO
+    // algoritmo que roda quando um revendedor cola um hex em Configurações ›
+    // Marca. Conferido: os 11 hexes batem byte a byte com `--color-accent-*`
+    // do `:root` em app/globals.css. Stop 600 = a semente, literal.
+    accent: {
+      50: "#f3f5f8", 100: "#dee4e9", 200: "#b8c3cd", 300: "#8898a8",
+      400: "#5c7185", 500: "#3a5064", 600: "#1c2e3f", 700: "#1c2937",
+      800: "#1b2631", 900: "#1b242c", 950: "#181d22",
+    },
+    // A mesma rampa andada -1 grau (50 e 100 colapsam no mesmo hex) — é o que
+    // `[data-theme="dark"]` declara em app/globals.css; ver `accentDark` no tipo.
+    accentDark: {
+      50: "#f3f5f8", 100: "#f3f5f8", 200: "#dee4e9", 300: "#b8c3cd",
+      400: "#8898a8", 500: "#5c7185", 600: "#3a5064", 700: "#1c2e3f",
+      800: "#1c2937", 900: "#1b2631", 950: "#1b242c",
+    },
+    // `--color-neutral-*` do `:root` (claro) e do `[data-theme="dark"]` (escuro).
+    neutralLight: {
+      50: "#f5f7f9", 100: "#ecf0f3", 200: "#dae0e7", 300: "#c2ccd6",
+      400: "#97a6b4", 500: "#6e8091", 600: "#586674", 700: "#394756",
+      800: "#263340", 900: "#162431", 950: "#0c141d",
+    },
+    neutralDark: {
+      50: "#edf0f3", 100: "#dce0e5", 200: "#b5bdc5", 300: "#9da6ad",
+      400: "#657381", 500: "#3d4d5c", 600: "#212e3b", 700: "#1a242e",
+      800: "#101a23", 900: "#0b1219", 950: "#060a0e",
+    },
+    // Os semânticos NÃO mudaram com o tema: são os mesmos da Sage v1.0.
+    states: {
+      light: { success: "#5a8a5f", warning: "#b07a2b", error: "#a94a3c", info: "#4a7a93" },
+      dark:  { success: "#82a077", warning: "#d09455", error: "#c87263", info: "#7da9bf" },
+    },
+    // `--color-bg` / `--color-surface` / `--color-surface-elevated` /
+    // `--color-text` / `--color-text-muted` / `--color-border` dos dois blocos.
+    surfaces: {
+      light: { bg: "#f5f7f9", surface: "#ffffff", surfaceElevated: "#edf0f3", text: "#162431", textMuted: "#586674", border: "#dae0e7" },
+      dark:  { bg: "#0b1219", surface: "#101a23", surfaceElevated: "#1a242e", text: "#edf0f3", textMuted: "#9da6ad", border: "#212e3b" },
+    },
+  },
   sage: {
     id: "sage",
     name: "Sage",
-    description: "Verde-erva desaturado. Calmo, confiável, vegetal.",
+    description: "Verde-erva desaturado. Calmo, confiável, vegetal. (v1.0 upstream — histórico.)",
     accent: {
       50: "#f3f6f1", 100: "#e4ebe0", 200: "#c8d6c1", 300: "#a4ba9a",
       400: "#82a077", 500: "#67885d", 600: "#506d48", 700: "#41573b",
@@ -191,6 +257,19 @@ export const DENSITIES: Record<DensityId, { label: string; rowH: string; gap: st
 // ─── Typography pairings ───────────────────────────────────────────────────
 
 export const TYPOS: Record<TypoId, { name: string; display: string; body: string; mono: string; description: string; scale: number }> = {
+  // O par que o produto carrega (app/layout.tsx, via next/font/google): Urbanist
+  // em h1–h6 (`--font-display`), Epilogue no corpo (`--font-sans`), IBM Plex
+  // Mono em code/kbd/pre/samp (`--font-mono`) — ver `@theme inline` e
+  // `@layer base` em app/globals.css. `scale` não existe no CSS; 1.25 é a razão
+  // que docs/design-system/03-typography.md documenta para a escala.
+  "epilogue-urbanist": {
+    name: "Urbanist + Epilogue",
+    display: '"Urbanist", system-ui, sans-serif',
+    body: '"Epilogue", system-ui, sans-serif',
+    mono: '"IBM Plex Mono", ui-monospace, monospace',
+    description: "Marca Jo. Display geométrico-humanista, body com peso 300–700, mono Plex para dados.",
+    scale: 1.25,
+  },
   "bricolage-jakarta": {
     name: "Bricolage + Plus Jakarta",
     display: '"Bricolage Grotesque", system-ui, sans-serif',
@@ -236,12 +315,17 @@ export const SPACING = [
   { token: "16", px: "64px" },   { token: "20", px: "80px" },
 ];
 
+// `--radius-*` de app/globals.css: 0,85rem (o `--radius` do Jo OS) é o degrau
+// `lg`, e os outros seguem o passo de 4px do fork recentrado nele. Os nomes
+// são os do CSS (sm/md/lg/xl) — não existe `xs` no runtime. A coluna "uso"
+// foi medida em components/ui: button/input/popover/select = `rounded-md`;
+// card/dialog = `rounded-lg`; dropdown item/sheet/textarea = `rounded-sm`.
 export const RADII = [
   { token: "none", value: "0px",   use: "Tabelas densas, áreas de dados, cabeçalhos de coluna." },
-  { token: "xs",   value: "4px",   use: "Botões, inputs, badges. Padrão para controles." },
-  { token: "sm",   value: "8px",   use: "Cards de lista, item de inbox, kanban card." },
-  { token: "md",   value: "12px",  use: "Containers maiores, modais menores, panels." },
-  { token: "lg",   value: "16px",  use: "Modais, popovers grandes, surfaces premium." },
+  { token: "sm",   value: "6px",   use: "Item de menu, textarea, sheet, chips. O menor raio visível." },
+  { token: "md",   value: "10px",  use: "Botões, inputs, select, popover. Padrão para controles (`--radius`)." },
+  { token: "lg",   value: "14px",  use: "Card, dialog, containers. O `--radius` do Jo OS (0,85rem)." },
+  { token: "xl",   value: "18px",  use: "Modal full-size, sheet grande, surfaces premium." },
   { token: "full", value: "9999px",use: "Avatar, pill badge, dot indicator." },
 ];
 
@@ -251,12 +335,17 @@ export const BORDERS = [
   { token: "focus",    value: "2px solid var(--accent-500)",use: "Focus ring (a11y). Sempre 2px." },
 ];
 
+// `--shadow-*` do `:root` em app/globals.css (tema claro): mesmo offset/blur/alfa
+// do fork, retingidos com o petróleo `rgb(22, 36, 49)` (o `--color-text` claro)
+// em vez do neutro quente `rgb(20, 18, 14)` da v1.0. O escuro usa os mesmos
+// offsets com `rgba(4, 8, 11, …)` e alfas mais altos — ver `[data-theme="dark"]`.
 export const SHADOWS = [
   { token: "none",  value: "none",                                              use: "Default. Use whitespace + border." },
-  { token: "sm",    value: "0 1px 2px 0 rgba(20,18,14,0.04)",                   use: "Hover discreto em cards interativos." },
-  { token: "md",    value: "0 4px 12px -2px rgba(20,18,14,0.06), 0 2px 4px -1px rgba(20,18,14,0.04)", use: "Popover, dropdown, toast." },
-  { token: "lg",    value: "0 12px 32px -6px rgba(20,18,14,0.10), 0 4px 12px -2px rgba(20,18,14,0.06)", use: "Modal, sheet." },
-  { token: "inset", value: "inset 0 1px 0 0 rgba(255,255,255,0.04)",            use: "Highlight superior em superfícies dark." },
+  { token: "xs",    value: "0 1px 2px 0 rgba(22, 36, 49, 0.04)",                use: "Hover discreto em cards interativos." },
+  { token: "sm",    value: "0 1px 2px 0 rgba(22, 36, 49, 0.05), 0 1px 1px 0 rgba(22, 36, 49, 0.03)", use: "Card elevado, input em foco." },
+  { token: "md",    value: "0 4px 12px -2px rgba(22, 36, 49, 0.06), 0 2px 4px -1px rgba(22, 36, 49, 0.04)", use: "Popover, dropdown, toast." },
+  { token: "lg",    value: "0 12px 32px -6px rgba(22, 36, 49, 0.10), 0 4px 12px -2px rgba(22, 36, 49, 0.06)", use: "Modal, sheet." },
+  { token: "xl",    value: "0 24px 48px -12px rgba(22, 36, 49, 0.16), 0 8px 16px -4px rgba(22, 36, 49, 0.08)", use: "Dialog full-size, drawer. Raro." },
 ];
 
 export const Z_INDEX = [

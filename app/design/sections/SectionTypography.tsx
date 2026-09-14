@@ -5,6 +5,11 @@ import type { TypoId } from "../lib/tokens";
 import { useVariant } from "../lib/variant-context";
 
 const TYPO_FONTS: Record<TypoId, { display: string; body: string }> = {
+  // Variáveis do root layout (app/layout.tsx), que envolve o showcase.
+  "epilogue-urbanist": {
+    display: "var(--font-urbanist)",
+    body: "var(--font-epilogue)",
+  },
   "bricolage-jakarta": {
     display: "var(--font-bricolage)",
     body: "var(--font-jakarta)",
@@ -121,11 +126,13 @@ export function SectionTypography() {
     <div className="ds-section">
       <h2 className="ds-display">Tipografia</h2>
       <p className="ds-lede">
-        Quatro pareamentos avaliados. Critério: legibilidade em 8h-shifts, suporte a numerais tabulares,
-        peso extremo disponível, italic real (não slanted). Inter / Geist / Space Grotesk foram banidos
-        por saturação em training data.
+        O par do produto (Urbanist + Epilogue, o mesmo do Jo OS) e os quatro pareamentos avaliados
+        na v1.0. Critério: legibilidade em 8h-shifts, suporte a numerais tabulares, peso extremo
+        disponível, italic real (não slanted). Inter / Geist / Space Grotesk foram banidos por
+        saturação em training data.
       </p>
 
+      <PairBlock id="epilogue-urbanist" />
       <PairBlock id="bricolage-jakarta" />
       <PairBlock id="fraunces-manrope" />
       <PairBlock id="atkinson" />

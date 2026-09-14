@@ -1,40 +1,50 @@
 # 03 — Tipografia
 
-> **Source of truth:** `app/design/lib/fonts.ts` (`atkinson`, `plexMono`), `app/design/lib/tokens.ts` → `TYPOS.atkinson`
+> **Source of truth:** `app/layout.tsx` (`epilogue`, `urbanist`, `plexMono` via `next/font/google`) e `app/globals.css` (`--font-sans`, `--font-display`, `--font-mono` no `@theme inline`; `h1..h6` no `@layer base`). Espelho no showcase: `app/design/lib/tokens.ts` → `TYPOS["epilogue-urbanist"]`.
+>
+> **Histórico:** a v1.0 upstream usava Atkinson Hyperlegible para display + body. O par abaixo é o do tema Marca Jo (2026-09-13, `00-overview.md` § Versionamento); Atkinson continua no showcase (`TYPOS.atkinson`) só para comparação.
 
-## Por que Atkinson Hyperlegible
+## Por que Urbanist + Epilogue
 
-A fonte de display + body do DeskcommCRM é **Atkinson Hyperlegible**, criada pelo Braille Institute em 2020 com um único objetivo: **maximizar a distinção entre caracteres similares** para usuários com baixa visão.
+O DeskcommCRM carrega a **mesma dupla do Jo OS**, o sistema interno da Jordão Aceleração IA: **Urbanist** nos títulos (`h1`–`h6`, utilitário `font-display`) e **Epilogue** no corpo (`font-sans`, o default do `<body>`). A razão primeira é identidade — o CRM e o sistema interno são a mesma casa, e a tipografia é o que o olho reconhece antes de ler qualquer palavra.
 
-Razões da escolha:
+O que o par entrega, além da identidade:
 
-- **Acessibilidade-first.** `0` vs `O`, `1` vs `l` vs `I`, `rn` vs `m`, `B` vs `8` — todos disambiguados por design. Crítico em CRM onde número de pedido (`#01430`) e código de cliente (`Bl0OO1`) precisam ser lidos sem ambiguidade.
-- **Humanista, não geométrica.** Curvas levemente abertas, terminais não-mecânicos. Diferencia do par Inter/Geist (geométrico, dominante no SaaS atual).
-- **Baseline alta, x-height generosa.** Confortável em 12–13px, que é onde acontece 80% da UI operacional (timestamps, helpers, dados de tabela).
-- **Anti-genérica.** Quase ninguém em CRM SaaS usa Atkinson. Diverge sem custo de legibilidade — pelo contrário, ganha.
-- **Mesma família display + body.** Reduz cognição na hierarquia: o que muda é peso e tamanho, não tipo. Combina com Aerada (a hierarquia vem do whitespace).
+- **Duas famílias, um mesmo desenho.** As duas são sans geométrico-humanistas com x-height generosa; a diferença entre título e corpo é de *voz* (Urbanist mais aberta e larga, Epilogue mais contida), não de gênero. A hierarquia continua vindo de peso, tamanho e whitespace — combina com Aerada.
+- **Faixa de pesos completa.** Epilogue carrega 300–700 e Urbanist 400–800: existe semibold de verdade (500/600), que Atkinson não tinha. Use-os; não simule peso com tamanho.
+- **Anti-genérica.** Nem Inter, nem Geist, nem Space Grotesk (`09-anti-patterns.md` § 1–2). Urbanist/Epilogue não são o par default de nenhum template de SaaS.
+- **Legibilidade em 12–13px.** Ambas têm contraformas abertas e mantêm-se legíveis em timestamp, helper e dado de tabela; o `letter-spacing: -0.015em` dos títulos (regra do Jo OS) só se aplica de `h1` a `h6`.
+- **`ss01` ligado no corpo.** `font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1` no `<body>` — é o conjunto que o Jo OS usa.
 
-A fonte secundária para **dados monoespaçados** é **IBM Plex Mono** — escolhida por ter a mesma sensibilidade humanista (pertence à família Plex, da IBM) sem cair em JetBrains Mono (saturação developer-tools) nem Fira Code (ligatures que confundem em UI).
+O que se **perdeu** em relação à v1.0, e é declarado: Atkinson Hyperlegible disambiguava `0`/`O`, `1`/`l`/`I` por desenho. Epilogue e Urbanist não têm essa garantia. Por isso **todo identificador (pedido, código de cliente, chave Pix) vai em IBM Plex Mono** (`mono-data`), onde a distinção existe — na v1.0 isso era recomendação; agora é regra.
+
+A fonte para **dados monoespaçados** continua **IBM Plex Mono** (`code`, `kbd`, `pre`, `samp` e a classe `font-mono`) — escolhida por ter sensibilidade humanista sem cair em JetBrains Mono (saturação developer-tools) nem Fira Code (ligatures que confundem em UI).
 
 ## Stack completo
 
+O que `app/globals.css` declara (a pilha de fallback é a real, não abreviada):
+
 ```css
---ds-font-display: var(--font-atkinson), ui-sans-serif, system-ui, sans-serif;
---ds-font-body:    var(--font-atkinson), ui-sans-serif, system-ui, sans-serif;
---ds-font-mono:    var(--font-plex-mono), ui-monospace, "SF Mono", Menlo, monospace;
+/* @theme inline — vira os utilitários font-sans / font-display / font-mono */
+--font-sans:    var(--font-epilogue), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+--font-display: var(--font-urbanist), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+--font-mono:    var(--font-mono), ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+/* @layer base */
+body            { font-family: var(--font-epilogue), …; font-feature-settings: "rlig" 1, "calt" 1, "ss01" 1; }
+h1, h2, h3, h4, h5, h6 { font-family: var(--font-urbanist), …; letter-spacing: -0.015em; }
+code, kbd, pre, samp   { font-family: var(--font-mono), …; font-variant-numeric: tabular-nums; }
 ```
 
-`var(--font-atkinson)` é injetado por `next/font/google` via `app/design/lib/fonts.ts`.
+`--font-epilogue`, `--font-urbanist` e `--font-mono` são injetados por `next/font/google` em `app/layout.tsx` (classe no `<html>`), em build time — a imagem self-host não depende de CDN de fonte.
 
-**Pesos disponíveis** (Atkinson):
-- 400 — body, default UI
-- 700 — bold, headings, ênfase
+**Pesos carregados** (Epilogue, corpo): 300, 400, 500, 600, 700 — subsets `latin` + `latin-ext` (acentos do português).
 
-Itálico disponível em ambos. Não há 500/600 — quando precisar de "semibold", use 700 com tamanho menor, ou aceite que peso 400 é o body.
+**Pesos carregados** (Urbanist, títulos): 400, 500, 600, 700, 800.
 
-**Pesos disponíveis** (IBM Plex Mono):
-- 400 — default mono
-- 500 — emphasis em mono (raro)
+**Pesos carregados** (IBM Plex Mono): 400 — default mono; 500 — emphasis em mono (raro).
+
+Peso que não está na lista não existe na tela: o navegador sintetiza (falso-bold) ou cai no vizinho. Pedir 900 em Urbanist rende 800.
 
 ## Escala tipográfica
 
@@ -63,7 +73,7 @@ Modular ratio: **1.250 (minor third)**, com ajustes manuais em alguns stops para
 
 ## Numerais
 
-Atkinson Hyperlegible suporta **tabular nums** via `font-feature-settings`. Aplicado obrigatoriamente em:
+Epilogue e Urbanist suportam **tabular nums** via `font-variant-numeric`. Aplicado obrigatoriamente em:
 
 ```css
 .tabular {
@@ -116,7 +126,7 @@ Exemplo canônico: **item de inbox**.
 
 Detalhes a observar:
 - O nome da pessoa e o ID do pedido convivem na mesma linha porque hierarquia é dada por `weight` + `text-muted`, não por tamanho diferente.
-- ID `#12.443` está em sans (Atkinson) com `font-variant-numeric: tabular-nums` porque é um número curto inline; quando vira coluna de tabela, vira `mono-data` (Plex Mono).
+- ID `#12.443` está em sans (Epilogue) com `font-variant-numeric: tabular-nums` porque é um número curto inline **só de dígitos**; quando vira coluna de tabela, ou quando mistura letras e dígitos (`Bl0OO1`), vira `mono-data` (Plex Mono) — é onde `0`/`O` e `1`/`l` se distinguem.
 - Timestamp em `caption` + `tabular` para alinhar verticalmente entre rows.
 
 Outro exemplo: **header de view**.
@@ -133,19 +143,22 @@ Outro exemplo: **header de view**.
 - **Tamanho mínimo:** 12px (`caption`). Abaixo disso só ícones com `aria-label`.
 - **Line-height mínimo:** 1.4 em prosa, 1.35 em UI compacta.
 - **Tracking:** já calibrado por escala. Não sobrescreva sem motivo (legível ou marketing).
-- **Peso mínimo de leitura:** 400 sempre. Light (300) não existe na escala — Atkinson não tem 300 carregado.
-- **Foco visual:** texto em `text-muted` (`#5d594f` light / `#8e8b7f` dark) só pra UI 14px+; nunca aplicar a prosa longa.
+- **Peso mínimo de leitura:** 400 sempre. Epilogue 300 está carregado, mas é para display grande (≥ 28px) em hero — nunca para texto lido.
+- **Foco visual:** texto em `text-muted` (`#586674` light / `#9da6ad` dark) só pra UI 14px+; nunca aplicar a prosa longa. `text-subtle` (`#7c8c9c` / `#657381`) é só placeholder e ícone — 3.2:1 sobre o fundo claro não passa como texto.
 - **Truncate:** sempre com `text-overflow: ellipsis` + `white-space: nowrap` + `min-width: 0`. Tooltip com texto completo no hover (`<Tooltip>` shadcn).
 
 ## Como consumir em código
 
 ```tsx
 // Tailwind (mapeado no `@theme inline` de app/globals.css)
+// `h1`–`h6` já recebem Urbanist pelo `@layer base`; `font-display` é para
+// título que não é heading semântico (nome de card, valor grande).
 <h1 className="text-display-md font-bold tracking-tight">Inbox</h1>
+<div className="font-display text-2xl font-semibold">R$ 12.443,00</div>
 <p className="text-body-sm text-muted">42 abertas</p>
 <span className="font-mono text-mono-data tabular-nums">#12.443</span>
 
-// CSS direto (showcase ou estilos globais)
-.title { font-family: var(--ds-font-display); font-size: 28px; line-height: 36px; font-weight: 700; }
-.id    { font-family: var(--ds-font-mono);    font-size: 13px; line-height: 18px; font-variant-numeric: tabular-nums; }
+// CSS direto (estilos globais)
+.title { font-family: var(--font-display); font-size: 28px; line-height: 36px; font-weight: 700; }
+.id    { font-family: var(--font-mono);    font-size: 13px; line-height: 18px; font-variant-numeric: tabular-nums; }
 ```

@@ -56,7 +56,7 @@ Search input usa o mesmo Input com `type="search"` + leading `MagnifyingGlass`. 
 
 ## Card
 
-3 variants. Sempre sobre `surface` (white em light, `#1d1c17` em dark).
+3 variants. Sempre sobre `surface` (white em light, `#101a23` em dark).
 
 | Variant | Border | Hover | Uso |
 |---------|--------|-------|-----|
@@ -77,7 +77,7 @@ Composição interna canônica:
 </Card>
 ```
 
-Padding: `space-5` (20px) em Aerada. Radius: `radius-md` (12px).
+Padding: `space-5` (20px) em Aerada. Radius: `radius-lg` (14px — `rounded-lg` em `components/ui/card.tsx`).
 
 ---
 
@@ -88,7 +88,7 @@ Padding: `space-5` (20px) em Aerada. Radius: `radius-md` (12px).
 | Variant | bg | fg | Uso |
 |---------|----|----|-----|
 | `neutral` | `surface-elevated` | `text-muted` | Tag genérica, status default |
-| `accent` | `accent-soft` (`#e4ebe0`) | `accent` | Highlight não-semântico, "novo" |
+| `accent` | `accent-soft` (`#dee4e9`) | `accent` | Highlight não-semântico, "novo" |
 | `success` | `success/14%` | `success` | Resolvido, Pago, Entregue |
 | `warning` | `warning/14%` | `warning` | SLA próximo, Aguardando |
 | `error` | `error/14%` | `error` | Vencido, Falhou, Cancelado |
@@ -282,7 +282,7 @@ Avatar (sm/md) com tooltip mostrando nome do owner. Suporta "unassigned" (ícone
 
 ## TagPill
 
-Badge especializada para tags livres (cliente VIP, frete-grátis, etc.). Cor neutra default; usuário pode escolher de palette restrita (5 stops do greige + accent). Suporta close button (`X` 12px) em modo editável.
+Badge especializada para tags livres (cliente VIP, frete-grátis, etc.). Cor neutra default; usuário pode escolher de palette restrita (5 stops do neutro + accent). Suporta close button (`X` 12px) em modo editável.
 
 ---
 

@@ -9,28 +9,28 @@ Lista canônica do que **não fazer** no DeskcommCRM. Anti-patterns ficam aqui p
 ## 1. ❌ Inter como font family
 
 **Por quê:** ~70% dos SaaS atuais usam Inter. É correta, mas saturada. Diluição de marca.
-**✅ Sim:** Atkinson Hyperlegible (display + body) + IBM Plex Mono (dados). Ver `03-typography.md`.
+**✅ Sim:** Urbanist (títulos) + Epilogue (corpo) + IBM Plex Mono (dados). Ver `03-typography.md`.
 
 ---
 
 ## 2. ❌ Geist Sans, Space Grotesk, ou qualquer Vercel-default
 
 **Por quê:** mesma razão de Inter. Geist é a "nova Inter" de 2024–2025. Anti-genérico exige distância.
-**✅ Sim:** Atkinson.
+**✅ Sim:** Urbanist + Epilogue.
 
 ---
 
 ## 3. ❌ Gradient roxo/azul/rosa em hero ou primary button
 
 **Por quê:** símbolo do "AI SaaS 2024". Datado e clichê. Não combina com soft-tech calmo.
-**✅ Sim:** solid `accent-500` (Sage `#67885d`). Profundidade vem de border + shadow neutro, não gradient.
+**✅ Sim:** solid `accent` (petróleo `#1c2e3f` no claro, `#8898a8` no escuro — e o que o white-label puser no lugar). Profundidade vem de border + shadow tingido, não gradient.
 
 ---
 
 ## 4. ❌ `bg-zinc-900` ou `bg-slate-900` em dark mode
 
-**Por quê:** zinc/slate são cool-gray geométricos. A paleta é warm (greige). Misturar quebra coerência.
-**✅ Sim:** `bg: #161510` (warm dark canônico). Ver `02-palette-sage.md`.
+**Por quê:** zinc/slate são os cinzas de catálogo do Tailwind — e o produto tem a própria rampa de neutros, tingida do mesmo petróleo do accent. Misturar quebra coerência (e um `slate-900` ao lado do `bg` real fica visivelmente mais azul).
+**✅ Sim:** `bg-bg` (`#0b1219`, o dark canônico). Ver `02-palette-marca-jo.md`.
 
 ---
 
@@ -55,9 +55,9 @@ Lista canônica do que **não fazer** no DeskcommCRM. Anti-patterns ficam aqui p
 
 ---
 
-## 8. ❌ Sage accent como bg de toda a sidebar
+## 8. ❌ Accent como bg de toda a sidebar
 
-**Por quê:** a sidebar é greige (`surface` ou `surface-elevated`). Accent na sidebar fica saturado e cansa em 8h.
+**Por quê:** a sidebar é neutra (`surface` ou `surface-elevated`). O accent petróleo é quase preto: uma sidebar inteira nele vira um buraco na tela e cansa em 8h — e numa instalação que trocou a cor, vira a sidebar da cor do revendedor.
 **✅ Sim:** sidebar `surface`, com hover `accent-soft` em items de nav, active `accent-soft` + text `accent`.
 
 ---
@@ -72,7 +72,7 @@ Lista canônica do que **não fazer** no DeskcommCRM. Anti-patterns ficam aqui p
 ## 10. ❌ `red-500` puro (#ef4444) pra error
 
 **Por quê:** vermelho saturado em UI calma vira alarme. Quebra o tom soft-tech.
-**✅ Sim:** `error: #a94a3c` (light) ou `#c87263` (dark). Saturação ≤ 55%. Ver `02-palette-sage.md`.
+**✅ Sim:** `error: #a94a3c` (light) ou `#c87263` (dark). Saturação ≤ 55%. Ver `02-palette-marca-jo.md`.
 
 ---
 
@@ -106,22 +106,22 @@ Lista canônica do que **não fazer** no DeskcommCRM. Anti-patterns ficam aqui p
 
 ## 15. ❌ Sombras com preto puro (`rgba(0,0,0,0.X)`)
 
-**Por quê:** preto puro contra warm-bg vibra (gera halo cinza). Quebra coerência.
-**✅ Sim:** `rgba(20, 18, 14, X)` — cor do texto neutro. Ver `01-foundation-tokens.md` § Shadow.
+**Por quê:** preto puro contra um fundo tingido vibra (gera halo cinza). Quebra coerência.
+**✅ Sim:** `rgba(22, 36, 49, X)` no claro — a cor do texto (`#162431`) — e `rgba(4, 8, 11, X)` no escuro. Use os tokens `shadow-*`, nunca o literal. Ver `01-foundation-tokens.md` § Shadow.
 
 ---
 
 ## 16. ❌ `#fff` puro como bg de página em light mode
 
 **Por quê:** branco puro reflete demais em sessão longa, causa fadiga.
-**✅ Sim:** `bg: #faf9f6` (offwhite warm). `surface` (cards) sim usa `#ffffff` puro pra contraste.
+**✅ Sim:** `bg: #f5f7f9` (offwhite petróleo). `surface` (cards) sim usa `#ffffff` puro pra contraste.
 
 ---
 
 ## 17. ❌ `border-radius: 0` em todos os controles ("flat brutalism")
 
 **Por quê:** brutalist é uma direção válida, mas não combina com soft-tech calmo. Vira hostil em uso prolongado.
-**✅ Sim:** `radius-xs` (4px) em controles, `radius-sm` (8px) em cards de lista. Radius 0 só em tabelas densas.
+**✅ Sim:** `radius-md` (10px) em controles, `radius-lg` (14px) em cards. Radius 0 só em tabelas densas. (Não existe `radius-xs`; 4px era a v1.0.)
 
 ---
 
