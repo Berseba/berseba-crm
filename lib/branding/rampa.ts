@@ -10,7 +10,7 @@
  * pré-buildada e cada dependência nova é superfície de advisory num produto que o
  * cliente hospeda. As conversões (sRGB ↔ OKLab, de Björn Ottosson) cabem em 60 linhas.
  *
- * A régua é `app/globals.css`. `rampaDeSemente('#506d48')` reproduz os 11 stops Sage
+ * A régua é `app/globals.css`. `rampaDeSemente('#1c2e3f')` reproduz os 11 stops do accent
  * com Δ ≤ 2/255 por canal — medido, e vigiado por
  * `tests/unit/branding-rampa.test.ts`, que LÊ os stops esperados do próprio CSS.
  */
@@ -203,7 +203,9 @@ export function compor(cor: string, alfa: number, sobre: string): string {
 // ── A rampa ──────────────────────────────────────────────────────────────────
 
 /**
- * Lightness dos 11 stops Sage, medida em OKLab a partir de `app/globals.css`.
+ * Lightness dos 11 stops, medida em OKLab a partir dos stops Sage originais de
+ * `app/globals.css` (v1.0). A FORMA da escada foi mantida quando o accent virou o
+ * petróleo do Jo OS (2026-09-13): `rampaDeSemente('#1c2e3f')` reproduz o CSS atual.
  * É a FORMA da escada — a curva de luminosidade que o design system desenhou à mão.
  */
 export const ESCADA_L = [
