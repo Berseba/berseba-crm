@@ -63,7 +63,7 @@ export function SectionTokens() {
       </div>
 
       <h3>Shadows</h3>
-      <div className="ds-card" style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 16 }}>
+      <div className="ds-card" style={{ display: "grid", gridTemplateColumns: "repeat(6, 1fr)", gap: 16 }}>
         {SHADOWS.map((s) => (
           <div key={s.token} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
             <div

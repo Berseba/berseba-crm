@@ -1,6 +1,6 @@
 # 01 — Foundation Tokens
 
-> **Source of truth:** `app/design/lib/tokens.ts` (`SPACING`, `RADII`, `BORDERS`, `SHADOWS`, `Z_INDEX`, `MOTION`)
+> **Source of truth:** `app/globals.css` (`:root` — `--space-*`, `--radius-*`, `--shadow-*`, `--z-*`, `--ease-*`/`--duration-*`), espelhado em `app/design/lib/tokens.ts` (`SPACING`, `RADII`, `BORDERS`, `SHADOWS`, `Z_INDEX`, `MOTION`). Raios e sombras têm os valores do tema Marca Jo desde 2026-09-13 (`00-overview.md` § Versionamento).
 
 Todos os tokens primitivos do DeskcommCRM. Componentes compõem **só** a partir desta camada — nunca digite valores literais (`16px`, `#000`, `300ms`) em CSS de feature.
 
@@ -27,18 +27,20 @@ Base 4px. Escala não-linear (4 / 8 / 12 / 16 / 20 / 24 / 32 / 40 / 48 / 64 / 80
 
 ## Radius
 
-5 stops + uma pill. Cada stop tem prescrição de uso. Não invente valores intermediários.
+5 stops + uma pill, com passo de 4px recentrado no `--radius` do Jo OS (0,85rem ≈ 14px, o degrau `lg`). Os nomes são os do CSS — **não existe `radius-xs`** no runtime. Cada stop tem prescrição de uso; não invente valores intermediários.
 
 | Token | Valor | Use quando |
 |-------|-------|------------|
 | `radius-none` | 0 | Tabelas de dados, cabeçalhos de coluna, qualquer grid denso onde radius distrai |
-| `radius-xs` | 4px | **Default** para controles: botão, input, badge, dropdown menu item |
-| `radius-sm` | 8px | Cards de lista (item de inbox), kanban card, message bubble |
-| `radius-md` | 12px | Containers maiores (panel, side-card), modais menores |
-| `radius-lg` | 16px | Modal full-size, popover grande, sheet |
+| `radius-sm` | 6px | Item de dropdown menu, textarea, sheet, chips — o menor raio visível |
+| `radius-md` | 10px | **Default** para controles: botão, input, select, popover (é o `--radius` que o shadcn consome) |
+| `radius-lg` | 14px | Card, dialog, panel, side-card, kanban card |
+| `radius-xl` | 18px | Modal full-size, drawer, surfaces premium |
 | `radius-full` | 9999 | Avatar, pill badge, dot indicator, icon-button circular |
 
-Regra: **suba de radius só quando o componente for hierarquicamente "mais alto"**. Card (8) > Modal (16). Button (4) sempre menor que Card que o contém.
+Regra: **suba de radius só quando o componente for hierarquicamente "mais alto"**. Button (10) < Card (14) < Modal (18). Um controle nunca tem raio maior que o container que o contém.
+
+Medido em `components/ui` (2026-09-13): `button`/`input`/`popover`/`select` usam `rounded-md`; `card`/`dialog` usam `rounded-lg`; item de `dropdown-menu`, `sheet` e `textarea` usam `rounded-sm`. Histórico: até o tema Marca Jo os valores eram 4/8/12/16 e os controles usavam `rounded-sm`.
 
 ## Border
 
@@ -53,15 +55,18 @@ Borda 4px ou maior é proibida fora de elementos decorativos isolados (não usad
 
 ## Shadow
 
-Sombras em **color-mix com a cor de texto neutra (`rgba(20, 18, 14, X)`)**, não preto puro. Isso preserva o tom warm da paleta.
+Sombras **tingidas com a cor do texto (`rgba(22, 36, 49, X)` = `#162431`, o `--color-text` claro)**, não preto puro. Isso mantém a sombra no mesmo matiz petróleo da paleta. Os offsets, blurs e alfas são os mesmos da v1.0 — só a tinta mudou (era `rgba(20, 18, 14, X)`, o texto greige).
 
-| Token | Valor | Uso |
-|-------|-------|-----|
+| Token | Valor (light) | Uso |
+|-------|---------------|-----|
 | `shadow-none` | `none` | **Default**. Use whitespace + border. 90% dos componentes ficam aqui. |
-| `shadow-sm` | `0 1px 2px 0 rgba(20,18,14,0.04)` | Hover discreto em cards interativos |
-| `shadow-md` | `0 4px 12px -2px rgba(20,18,14,0.06), 0 2px 4px -1px rgba(20,18,14,0.04)` | Popover, dropdown, toast |
-| `shadow-lg` | `0 12px 32px -6px rgba(20,18,14,0.10), 0 4px 12px -2px rgba(20,18,14,0.06)` | Modal, sheet |
-| `shadow-inset` | `inset 0 1px 0 0 rgba(255,255,255,0.04)` | Highlight superior em superfícies dark (subtileza) |
+| `shadow-xs` | `0 1px 2px 0 rgba(22, 36, 49, 0.04)` | Hover discreto em cards interativos |
+| `shadow-sm` | `0 1px 2px 0 rgba(22, 36, 49, 0.05), 0 1px 1px 0 rgba(22, 36, 49, 0.03)` | Card elevado, input em foco |
+| `shadow-md` | `0 4px 12px -2px rgba(22, 36, 49, 0.06), 0 2px 4px -1px rgba(22, 36, 49, 0.04)` | Popover, dropdown, toast |
+| `shadow-lg` | `0 12px 32px -6px rgba(22, 36, 49, 0.10), 0 4px 12px -2px rgba(22, 36, 49, 0.06)` | Modal, sheet |
+| `shadow-xl` | `0 24px 48px -12px rgba(22, 36, 49, 0.16), 0 8px 16px -4px rgba(22, 36, 49, 0.08)` | Dialog full-size, drawer (raro) |
+
+No tema escuro os mesmos cinco tokens usam `rgba(4, 8, 11, X)` — petróleo quase-preto, não `#000` — com alfas mais altos (0.30 a 0.65), porque sombra sobre fundo escuro precisa de mais peso para existir. Os valores exatos estão no bloco `[data-theme="dark"]` de `app/globals.css`.
 
 **Anti-pattern:** `0 4px 24px rgba(0,0,0,0.2)`. Preto puro com saturação alta = visual genérico.
 
@@ -102,7 +107,7 @@ Definidas em `:root` por `app/design/lib/variant-context.tsx` ou `app/globals.cs
 ```css
 .my-card {
   padding: var(--space-5);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-lg);
   border: var(--border-thin);
   box-shadow: var(--shadow-sm);
   transition: background var(--motion-fast);
@@ -117,7 +122,7 @@ mais — a ponte token → utilitário vive no próprio CSS, logo abaixo dos blo
 `:root` / `[data-theme]`.)
 
 ```tsx
-<div className="p-5 rounded-sm border border-border shadow-sm transition-colors duration-150 ease-[cubic-bezier(0.2,0,0,1)]">
+<div className="p-5 rounded-lg border border-border shadow-sm transition-colors duration-150 ease-[cubic-bezier(0.2,0,0,1)]">
 ```
 
 **Regra:** se você precisa de valor que não existe na escala, primeiro pergunte se a escala é o problema. Adicionar token novo é OK quando justificado em PR; usar valor literal nunca é.

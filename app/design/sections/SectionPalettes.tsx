@@ -39,9 +39,10 @@ export function SectionPalettes() {
     <div className="ds-section">
       <h2 className="ds-display">Paletas</h2>
       <p className="ds-lede">
-        Cinco variantes de accent dentro do território &ldquo;soft-tech calmo&rdquo;: nenhuma satura mais
-        que ~45% (medido em HSL). Cada uma tem 11 stops do accent, 11 stops de neutro greige (não slate/zinc)
-        e versões light/dark <em>definidas separadamente</em>, não invertidas.
+        A paleta do produto (Marca Jo, lida de <code>app/globals.css</code>) e as cinco variantes
+        avaliadas na v1.0, todas no território &ldquo;soft-tech calmo&rdquo;: nenhuma satura mais que
+        ~45% (medido em HSL). Cada uma tem 11 stops do accent, 11 stops de neutro desaturado (não
+        slate/zinc) e versões light/dark <em>definidas separadamente</em>, não invertidas.
       </p>
 
       {Object.values(PALETTES).map((p) => {
@@ -68,9 +69,15 @@ export function SectionPalettes() {
             <div className="ds-card">
               <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
                 <div>
-                  <div className="ds-key" style={{ marginBottom: 6 }}>Accent</div>
+                  <div className="ds-key" style={{ marginBottom: 6 }}>{p.accentDark ? "Accent · Light" : "Accent"}</div>
                   <Swatches scale={p.accent} />
                 </div>
+                {p.accentDark && (
+                  <div>
+                    <div className="ds-key" style={{ marginBottom: 6 }}>Accent · Dark (rampa andada -1 grau)</div>
+                    <Swatches scale={p.accentDark} />
+                  </div>
+                )}
                 <div>
                   <div className="ds-key" style={{ marginBottom: 6 }}>Neutro · Light</div>
                   <Swatches scale={p.neutralLight} />
@@ -113,8 +120,8 @@ export function SectionPalettes() {
                       <div style={{ fontFamily: "var(--ds-font-display)", fontWeight: 600, marginBottom: 4 }}>Pedido #12.443</div>
                       <div style={{ fontSize: 12, color: p.surfaces.dark.textMuted }}>Enviado às 14h32 · cliente respondeu</div>
                       <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-                        <button style={{ background: p.accent[400], color: "#0a0908", border: "none", padding: "6px 12px", borderRadius: 4, fontSize: 12, cursor: "pointer" }}>Responder</button>
-                        <button style={{ background: "transparent", color: p.accent[400], border: `1px solid ${p.surfaces.dark.border}`, padding: "6px 12px", borderRadius: 4, fontSize: 12, cursor: "pointer" }}>Arquivar</button>
+                        <button style={{ background: (p.accentDark ?? p.accent)[400], color: "#0a0908", border: "none", padding: "6px 12px", borderRadius: 4, fontSize: 12, cursor: "pointer" }}>Responder</button>
+                        <button style={{ background: "transparent", color: (p.accentDark ?? p.accent)[400], border: `1px solid ${p.surfaces.dark.border}`, padding: "6px 12px", borderRadius: 4, fontSize: 12, cursor: "pointer" }}>Arquivar</button>
                       </div>
                     </div>
                   </div>

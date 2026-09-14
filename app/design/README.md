@@ -31,22 +31,33 @@ A rota é pública (sem auth) e tem `robots: noindex`.
 
 ## Direção visual
 
-> Soft-tech / calmo — neutros desaturados (greige/warm-gray, **não** slate/zinc),
-> 1 accent forte mas não saturado, motion fluido, whitespace generoso, hierarquia
-> tipográfica > decoração.
+> Soft-tech / calmo — neutros desaturados de um matiz só (**não** slate/zinc de
+> catálogo), 1 accent escuro e pouco saturado, sem gradiente, motion fluido,
+> whitespace generoso, hierarquia tipográfica > decoração.
 
-### Paletas (5)
-`Sage` · `Clay` · `Mist` · `Plum` · `Olive` — cada uma com 11 stops do accent,
-11 stops de neutro greige, 4 estados (success/warning/error/info), versões
-**light e dark definidas separadamente** (não invertidas).
+### Paletas (6)
+`Marca Jo` (o produto) · `Sage` (v1.0 upstream) · `Clay` · `Mist` · `Plum` ·
+`Olive` — cada uma com 11 stops do accent, 11 stops de neutro, 4 estados
+(success/warning/error/info), versões **light e dark definidas separadamente**
+(não invertidas).
 
-### Pareamentos tipográficos (4)
-1. Bricolage Grotesque + Plus Jakarta Sans (default)
-2. Fraunces + Manrope
-3. Atkinson Hyperlegible (mono-stack a11y-first)
-4. Source Serif 4 + IBM Plex Sans
+`Marca Jo` é a única que pinta telas reais: todo hex dela foi lido de
+`app/globals.css`, e o accent é `rampaDeSemente("#1c2e3f")`
+(`lib/branding/rampa.ts`). Ela é também a única com `accentDark` (a rampa
+andada −1 grau, como o CSS faz no `[data-theme="dark"]`). As outras cinco são
+as candidatas avaliadas na v1.0 e ficam aqui para comparação lado a lado.
 
-Inter / Geist / Space Grotesk **proibidos** por saturação em training data.
+### Pareamentos tipográficos (5)
+1. Urbanist + Epilogue (o produto — o mesmo par do Jo OS; default)
+2. Bricolage Grotesque + Plus Jakarta Sans
+3. Fraunces + Manrope
+4. Atkinson Hyperlegible (v1.0 upstream; mono-stack a11y-first)
+5. Source Serif 4 + IBM Plex Sans
+
+O par 1 lê `--font-urbanist` / `--font-epilogue` / `--font-mono` do root layout
+(`app/layout.tsx`), que envolve o showcase; os outros quatro são carregados por
+`lib/fonts.ts`. Inter / Geist / Space Grotesk **proibidos** por saturação em
+training data.
 
 ### Densidades (3)
 - `Aerada` · row 56 / gap 24 (Notion-like)
@@ -55,9 +66,14 @@ Inter / Geist / Space Grotesk **proibidos** por saturação em training data.
 
 ## Arquitetura
 
-- `lib/tokens.ts` — única source-of-truth para cores, fontes, densidade, motion.
-- `lib/fonts.ts` — todas as fontes carregadas via `next/font/google` no boot do
-  `_design/layout.tsx` (escopo isolado). Variáveis CSS expostas globalmente.
+- `lib/tokens.ts` — o que o showcase renderiza: cores, fontes, densidade,
+  motion. Para a paleta `jo`, raios e sombras ele é **espelho** de
+  `app/globals.css` (a fonte de verdade do produto), não a origem — mudou o
+  CSS, atualize aqui. `DEFAULT_PALETTE` / `DEFAULT_TYPO` dizem o que abre sem
+  escolha salva.
+- `lib/fonts.ts` — as fontes das paletas candidatas, via `next/font/google` no
+  boot do `layout.tsx` (escopo isolado). O par do produto não está aqui: vem do
+  root layout.
 - `lib/variant-context.tsx` — Context React + `setProperty` em `:root` para
   injetar tokens. Hidrata de `localStorage`.
 - `showcase.css` — todos os estilos do showcase prefixados `.ds-*`. Não interfere
@@ -67,9 +83,11 @@ Inter / Geist / Space Grotesk **proibidos** por saturação em training data.
 
 ## Decisões notáveis
 
-- **Default**: `Sage + Bricolage/Jakarta + Equilibrada + Light`. Sage projeta
-  calma operacional sem cair em "saúde mental clichê"; Bricolage tem width axis
-  útil para hierarquia em headers de inbox.
+- **Default**: `Marca Jo + Urbanist/Epilogue + Equilibrada + Light` — o que o
+  produto pinta desde o tema Marca Jo (2026-09-13). Até então era
+  `Sage + Bricolage/Jakarta`: Sage projetava calma operacional sem cair em
+  "saúde mental clichê"; Bricolage tinha width axis útil para headers de inbox.
+  Quem já tinha escolha salva em `localStorage` continua vendo a dela.
 - **Iconografia recomendada**: Phosphor (duotone). Justificativa na seção Iconografia.
 - **CSS variables, não Tailwind classes**: o showcase intencionalmente fica fora
   do tema do app para não poluí-lo antes da decisão final. Quando a variante for

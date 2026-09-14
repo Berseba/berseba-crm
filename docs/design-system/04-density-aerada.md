@@ -24,7 +24,7 @@ DeskcommCRM tem como persona principal o **atendente que passa 8h/dia na ferrame
 1. **Fadiga visual cumulativa.** Densidade alta (Linear-like, 32px row) é eficiente em sessões curtas; em sessões longas, gera tensão e erros. Aerada respira.
 2. **Não é banking ou planilha.** Em CRM de e-commerce, precisão extrema (ver 200 linhas em uma tela) importa menos que **conforto e velocidade na linha que você está lendo agora**.
 3. **Hit-target generoso.** 56px de altura permite click confortável com mouse e dedo (em tablet), sem exigir precisão. Reduz miscliques.
-4. **Whitespace como hierarquia.** Aerada dá ar pra hierarquia tipográfica (Atkinson Hyperlegible, weights 400/700) funcionar — não precisa truncar tudo em 1 linha.
+4. **Whitespace como hierarquia.** Aerada dá ar pra hierarquia tipográfica (Urbanist nos títulos, Epilogue no corpo, pesos 400–700) funcionar — não precisa truncar tudo em 1 linha.
 5. **Diferenciação de mercado.** A maioria dos CRMs converge pra densidade equilibrada (~44px) ou compacta. Aerada projeta confiança operacional sem urgência.
 
 Comparativo:

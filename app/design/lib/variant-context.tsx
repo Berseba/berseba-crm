@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { PALETTES, DENSITIES, TYPOS } from "./tokens";
+import { DEFAULT_PALETTE, DEFAULT_TYPO, PALETTES, DENSITIES, TYPOS } from "./tokens";
 import type { PaletteId, TypoId, DensityId, ThemeId } from "./tokens";
 
 type State = {
@@ -23,6 +23,14 @@ const VariantCtx = React.createContext<Ctx | null>(null);
 const STORAGE = "deskcomm.designshowcase.v1";
 
 const TYPO_VAR_MAP: Record<TypoId, { display: string; body: string; mono: string }> = {
+  // As três variáveis vêm do `<html className>` de app/layout.tsx (o root
+  // layout envolve o showcase), não de ./fonts.ts — são as fontes que o
+  // produto já carrega; carregá-las de novo aqui só duplicaria o download.
+  "epilogue-urbanist": {
+    display: "var(--font-urbanist)",
+    body: "var(--font-epilogue)",
+    mono: "var(--font-mono)",
+  },
   "bricolage-jakarta": {
     display: "var(--font-bricolage)",
     body: "var(--font-jakarta)",
@@ -52,13 +60,15 @@ function applyToRoot(s: State) {
   const surfaces = s.theme === "dark" ? p.surfaces.dark : p.surfaces.light;
   const states = s.theme === "dark" ? p.states.dark : p.states.light;
   const neutral = s.theme === "dark" ? p.neutralDark : p.neutralLight;
+  // A rampa que o tema escuro pinta pode ser outra (ver `accentDark` em ./tokens).
+  const accent = s.theme === "dark" ? (p.accentDark ?? p.accent) : p.accent;
 
   root.dataset.theme = s.theme;
   root.dataset.palette = s.palette;
   root.dataset.density = s.density;
 
   // accent stops
-  Object.entries(p.accent).forEach(([k, v]) => {
+  Object.entries(accent).forEach(([k, v]) => {
     root.style.setProperty(`--accent-${k}`, v);
   });
   Object.entries(neutral).forEach(([k, v]) => {
@@ -72,9 +82,9 @@ function applyToRoot(s: State) {
   root.style.setProperty("--ds-text", surfaces.text);
   root.style.setProperty("--ds-text-muted", surfaces.textMuted);
   root.style.setProperty("--ds-border", surfaces.border);
-  root.style.setProperty("--ds-accent", p.accent[s.theme === "dark" ? 400 : 600]);
-  root.style.setProperty("--ds-accent-hover", p.accent[s.theme === "dark" ? 300 : 700]);
-  root.style.setProperty("--ds-accent-soft", p.accent[s.theme === "dark" ? 800 : 100]);
+  root.style.setProperty("--ds-accent", accent[s.theme === "dark" ? 400 : 600]);
+  root.style.setProperty("--ds-accent-hover", accent[s.theme === "dark" ? 300 : 700]);
+  root.style.setProperty("--ds-accent-soft", accent[s.theme === "dark" ? 800 : 100]);
   root.style.setProperty("--ds-accent-fg", s.theme === "dark" ? "#0c0b08" : "#ffffff");
 
   root.style.setProperty("--ds-success", states.success);
@@ -99,8 +109,8 @@ function applyToRoot(s: State) {
 
 export function VariantProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = React.useState<State>({
-    palette: "sage",
-    typo: "bricolage-jakarta",
+    palette: DEFAULT_PALETTE,
+    typo: DEFAULT_TYPO,
     density: "equilibrada",
     theme: "light",
   });
