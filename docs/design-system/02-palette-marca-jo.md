@@ -85,7 +85,7 @@ A paleta tem **dois temas desenhados independentemente**, não invertidos. O esc
 | 50 | `#edf0f3` | `--color-text` — texto primary em dark |
 | 100 | `#dce0e5` | Texto sobre surface escuro (alta hierarquia) |
 | 200 | `#b5bdc5` | Texto importante em dark |
-| 300 | `#9ba6b0` | `--color-text-muted` — texto secundário |
+| 300 | `#9da6ad` | `--color-text-muted` — texto secundário (croma baixada ao nível do stop 200 para separar do accent `#8898a8`, que tem o MESMO matiz) |
 | 400 | `#657381` | `--color-text-subtle` — placeholder, helper |
 | 500 | `#3d4d5c` | Disabled |
 | 600 | `#212e3b` | `--color-border` — borders default (`--color-border-strong` é `#304255`) |
@@ -98,7 +98,7 @@ A paleta tem **dois temas desenhados independentemente**, não invertidos. O esc
 - `bg`: `#0b1219` — página (NÃO `#000` nem `#0a0a0a`; petróleo quase-preto)
 - `surface`: `#101a23` — cards
 - `surfaceElevated`: `#1a242e` — header, dropdown
-- `text`: `#edf0f3` / `textMuted`: `#9ba6b0` / `textSubtle`: `#657381` / `border`: `#212e3b` / `borderStrong`: `#304255`
+- `text`: `#edf0f3` / `textMuted`: `#9da6ad` / `textSubtle`: `#657381` / `border`: `#212e3b` / `borderStrong`: `#304255`
 - `overlay`: `rgba(6, 10, 15, 0.55)`
 
 ## Estados (success / warning / error / info)
@@ -147,7 +147,7 @@ Razões calculadas (luminância relativa WCAG 2.x) sobre os hexes acima. A régu
 | `info` light (`#4a7a93`) sobre `bg` | 4.4:1 | AA UI | Ícone, border; texto só com o `-fg` |
 | `success` / `warning` light sobre `bg` | 3.7:1 / 3.5:1 | AA UI | Ícone, border, badge **com** `-fg` como texto — nunca o hex cru como texto |
 | Dark: `text` (`#edf0f3`) sobre `bg` (`#0b1219`) | 16.5:1 | AAA | Body text |
-| Dark: `text-muted` (`#9ba6b0`) sobre `bg` | 7.6:1 | AAA | Secondary |
+| Dark: `text-muted` (`#9da6ad`) sobre `bg` | 7.6:1 | AAA | Secondary |
 | Dark: `accent-400` (`#8898a8`) sobre `bg` | 6.4:1 | AA+ | Link, primary |
 | Dark: `accent-fg` (`#0b1219`) sobre `accent-400` | 6.4:1 | AA+ | Label do botão primary |
 | Dark: `accent-300` (`#b8c3cd`, hover) sobre `bg` | 10.5:1 | AAA | Hover de link |

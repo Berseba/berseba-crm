@@ -449,7 +449,7 @@ function montarTema(
     indices: {
       accent: accent.indice,
       hover: hover.indice,
-      // `--color-accent-soft` no escuro é `rgba(130,160,119,0.16)` — verde Sage CRU, que
+      // `--color-accent-soft` no escuro é `rgba(136,152,168,0.16)` — petróleo CRU, que
       // sobreviveria intacto a qualquer override da rampa. Sem índice, ele é reancorado
       // no stop do accent (ver `resolverSoft`); é a única forma de ele acompanhar a marca.
       soft: soft.tipo === "grau" ? soft.indice : null,
