@@ -171,9 +171,17 @@ export function TestPanel({ agent, draft, published, readOnly }: Props) {
           ...(contactPhone.trim() ? { phone: contactPhone.trim() } : {}),
         };
       }
+      // O ensaio roda o runtime inteiro (classificador, detector de jailbreak,
+      // a resposta do agente e o checkpoint): medido em 2026-09-13 numa
+      // instalação real, 35–45 s por rodada. O padrão do cliente HTTP (10 s)
+      // abortava no meio, tentava de novo três vezes — três rodadas cobradas
+      // no provedor para um único clique — e a tela terminava em "Erro
+      // inesperado" com o run preso em `running`. A janela aqui acompanha a do
+      // runner interno (~5 min no proxy), com folga para modelo lento.
       const res = await apiClient.post<TestResponse>(
         `/api/v1/ai/agents/${agent.id}/versions/${target.id}/test`,
         body,
+        { timeoutMs: 180_000 },
       );
       setResult(res.data);
       qc.invalidateQueries({ queryKey: agentRunsKey(agent.id) });
