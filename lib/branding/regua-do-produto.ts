@@ -303,7 +303,7 @@ export const REGUA_DO_PRODUTO: Regua = {
       "#edf0f3",
       "#dce0e5",
       "#b5bdc5",
-      "#9ba6b0",
+      "#9da6ad",
       "#657381",
       "#3d4d5c",
       "#212e3b",

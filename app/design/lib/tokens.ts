@@ -88,7 +88,7 @@ export const PALETTES: Record<PaletteId, PaletteDef> = {
       800: "#263340", 900: "#162431", 950: "#0c141d",
     },
     neutralDark: {
-      50: "#edf0f3", 100: "#dce0e5", 200: "#b5bdc5", 300: "#9ba6b0",
+      50: "#edf0f3", 100: "#dce0e5", 200: "#b5bdc5", 300: "#9da6ad",
       400: "#657381", 500: "#3d4d5c", 600: "#212e3b", 700: "#1a242e",
       800: "#101a23", 900: "#0b1219", 950: "#060a0e",
     },
@@ -101,7 +101,7 @@ export const PALETTES: Record<PaletteId, PaletteDef> = {
     // `--color-text` / `--color-text-muted` / `--color-border` dos dois blocos.
     surfaces: {
       light: { bg: "#f5f7f9", surface: "#ffffff", surfaceElevated: "#edf0f3", text: "#162431", textMuted: "#586674", border: "#dae0e7" },
-      dark:  { bg: "#0b1219", surface: "#101a23", surfaceElevated: "#1a242e", text: "#edf0f3", textMuted: "#9ba6b0", border: "#212e3b" },
+      dark:  { bg: "#0b1219", surface: "#101a23", surfaceElevated: "#1a242e", text: "#edf0f3", textMuted: "#9da6ad", border: "#212e3b" },
     },
   },
   sage: {

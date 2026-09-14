@@ -312,8 +312,12 @@ describe("o bloco emitido não pode contradizer o globals.css", () => {
   it("a caminhada de fato ANDA — e a emissão anda junto", () => {
     // Guarda de vacuidade da sabotagem: se nenhuma semente deslocasse, emitir a
     // rampa crua e emiti-la deslocada dariam o mesmo texto, e os testes acima
-    // seriam verdes contra o defeito. 13 combos (semente × tema) andam — o mesmo
-    // número que `branding-contraste.test.ts` mede na derivação.
+    // seriam verdes contra o defeito. 17 combos (semente × tema) andam — o mesmo
+    // número que `branding-contraste.test.ts` mede na derivação, e a recalibração
+    // dos dois anda junta de propósito: eram 13 com a Sage, e as 4 a mais são as
+    // sementes ACROMÁTICAS, que caem na rampa do produto e agora andam -1 no tema
+    // escuro — exatamente o deslocamento que o bloco `[data-theme="dark"]` do
+    // `globals.css` já traz congelado.
     let andaram = 0;
     for (const hex of SEMENTES) {
       const cor = corDe(hex);
@@ -332,35 +336,40 @@ describe("o bloco emitido não pode contradizer o globals.css", () => {
         );
       }
     }
-    expect(andaram).toBe(13);
+    expect(andaram).toBe(17);
   });
 });
 
 describe("controle positivo — o produto sem marca não pode se mexer", () => {
   it("a Sage reproduz, pintada, os números do design system", () => {
-    // `#506d48` é a semente do próprio produto: ela não desloca nada, e os pares
-    // pintados têm que dar o que o `globals.css` sempre deu. Se estes números
-    // mudarem, o conserto vazou para quem não pediu.
+    // `#506d48` era a semente do próprio produto quando este teste foi escrito.
+    // NÃO é mais (hoje é o petróleo `#1c2e3f`), e o que continua verdade — que é o
+    // que este caso existe para guardar — é que ela NÃO DESLOCA NADA: uma semente
+    // que cabe nos pisos sem andar é o controle de que a caminhada não mexe em
+    // quem não pediu.
+    //
+    // As razões abaixo foram recalibradas, e a causa NÃO é o anel: o anel continua
+    // saindo do mesmo stop da mesma rampa Sage. Quem mudou foram as SUPERFÍCIES —
+    // `--color-bg` e `--color-surface-elevated` deixaram de ser o greige e viraram
+    // o petróleo. No claro as superfícies escureceram um tico e as razões caíram
+    // (3,79 → 3,72 e 3,60 → 3,49); no escuro elas escureceram mais e as razões
+    // subiram (6,30 → 6,49 e 5,22 → 5,42). Medidas com a instrumentação deste
+    // arquivo sobre o `globals.css` de hoje.
     const cor = corDe("#506d48");
     expect(cor.derivada?.claro.deslocamento).toBe(0);
     expect(cor.derivada?.escuro.deslocamento).toBe(0);
 
     const p = pintadosDaSemente("#506d48");
-    // Claro: os dois números que `contraste.ts` documenta como medidos à mão.
-    expect(foco(p.claro, "--color-bg")).toBeCloseTo(3.79, 2);
-    expect(foco(p.claro, "--color-surface-elevated")).toBeCloseTo(3.6, 2);
-    // Escuro: 6,30 e 5,22 na rampa DERIVADA da semente; os literais do
-    // `globals.css` (`#82a077`) dão 6,31 e 5,23 — a rampa reproduz a Sage com
-    // Δ ≤ 2/255 por canal, e a diferença de 0,01 é esse arredondamento.
-    expect(foco(p.escuro, "--color-bg")).toBeCloseTo(6.3, 2);
-    expect(foco(p.escuro, "--color-surface-elevated")).toBeCloseTo(5.22, 2);
+    expect(foco(p.claro, "--color-bg")).toBeCloseTo(3.72, 2);
+    expect(foco(p.claro, "--color-surface-elevated")).toBeCloseTo(3.49, 2);
+    expect(foco(p.escuro, "--color-bg")).toBeCloseTo(6.49, 2);
+    expect(foco(p.escuro, "--color-surface-elevated")).toBeCloseTo(5.42, 2);
     // No escuro o anel NÃO fica apertado contra as bases: quem aperta é o
-    // `-soft` COMPOSTO. 4,58 aqui — é este o par que a prova em tela reportou
-    // como "4,58 no escuro", e não `foco × --color-bg` (6,30). Nos literais do
-    // `globals.css` o mesmo par dá 4,59, e `superficiesDoTema` documenta o trio
-    // 4,99 · 4,59 · 4,02.
-    expect(foco(p.escuro, "--color-accent-soft@--color-surface")).toBeCloseTo(4.58, 2);
-    expect(foco(p.escuro, "--color-accent-soft@--color-surface-elevated")).toBeCloseTo(4.03, 2);
+    // `-soft` COMPOSTO — era o par de 4,58 que a prova em tela reportou como
+    // "4,58 no escuro", e não `foco × --color-bg`. Continua sendo o par mais
+    // apertado do tema escuro depois da troca de paleta: 4,76 e 4,19.
+    expect(foco(p.escuro, "--color-accent-soft@--color-surface")).toBeCloseTo(4.76, 2);
+    expect(foco(p.escuro, "--color-accent-soft@--color-surface-elevated")).toBeCloseTo(4.19, 2);
   });
 
   it("sem marca configurada nada é injetado, e a tela fica como está", () => {
@@ -372,15 +381,22 @@ describe("controle positivo — o produto sem marca não pode se mexer", () => {
 
 describe("a navy #0f172a — o defeito que a prova em tela achou", () => {
   it("os quatro números do anel de foco, agora acima do piso", () => {
-    // ANTES (medido no browser, servidor de dev na 3111): claro 10,77 e 10,22;
-    // escuro 2,86 e 2,37 — os dois de baixo abaixo do piso 3,0, porque o anel
-    // pintava `--color-accent-400: #545f77`, o stop CRU. O tema escuro anda -1,
-    // então o anel agora pinta `#828a9d`, o stop 300 da rampa da marca.
+    // ANTES (medido no browser, servidor de dev na 3111, com as superfícies
+    // GREIGE): claro 10,77 e 10,22; escuro 2,86 e 2,37 — os dois de baixo abaixo
+    // do piso 3,0, porque o anel pintava `--color-accent-400: #545f77`, o stop
+    // CRU. O tema escuro anda -1, então o anel pinta `#828a9d`, o stop 300 da
+    // rampa da marca, e os quatro passam.
+    //
+    // Os números foram recalibrados com a troca das superfícies para o petróleo
+    // (a rampa da navy e o deslocamento -1 são os MESMOS; o que mudou é contra o
+    // que se mede): 10,77 → 10,55 e 10,22 → 9,91 no claro, 5,28 → 5,45 e
+    // 4,39 → 4,55 no escuro. O que o caso guarda — os dois do escuro ACIMA do
+    // piso — continua sendo asserido pelo laço logo abaixo, contra `PISOS`.
     const p = pintadosDaSemente("#0f172a");
-    expect(foco(p.claro, "--color-bg")).toBeCloseTo(10.77, 2);
-    expect(foco(p.claro, "--color-surface-elevated")).toBeCloseTo(10.22, 2);
-    expect(foco(p.escuro, "--color-bg")).toBeCloseTo(5.28, 2);
-    expect(foco(p.escuro, "--color-surface-elevated")).toBeCloseTo(4.39, 2);
+    expect(foco(p.claro, "--color-bg")).toBeCloseTo(10.55, 2);
+    expect(foco(p.claro, "--color-surface-elevated")).toBeCloseTo(9.91, 2);
+    expect(foco(p.escuro, "--color-bg")).toBeCloseTo(5.45, 2);
+    expect(foco(p.escuro, "--color-surface-elevated")).toBeCloseTo(4.55, 2);
     for (const superficie of ["--color-bg", "--color-surface-elevated"] as const) {
       expect(foco(p.escuro, superficie), superficie).toBeGreaterThanOrEqual(PISOS.componente);
     }

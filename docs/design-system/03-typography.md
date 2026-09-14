@@ -144,7 +144,7 @@ Outro exemplo: **header de view**.
 - **Line-height mínimo:** 1.4 em prosa, 1.35 em UI compacta.
 - **Tracking:** já calibrado por escala. Não sobrescreva sem motivo (legível ou marketing).
 - **Peso mínimo de leitura:** 400 sempre. Epilogue 300 está carregado, mas é para display grande (≥ 28px) em hero — nunca para texto lido.
-- **Foco visual:** texto em `text-muted` (`#586674` light / `#9ba6b0` dark) só pra UI 14px+; nunca aplicar a prosa longa. `text-subtle` (`#7c8c9c` / `#657381`) é só placeholder e ícone — 3.2:1 sobre o fundo claro não passa como texto.
+- **Foco visual:** texto em `text-muted` (`#586674` light / `#9da6ad` dark) só pra UI 14px+; nunca aplicar a prosa longa. `text-subtle` (`#7c8c9c` / `#657381`) é só placeholder e ícone — 3.2:1 sobre o fundo claro não passa como texto.
 - **Truncate:** sempre com `text-overflow: ellipsis` + `white-space: nowrap` + `min-width: 0`. Tooltip com texto completo no hover (`<Tooltip>` shadcn).
 
 ## Como consumir em código

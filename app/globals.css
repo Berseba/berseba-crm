@@ -342,7 +342,15 @@
 
   /* Text (dark) */
   --color-text: #edf0f3;
-  --color-text-muted: #9ba6b0;
+  /* `#9ba6b0` → `#9da6ad`: MESMA lightness (L 0,7196) e mesmo papel, croma OKLab
+     baixada de 0,0192 para 0,0144 — exatamente a do stop vizinho (`neutral-200`),
+     o "um degrau" da curva de croma desta rampa. Não é gosto: o accent do tema
+     escuro (`#8898a8`, o stop em uso depois da caminhada de -1) tem matiz 248,3° e
+     os neutros petróleo têm 245,5° — é o MESMO matiz, então accent e neutro só se
+     separam por lightness e por croma. Medido com `separacaoDoNeutro`
+     (lib/branding/contraste.ts): 0,0485 antes, abaixo do piso 0,05, e 0,0503
+     depois. Espelhado em `--color-neutral-300` mais abaixo, que é o mesmo pixel. */
+  --color-text-muted: #9da6ad;
   --color-text-subtle: #657381;
 
   /* Borders (dark) */
@@ -379,7 +387,8 @@
   --color-neutral-50:  #edf0f3;
   --color-neutral-100: #dce0e5;
   --color-neutral-200: #b5bdc5;
-  --color-neutral-300: #9ba6b0;
+  /* Mesmo pixel de `--color-text-muted`; a razão da troca está lá em cima. */
+  --color-neutral-300: #9da6ad;
   --color-neutral-400: #657381;
   --color-neutral-500: #3d4d5c;
   --color-neutral-600: #212e3b;
