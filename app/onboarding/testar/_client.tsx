@@ -65,8 +65,11 @@ export function TestarClient({ nome, agenteId, versaoId }: Props) {
       // que a tela fez no primeiro percurso real, enquanto a causa verdadeira
       // era outra: a versão não tinha credencial. Mentir sobre a causa manda a
       // pessoa procurar no lugar errado.
+      // A rota devolve "ok" quando o agente gerou resposta e "blocked" quando nada saiu
+      // (app/api/v1/ai/agents/[id]/versions/[vid]/test/route.ts). Esperar "completed"
+      // fazia um ensaio bem-sucedido aparecer como falha: "o ensaio terminou como \"ok\"".
       const d = json.data;
-      if (d?.status && d.status !== "completed") {
+      if (d?.status && d.status !== "ok" && d.status !== "completed") {
         setDesfecho({
           tipo: "erro",
           mensagem: d.error_message ?? d.error_code ?? `${t("o ensaio terminou como")} "${d.status}"`,
