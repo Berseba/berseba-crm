@@ -69,7 +69,12 @@ services:
     # O teto não impede o pico legítimo; impede que UM serviço leve a máquina
     # inteira. Estourá-lo mata só quem estourou, e o `restart: unless-stopped`
     # o traz de volta — falha isolada em vez de queda geral.
-    mem_limit: 512m
+    #
+    # Berseba (2026-09): 512m derrubava o worker a cada ~10 min — 863 reinícios,
+    # heap de ~252 MiB, numa VPS de 7,9 GB. O heap padrão do Node não conhece o
+    # teto do contêiner, então ele cresce até o OOM killer agir. Teto de 1g e
+    # `--max-old-space-size=768` (abaixo do teto) fazem o Node coletar antes.
+    mem_limit: 1g
     # Imagem publicada — e não mais `build:` sozinho. O motivo é o modo de falha
     # que isso escondia: serviço build-only é PULADO por `docker compose pull`
     # ("Skipped - No image to be pulled") e imune a `up -d` sem `--build`. Ele era
@@ -102,6 +107,7 @@ services:
       # dentro da rede do compose, o WAHA é o serviço 'waha' na porta interna 3000
       WAHA_API_BASE_URL: http://waha:3000
       SUPABASE_DB_ADMIN_URL: ""
+      NODE_OPTIONS: "--max-old-space-size=768"
     networks:
       - internal
     healthcheck:
