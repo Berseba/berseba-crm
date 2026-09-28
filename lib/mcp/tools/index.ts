@@ -8,6 +8,7 @@
  */
 import type { McpToolDefinition } from "../types";
 import { TOOL_CATALOG, VALID_TOOL_IDS } from "./catalog";
+import { crmFindExternalSlots } from "./agenda-externa";
 import { crmSearchContacts, crmGetContact, crmProposeContactField } from "./contacts";
 import {
   crmListConversations,
@@ -121,6 +122,7 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmListAutomationRuns,
   crmListTeamMembers,
   crmListFollowups,
+  crmFindExternalSlots,
   crmListAtRiskLeads,
   crmListAvailableAttendants,
   crmListHumanCases,
