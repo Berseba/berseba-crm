@@ -309,6 +309,19 @@ const PROVA_PROPRIA: readonly Excecao[] = [
       "`describe.each`. Guarda as UTMs de cada clique no botão da landing " +
       "page e o ref curto que as liga à mensagem do WhatsApp.",
   },
+  {
+    tabela: "channel_session_groups",
+    razao:
+      "tests/invariants/grupos-na-inbox.test.ts, dois casos. \"isola por " +
+      "organização (RLS), membro só LÊ e só o service role escreve\": com uma " +
+      "linha REAL semeada na outra organização (e um controle que confere que " +
+      "ela existe), o manager da organização de teste lê 0 linhas dela por JWT " +
+      "e o agent lê a da própria; insert/update/delete de manager, insert de " +
+      "agent e de anon são recusados; o service_role grava e altera. \"nenhuma " +
+      "escrita concedida a anon/authenticated\": o catálogo não tem INSERT, " +
+      "UPDATE, DELETE nem TRUNCATE para anon, authenticated ou PUBLIC. O " +
+      "isolamento é medido num sentido só (org de teste → outra). Migration 0482.",
+  },
 ];
 
 /**

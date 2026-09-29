@@ -1,6 +1,7 @@
 "use client";
 
 import { RoteirosDoContato } from "@/components/contacts/RoteirosDoContato";
+import { AcervoSearch } from "./AcervoSearch";
 import { LeadEnrichment } from "./LeadEnrichment";
 import type { ProspectEnrichment } from "@/lib/prospecting/schema";
 import { useAuth } from "@/hooks/auth/AuthProvider";
@@ -910,6 +911,21 @@ export function CRMSidePanel({ conversation }: Props) {
         ) : (
           <SemLista vazio="Sem atividade." erro={erro} onTentarDeNovo={() => setTentativa((n) => n + 1)} />
         )}
+      </section>
+
+      <Separator />
+
+      {/* Perguntar ao acervo — a MESMA busca que a IA faz, com a origem de cada
+          trecho. Não é busca própria: o componente só pergunta e mostra, e quem
+          decide limiar/top-K é a rota, que chama `buscarConhecimento`. Colocada
+          DEPOIS das seções de trabalho: é consulta, não é o que o atendente abre
+          a conversa para fazer. */}
+      <section>
+        <h3 className="text-xs font-semibold">{t("Acervo")}</h3>
+        <p className="mt-1 mb-2 text-xs text-muted-foreground">
+          {t("Pergunte como a IA perguntaria — a resposta vem com a origem de cada trecho.")}
+        </p>
+        <AcervoSearch />
       </section>
     </aside>
   );

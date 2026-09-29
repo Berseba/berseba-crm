@@ -592,6 +592,13 @@ export const flowSettingsSchema = z.strictObject({
    */
   expira_em_horas: z.number().int().min(1).max(720).optional(),
   /**
+   * O roteiro pode começar de novo para um cliente que JÁ o concluiu (#1130,
+   * decisão do doc 69: cada roteiro escolhe). Ausente = NÃO recomeça: repetir a
+   * palavra-gatilho de um cadastro já feito reabria as mesmas perguntas.
+   * Agendamento, que precisa repetir, liga.
+   */
+  pode_recomecar: z.boolean().optional(),
+  /**
    * SOMENTE INTERNO (#1540): o fluxo inteiro não fala com o cliente. A
    * publicação (`validate-publish.ts`) recusa qualquer nó de ENVIO num fluxo
    * com esta marca — é a garantia de que "só lembrete" não é uma intenção que

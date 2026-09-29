@@ -111,6 +111,9 @@ beforeAll(() => {
       v_sale uuid;
       v_camp    uuid;
       v_sale_item uuid;
+      v_empresa uuid;
+      v_pessoa uuid;
+      v_lote uuid;
     begin
       foreach v_org in array array['${ORG_A}'::uuid, '${ORG_B}'::uuid] loop
         select id into v_sess from public.channel_sessions where organization_id = v_org limit 1;
@@ -526,6 +529,36 @@ beforeAll(() => {
             (organization_id, campaign_id, channel_session_id)
             values (v_org, v_camp, v_sess);
         end if;
+        -- migration 0448 (metade B2B do #1621): empresa, pessoa que decide, o
+        -- vínculo entre as duas e o lote de planilha com a sua linha. A linha
+        -- importada guarda o texto cru da planilha (nome e telefone de gente),
+        -- e a pessoa é gente: vazar qualquer uma entrega ao vizinho a carteira
+        -- de clientes B2B da organização. Select-then-insert: o seed roda uma
+        -- vez por organização e cada passada precisa das próprias ids.
+        select id into v_empresa from public.companies
+          where organization_id = v_org and trade_name = 'RLS invariant empresa';
+        if v_empresa is null then
+          insert into public.companies (organization_id, trade_name)
+            values (v_org, 'RLS invariant empresa') returning id into v_empresa;
+        end if;
+        select id into v_pessoa from public.people
+          where organization_id = v_org and full_name = 'RLS invariant pessoa';
+        if v_pessoa is null then
+          insert into public.people (organization_id, full_name)
+            values (v_org, 'RLS invariant pessoa') returning id into v_pessoa;
+        end if;
+        insert into public.company_people (organization_id, company_id, person_id)
+          values (v_org, v_empresa, v_pessoa)
+          on conflict (company_id, person_id) do nothing;
+        select id into v_lote from public.import_batches
+          where organization_id = v_org and filename = 'rls-invariant.csv';
+        if v_lote is null then
+          insert into public.import_batches (organization_id, filename)
+            values (v_org, 'rls-invariant.csv') returning id into v_lote;
+        end if;
+        insert into public.import_rows (organization_id, batch_id, row_number, raw_data)
+          values (v_org, v_lote, 2, '{"nome": "RLS invariant"}'::jsonb)
+          on conflict (batch_id, row_number) do nothing;
       end loop;
     end
     $seed$;
@@ -683,6 +716,14 @@ export const TABLES = [
   // entrada abre por `?rascunho=`), então o `agent` semeado aqui é controle
   // positivo legítimo e a policy `for all` cobre também o UPDATE do consumo.
   "conversation_drafts",
+  // migration 0448 (metade B2B do #1621) — as cinco tabelas do módulo de
+  // empresas. Leitura org-flat; a escrita por papel (manager cria, agent
+  // edita) é medida em tests/invariants/companies-people-rls.test.ts.
+  "companies",
+  "people",
+  "company_people",
+  "import_batches",
+  "import_rows",
 ] as const;
 
 describe("RLS tenant isolation (fn_user_org_ids pattern)", () => {
