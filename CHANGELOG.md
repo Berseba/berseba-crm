@@ -9281,7 +9281,7 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
 [Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.0.0...HEAD
-[2.0.0]: https://github.com/berseba/berseba-crm/compare/v1.60.0...v2.0.0
+[2.0.0]: https://github.com/berseba/berseba-crm/compare/0440d4fc3ffe036521b7619763cba4311617b8a1...v2.0.0
 [1.60.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.59.0...v1.60.0
 [1.59.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.58.1...v1.59.0
 [1.58.1]: https://github.com/melgarafael/DeskcommCRM/compare/v1.58.0...v1.58.1
