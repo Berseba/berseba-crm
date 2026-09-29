@@ -325,6 +325,31 @@ function ConfiguracoesDoRoteiro({
         />
         <p className="text-xs text-text-muted">{t("Em branco, o roteiro encerra depois de 72 horas sem resposta.")}</p>
       </div>
+      {/* #1130 (@vgamkt): o padrão é NÃO recomeçar para quem já concluiu. */}
+      <div className="space-y-1" data-testid="roteiro-pode-recomecar">
+        <label className="flex cursor-pointer items-center gap-2" htmlFor="roteiro-recomeca">
+          <Switch
+            id="roteiro-recomeca"
+            checked={settings?.pode_recomecar === true}
+            onCheckedChange={(v) => {
+              if (v) {
+                gravar({ pode_recomecar: true });
+                return;
+              }
+              const { pode_recomecar: _anterior, ...resto } = atual;
+              onSettingsChange?.(resto);
+            }}
+          />
+          <span className="text-sm font-medium text-text">
+            {t("Pode recomeçar para quem já concluiu")}
+          </span>
+        </label>
+        <p className="text-xs text-text-muted">
+          {t(
+            "Desligado, o cliente que já respondeu tudo não recebe as mesmas perguntas de novo, mesmo repetindo a palavra-gatilho. Ligue para roteiros que se repetem, como agendamento.",
+          )}
+        </p>
+      </div>
     </div>
   );
 }

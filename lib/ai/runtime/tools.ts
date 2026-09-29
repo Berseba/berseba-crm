@@ -105,6 +105,69 @@ export async function leadIdDoContatoDoTurno(
   return r.routed ? r.leadId : null;
 }
 
+/**
+ * Uma ESCRITA do agente numa conversa só mira um negócio DO CONTATO desta
+ * conversa.
+ *
+ * `leadIdDoContatoDoTurno`, logo acima, conserta a confusão contato × negócio.
+ * Ficavam dois casos de fora, e o segundo é o que faz dano calado:
+ *
+ *  1. o id INVENTADO. Medido em produção (2026-09-15): o assistente ouviu "sim,
+ *     já tenho os textos", chamou `crm_update_lead` com a chave certa e um
+ *     `lead_id` que não existe em lugar nenhum. O escopo recusou, e a
+ *     resposta do cliente se perdeu.
+ *  2. o id REAL de OUTRO cliente, no mesmo funil. O escopo aprova (o funil é
+ *     do agente), a escrita acontece, a auditoria grava sucesso — e o dado de
+ *     um cliente vai para a ficha de outro, sem erro para ninguém investigar.
+ *
+ * A regra segue a de `leadIdDoContatoDoTurno`: o runtime não escolhe por
+ * palpite. Um negócio deste contato segue como veio; fora dele, só se troca
+ * quando o contato tem UM negócio aberto; com nenhum ou vários, recusa com o
+ * motivo, em texto, para o modelo seguir a conversa.
+ */
+export async function negocioDaEscritaDoTurno(
+  supabase: SupabaseClient,
+  organizationId: string,
+  contatoDoTurno: string,
+  leadId: string,
+): Promise<
+  | { ok: true; leadId: string; trocado: boolean }
+  | { ok: false; motivo: "indisponivel" | "sem_negocio" | "negocio_ambiguo"; mensagem: string }
+> {
+  const { data, error } = await supabase
+    .from("crm_leads")
+    .select("id, status")
+    .eq("organization_id", organizationId)
+    .eq("contact_id", contatoDoTurno);
+  if (error) {
+    // Falha de leitura nunca vira "não é seu negócio": o modelo leria como
+    // veredito e pararia de tentar. Mesma disciplina do escopo de funil.
+    return {
+      ok: false,
+      motivo: "indisponivel",
+      mensagem: "não consegui conferir o negócio desta conversa agora; tente de novo.",
+    };
+  }
+  const negocios = (data ?? []) as Array<{ id: string; status: string }>;
+  if (negocios.some((n) => n.id === leadId)) return { ok: true, leadId, trocado: false };
+  const abertos = negocios.filter((n) => n.status === "open");
+  if (abertos.length === 1) return { ok: true, leadId: abertos[0]!.id, trocado: true };
+  if (abertos.length === 0) {
+    return {
+      ok: false,
+      motivo: "sem_negocio",
+      mensagem: "esta pessoa ainda não tem um negócio aberto — siga a conversa normalmente.",
+    };
+  }
+  return {
+    ok: false,
+    motivo: "negocio_ambiguo",
+    mensagem:
+      "esta pessoa tem mais de um negócio aberto e o id enviado não é de nenhum deles — " +
+      "siga a conversa e deixe que alguém da equipe registre.",
+  };
+}
+
 const HANDOFF_TOOL_NAME = "crm_request_human_handoff";
 const DRAFT_PROPOSAL_TOOL_NAME = "crm_draft_proposal";
 const PREPARAR_PROPOSTA_TOOL_NAME = "crm_preparar_proposta";
@@ -170,6 +233,45 @@ function wrapMcpTool(
       try {
         ensureScope(input.auth.scopes, def.requiresScope);
         ensureRole(input.auth.role, def.requiresRole);
+
+        // ── DE QUE NEGÓCIO É ESTA ESCRITA — do contato da conversa ──────────
+        //
+        // Só ESCRITA: `crm_list_followups`, `crm_list_appointments` e irmãs têm
+        // `lead_id` e são leituras; trocar ali faria o modelo perguntar por um
+        // negócio e receber outro. Só com contato do turno: o Operador, a rota
+        // HTTP e as automações seguem com o `lead_id` de quem chamou. Antes do
+        // escopo, para o escopo julgar o negócio que de fato vai ser escrito.
+        if (
+          input.contatoDoTurno &&
+          def.category === "write" &&
+          typeof argsRecord.lead_id === "string"
+        ) {
+          const alvo = await negocioDaEscritaDoTurno(
+            input.supabase,
+            input.ctx.organizationId,
+            input.contatoDoTurno,
+            argsRecord.lead_id,
+          );
+          if (!alvo.ok) {
+            void auditMcpToolCall({
+              ctx: input.ctx,
+              toolName: def.name,
+              args: argsAudit,
+              durationMs: Date.now() - startedAt,
+              success: false,
+              errorMessage: `negocio_da_conversa:${alvo.motivo}`,
+            });
+            return { permitido: false, motivo: alvo.motivo, mensagem: alvo.mensagem };
+          }
+          if (alvo.trocado) {
+            // Não é cosmético: é a única forma de saber que o modelo chuta, e
+            // com que frequência.
+            logger.info("lead_id fora do contato do turno — trocado pelo negócio aberto dele", {
+              tool: def.name,
+            });
+            argsRecord.lead_id = alvo.leadId;
+          }
+        }
 
         // ── ESCOPO DE FUNIL (spec 17 passo 3) ────────────────────────────────
         //

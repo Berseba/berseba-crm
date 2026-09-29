@@ -130,6 +130,177 @@ export type Database = {
         };
         Relationships: [];
       }
+      companies: {
+        Row: {
+          id: string
+          organization_id: string
+          legal_name: string | null
+          trade_name: string | null
+          cnpj: string | null
+          normalized_cnpj: string | null
+          registration_status: string | null
+          legal_nature: string | null
+          company_size: string | null
+          share_capital: number | null
+          opened_at: string | null
+          main_cnae_code: string | null
+          main_cnae_description: string | null
+          secondary_cnaes: Json
+          street: string | null
+          number: string | null
+          complement: string | null
+          district: string | null
+          city: string | null
+          state: string | null
+          zip_code: string | null
+          email: string | null
+          phone: string | null
+          enrichment_status: string
+          enriched_at: string | null
+          enrichment_error: string | null
+          brasilapi_raw: Json | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          legal_name?: string | null
+          trade_name?: string | null
+          cnpj?: string | null
+          normalized_cnpj?: string | null
+          registration_status?: string | null
+          legal_nature?: string | null
+          company_size?: string | null
+          share_capital?: number | null
+          opened_at?: string | null
+          main_cnae_code?: string | null
+          main_cnae_description?: string | null
+          secondary_cnaes?: Json
+          street?: string | null
+          number?: string | null
+          complement?: string | null
+          district?: string | null
+          city?: string | null
+          state?: string | null
+          zip_code?: string | null
+          email?: string | null
+          phone?: string | null
+          enrichment_status?: string
+          enriched_at?: string | null
+          enrichment_error?: string | null
+          brasilapi_raw?: Json | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          legal_name?: string | null
+          trade_name?: string | null
+          cnpj?: string | null
+          normalized_cnpj?: string | null
+          registration_status?: string | null
+          legal_nature?: string | null
+          company_size?: string | null
+          share_capital?: number | null
+          opened_at?: string | null
+          main_cnae_code?: string | null
+          main_cnae_description?: string | null
+          secondary_cnaes?: Json
+          street?: string | null
+          number?: string | null
+          complement?: string | null
+          district?: string | null
+          city?: string | null
+          state?: string | null
+          zip_code?: string | null
+          email?: string | null
+          phone?: string | null
+          enrichment_status?: string
+          enriched_at?: string | null
+          enrichment_error?: string | null
+          brasilapi_raw?: Json | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "companies_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      company_people: {
+        Row: {
+          id: string
+          organization_id: string
+          company_id: string
+          person_id: string
+          job_title: string | null
+          department: string | null
+          is_decision_maker: boolean
+          is_primary: boolean
+          notes: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          company_id: string
+          person_id: string
+          job_title?: string | null
+          department?: string | null
+          is_decision_maker?: boolean
+          is_primary?: boolean
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          company_id?: string
+          person_id?: string
+          job_title?: string | null
+          department?: string | null
+          is_decision_maker?: boolean
+          is_primary?: boolean
+          notes?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "company_people_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_people_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "company_people_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       financial_accounts: {
         Row: {
           created_at: string
@@ -168,6 +339,128 @@ export type Database = {
           {
             foreignKeyName: "financial_accounts_organization_id_fkey"
             columns: ["organization_id"]
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      import_batches: {
+        Row: {
+          id: string
+          organization_id: string
+          kind: string
+          filename: string
+          status: string
+          total_rows: number
+          processed_rows: number
+          successful_rows: number
+          failed_rows: number
+          conflict_rows: number
+          column_mapping: Json
+          created_by: string | null
+          created_at: string
+          completed_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          kind?: string
+          filename: string
+          status?: string
+          total_rows?: number
+          processed_rows?: number
+          successful_rows?: number
+          failed_rows?: number
+          conflict_rows?: number
+          column_mapping?: Json
+          created_by?: string | null
+          created_at?: string
+          completed_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          kind?: string
+          filename?: string
+          status?: string
+          total_rows?: number
+          processed_rows?: number
+          successful_rows?: number
+          failed_rows?: number
+          conflict_rows?: number
+          column_mapping?: Json
+          created_by?: string | null
+          created_at?: string
+          completed_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "import_batches_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      import_rows: {
+        Row: {
+          id: string
+          organization_id: string
+          batch_id: string
+          row_number: number
+          raw_data: Json
+          normalized_data: Json
+          status: string
+          error: string | null
+          company_id: string | null
+          person_id: string | null
+          contact_id: string | null
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          batch_id: string
+          row_number: number
+          raw_data?: Json
+          normalized_data?: Json
+          status?: string
+          error?: string | null
+          company_id?: string | null
+          person_id?: string | null
+          contact_id?: string | null
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          batch_id?: string
+          row_number?: number
+          raw_data?: Json
+          normalized_data?: Json
+          status?: string
+          error?: string | null
+          company_id?: string | null
+          person_id?: string | null
+          contact_id?: string | null
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "import_rows_batch_id_fkey"
+            columns: ["batch_id"]
+            isOneToOne: false
+            referencedRelation: "import_batches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "import_rows_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
@@ -248,6 +541,50 @@ export type Database = {
           {
             foreignKeyName: "account_plans_organization_id_fkey"
             columns: ["organization_id"]
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      people: {
+        Row: {
+          id: string
+          organization_id: string
+          full_name: string
+          normalized_name: string | null
+          email: string | null
+          notes: string | null
+          created_by: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          full_name: string
+          normalized_name?: string | null
+          email?: string | null
+          notes?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          full_name?: string
+          normalized_name?: string | null
+          email?: string | null
+          notes?: string | null
+          created_by?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "people_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
@@ -3664,6 +4001,80 @@ export type Database = {
           },
         ]
       }
+      channel_session_groups: {
+        Row: {
+          channel_session_id: string
+          contact_id: string | null
+          conversation_id: string | null
+          created_at: string
+          enabled: boolean
+          enabled_at: string | null
+          enabled_by_user_id: string | null
+          group_chat_id: string
+          id: string
+          organization_id: string
+          subject: string | null
+          updated_at: string
+        }
+        Insert: {
+          channel_session_id: string
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          enabled?: boolean
+          enabled_at?: string | null
+          enabled_by_user_id?: string | null
+          group_chat_id: string
+          id?: string
+          organization_id: string
+          subject?: string | null
+          updated_at?: string
+        }
+        Update: {
+          channel_session_id?: string
+          contact_id?: string | null
+          conversation_id?: string | null
+          created_at?: string
+          enabled?: boolean
+          enabled_at?: string | null
+          enabled_by_user_id?: string | null
+          group_chat_id?: string
+          id?: string
+          organization_id?: string
+          subject?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "channel_session_groups_channel_session_id_fkey"
+            columns: ["channel_session_id"]
+            isOneToOne: false
+            referencedRelation: "channel_sessions"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "channel_session_groups_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "channel_session_groups_conversation_id_fkey"
+            columns: ["conversation_id"]
+            isOneToOne: false
+            referencedRelation: "conversations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "channel_session_groups_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       channel_session_health: {
         Row: {
           channel_session_id: string
@@ -4009,11 +4420,13 @@ export type Database = {
           is_anonymized: boolean
           is_blocked: boolean
           is_merged_into: string | null
+          kind: string
           last_activity_at: string | null
           locale: string | null
           merged_at: string | null
           name: string | null
           organization_id: string
+          person_id: string | null
           phone_lookup_at: string | null
           phone_number: string | null
           social_identity: string | null
@@ -4050,11 +4463,13 @@ export type Database = {
           is_anonymized?: boolean
           is_blocked?: boolean
           is_merged_into?: string | null
+          kind?: string
           last_activity_at?: string | null
           locale?: string | null
           merged_at?: string | null
           name?: string | null
           organization_id: string
+          person_id?: string | null
           phone_lookup_at?: string | null
           phone_number?: string | null
           social_identity?: string | null
@@ -4091,11 +4506,13 @@ export type Database = {
           is_anonymized?: boolean
           is_blocked?: boolean
           is_merged_into?: string | null
+          kind?: string
           last_activity_at?: string | null
           locale?: string | null
           merged_at?: string | null
           name?: string | null
           organization_id?: string
+          person_id?: string | null
           phone_lookup_at?: string | null
           phone_number?: string | null
           social_identity?: string | null
@@ -4119,6 +4536,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contacts_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "people"
             referencedColumns: ["id"]
           },
         ]
@@ -4179,6 +4603,9 @@ export type Database = {
           created_by_name: string | null
           created_by_user_id: string | null
           id: string
+          media_mime: string | null
+          media_size_bytes: number | null
+          media_storage_path: string | null
           organization_id: string
         }
         Insert: {
@@ -4188,6 +4615,9 @@ export type Database = {
           created_by_name?: string | null
           created_by_user_id?: string | null
           id?: string
+          media_mime?: string | null
+          media_size_bytes?: number | null
+          media_storage_path?: string | null
           organization_id: string
         }
         Update: {
@@ -4197,6 +4627,9 @@ export type Database = {
           created_by_name?: string | null
           created_by_user_id?: string | null
           id?: string
+          media_mime?: string | null
+          media_size_bytes?: number | null
+          media_storage_path?: string | null
           organization_id?: string
         }
         Relationships: [

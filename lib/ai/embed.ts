@@ -9,12 +9,13 @@
  * que sim.
  */
 
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
 import { embed } from "ai";
 
 import {
   DIMENSOES_DO_EMBEDDING,
-  MODELO_DE_EMBEDDING,
+  modeloDeEmbedding,
   resolverChaveDeEmbedding,
   type ChaveDeEmbedding,
   type PontoDeEmbedding,
@@ -66,7 +67,7 @@ export async function embedText(
     throw new SemChaveDeEmbeddingError(opts.organizationId);
   }
 
-  const modelId = String(opts.model ?? MODELO_DE_EMBEDDING);
+  const modelId = String(opts.model ?? modeloDeEmbedding(chave.provedor));
 
   // COM gateway: a string `openai/text-embedding-3-small` é roteada por ele, que
   // lê `AI_GATEWAY_API_KEY` do process.env. Headers vão junto p/ observabilidade
@@ -79,7 +80,11 @@ export async function embedText(
   // recebe o slug completo que a API de embeddings dela exige.
   const resolvido = chave.viaGateway
     ? modelId
-    : createOpenAI({
+    : chave.provedor === "google"
+      ? createGoogleGenerativeAI({ apiKey: chave.apiKey ?? "" }).embeddingModel(
+          modelId.replace(/^google\//, ""),
+        )
+      : createOpenAI({
         apiKey: chave.apiKey ?? "",
         ...(chave.baseUrl ? { baseURL: chave.baseUrl } : {}),
       }).textEmbeddingModel(
@@ -92,6 +97,21 @@ export async function embedText(
     headers: chave.viaGateway
       ? gatewayHeaders({ organizationId: opts.organizationId })
       : undefined,
+    // O Gemini devolve 3072 dimensões por padrão; pedir 1536 é o que deixa a
+    // coluna `vector(1536)` servir aos dois provedores sem migration. A busca é
+    // por cosseno (`<=>`), então o vetor não normalizado dessa dimensão não
+    // distorce a nota. O `taskType` é o par documento×pergunta do próprio Google.
+    ...(chave.provedor === "google"
+      ? {
+          providerOptions: {
+            google: {
+              outputDimensionality: DIMENSOES_DO_EMBEDDING,
+              taskType:
+                opts.ponto === "embedding_consultar" ? "RETRIEVAL_QUERY" : "RETRIEVAL_DOCUMENT",
+            },
+          },
+        }
+      : {}),
   });
 
   // Dimensão asserida a cada chamada: divergir de modelo quebra o recall em

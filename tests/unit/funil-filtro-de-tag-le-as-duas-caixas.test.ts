@@ -146,8 +146,12 @@ describe("os pontos de chamada — a regra só vale se quem a usa a chama", () =
 
   it("o filtro CASA pela mesma regra", () => {
     const fonte = readFileSync("lib/kanban/filters.ts", "utf8");
-    expect(fonte, "applyFilters não filtra com cardTemMarcador(l, f.tag)").toContain(
-      "cardTemMarcador(l, f.tag)",
+    // ⚠️ O nome da chamada mudou com #1274: o filtro passou a casar uma LISTA de
+    // marcadores (com E/OU), então o predicado virou `cardTemMarcador(lead, m)`
+    // dentro de um `every`/`some`. A régua que este arquivo vigia é a mesma — a
+    // única diferença é quantos marcadores a chamada recebe.
+    expect(fonte, "applyFilters não filtra com a régua das três caixas").toContain(
+      "cardTemMarcador(lead, m)",
     );
   });
 });
