@@ -199,7 +199,9 @@ jobs:
           if attention:
               body += "\n## Requer atenção\n\nO fornecedor pediu ação do operador nestas versões — leia antes de atualizar:\n\n" + "\n\n".join(attention) + "\n"
           os.makedirs(".changes", exist_ok=True)
-          open(f".changes/sync-upstream-{target}.md", "w", encoding="utf-8").write(body)
+          # Kebab-case filename: the fragment gate (tests/unit/fragmentos-de-release.test.ts)
+          # rejects dots, so v1.62.0 becomes sync-upstream-v1-62-0.md.
+          open(f".changes/sync-upstream-{target.replace('.', '-')}.md", "w", encoding="utf-8").write(body)
           print(f"fragment: impact={impact}, versions={versions}")
           PY
           git add .changes
@@ -255,8 +257,6 @@ jobs:
           # — and every upstream release changes .github/workflows. The REST endpoint
           # accepts the same token (measured 2026-09-29: GraphQL 403, REST 201).
           title="Sync upstream ${TARGET}$([ "$CONFLICT" = yes ] && echo ' (conflict — finish by hand)')"
-          python3 - "$title" "$branch" > /tmp/pr.json <<'PY'
-          import json, sys
-          print(json.dumps({"title": sys.argv[1], "head": sys.argv[2], "base": "main", "body": open("/tmp/body.md", encoding="utf-8").read()}))
-          PY
+          jq -n --arg title "$title" --arg head "$branch" --rawfile body /tmp/body.md \
+            '{title: $title, head: $head, base: "main", body: $body}' > /tmp/pr.json
           gh api -X POST "repos/${GITHUB_REPOSITORY}/pulls" --input /tmp/pr.json --jq '.html_url'
