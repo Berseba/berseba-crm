@@ -8,6 +8,68 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.0.0] — 2026-09-29
+
+### ⚠️ Requer atenção
+
+- **As imagens e o repositório passam a ser os da Berseba** Instalação que hoje aponta para outro dono de imagem (`ghcr.io/samuelnishioka`
+  ou `ghcr.io/melgarafael`) precisa, uma vez, trocar no `.env` as variáveis
+  `APP_IMAGE`, `WORKER_IMAGE` e `SCHEDULER_IMAGE` para `ghcr.io/berseba/...` e
+  o remoto `origin` do clone para `https://github.com/berseba/berseba-crm.git`,
+  antes de rodar o `update.sh`. Faça com backup e numa janela de baixo uso.
+
+### Adicionado
+
+- **Dois freios clínicos determinísticos para organizações de saúde** Organizações que marcarem `nicho: saude` nas configurações passam a ter dois
+  freios automáticos, ligados por padrão para elas e sem efeito para as demais:
+
+  1. **Urgência médica → humano na hora.** Se o contato relatar algo que parece
+     uma emergência (dor no peito, falta de ar, desmaio, sangramento que não
+     para, sinais de AVC, convulsão, fratura exposta, ideação suicida, queda com
+     trauma de cabeça, dor de cabeça súbita e muito forte, ou febre alta em
+     bebê), o atendimento automático passa a hora para uma pessoa da equipe e o
+     contato recebe uma orientação fixa: ligar 192 (SAMU) ou procurar o
+     pronto-socorro mais próximo. Se a organização estiver em modo assistido,
+     essa orientação vira um alerta na Central para revisão humana, em vez de
+     sair sozinha.
+  2. **Nunca diagnóstico, nunca prescrição.** A resposta do assistente é
+     bloqueada e reescrita antes de sair se afirmar um diagnóstico, prescrever
+     medicamento ou prometer cura — isso continua sendo trabalho do
+     profissional, feito presencialmente.
+
+  Nenhuma organização que já usa o sistema muda de comportamento: os dois freios
+  só entram em ação quando o nicho da organização está marcado como saúde.
+
+- **Nicho da organização — a tela que liga os freios clínicos** Agora é possível declarar o nicho da organização em Configurações › Segurança
+  (só administradores): Saúde, E-commerce, Imobiliária, Infoproduto, Serviços,
+  ou Nenhum.
+
+  Escolher **Saúde** liga os dois freios clínicos que já existiam no motor mas
+  não tinham como ser ligados: urgência médica relatada pelo contato vai direto
+  para uma pessoa, com orientação de emergência; e a IA nunca afirma
+  diagnóstico, receita remédio ou promete cura. Os outros nichos ainda não
+  mudam nenhum comportamento — a tela já avisa que são reservados.
+
+  Quem não mexer na tela nota zero diferença: o padrão continua "nenhum nicho
+  escolhido", exatamente como toda organização já estava antes desta mudança.
+
+### Alterado
+
+- **As imagens e o repositório passam a ser os da Berseba** O kit de instalação, o `docker-compose.prod.yml` e o `.env` de exemplo passam
+  a apontar para `ghcr.io/berseba/*` e para `github.com/berseba/berseba-crm`,
+  em vez do fornecedor (`melgarafael/DeskcommCRM`). Os nomes das imagens
+  (`deskcommcrm`, `deskcomm-worker`, `deskcomm-scheduler`,
+  `deskcomm-voice-agent`) não mudam: só o dono muda.
+
+### Corrigido
+
+- **O worker deixa de reiniciar a cada dez minutos por falta de memória** O serviço `worker` (o runtime dos agentes de IA) tinha teto de 512 MB e um
+  heap padrão do Node maior do que isso: ele crescia, estourava o teto e era
+  morto e reiniciado a cada ~10 minutos (863 reinícios medidos numa VPS de
+  7,9 GB, com heap de ~252 MB). O teto passa a 1 GB e o heap do Node fica
+  limitado a 768 MB, abaixo do teto, para o próprio Node coletar lixo antes de
+  o contêiner ser morto. Nada a fazer: o `update.sh` aplica o compose novo.
+
 ## [1.60.0] — 2026-09-28
 
 ### Adicionado
@@ -9218,7 +9280,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/melgarafael/DeskcommCRM/compare/v1.60.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/berseba/berseba-crm/compare/0440d4fc3ffe036521b7619763cba4311617b8a1...v2.0.0
 [1.60.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.59.0...v1.60.0
 [1.59.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.58.1...v1.59.0
 [1.58.1]: https://github.com/melgarafael/DeskcommCRM/compare/v1.58.0...v1.58.1
