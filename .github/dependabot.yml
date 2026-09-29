@@ -9,6 +9,13 @@ updates:
       minor-and-patch:
         update-types: ["minor", "patch"]
     ignore:
+      # Berseba (at the top on purpose: upstream appends its own entries below).
+      # jsdom 30.1+ breaks Vitest's jsdom environment (vitest-dev/vitest#11336,
+      # upstream DeskcommCRM#1745): Blob moved to a private field and every
+      # URL.createObjectURL/FormData test dies. package.json pins 30.0.1 without
+      # a caret, but Dependabot does not read comments and kept proposing 30.1.1
+      # (PR #22). Drop this entry once vitest ships the fix.
+      - dependency-name: "jsdom"
       # `@types/node` acompanha o RUNTIME, não o "latest" do npm. O runtime é
       # Node 22 em toda parte — `engines`, `.nvmrc`, os três Dockerfiles e os
       # workflows —, e tipagem de um major acima descreve API que não existe em
