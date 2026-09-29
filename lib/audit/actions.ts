@@ -29,6 +29,18 @@
  * `tests/unit/audit-lista-do-painel-e-derivada.test.tsx` reprova quem tentar.
  */
 export const AUDIT_ACTIONS = [
+  // ── Berseba ──────────────────────────────────────────────────────────────
+  // OUR entry, at the TOP on purpose: upstream appends its own at the END of
+  // this list on every release, and that is exactly where the v1.61.0 merge
+  // conflicted. At the top, no sync touches this line.
+  //
+  // Organization niche (`app/api/v1/settings/nicho/route.ts`) — turns the two
+  // deterministic clinical brakes on/off (`lerNichoDaOrg`/`nichoEhSaude`,
+  // `lib/agent-engine/guardrails/camadas-da-org.ts`). Audited because it changes
+  // what the AI may state on the organization's WhatsApp (diagnosis,
+  // prescription, medical emergency) with no migration involved.
+  "org.nicho_changed",
+  // ── end of the Berseba block ─────────────────────────────────────────────
   "ad_tracking_link.saved",
   "auth.login_success",
   "auth.login_failed",
@@ -966,13 +978,6 @@ export const AUDIT_ACTIONS = [
   // "Enviar vendas pelo canal da conversa" (doc 76, PR #1819): ligar faz o
   // valor da venda e o telefone do cliente saírem para o provedor do canal.
   "conversions.report_via_channel_updated",
-
-  // Nicho da organização (`app/api/v1/settings/nicho/route.ts`) — liga/desliga
-  // os dois freios clínicos determinísticos (`lerNichoDaOrg`/`nichoEhSaude`,
-  // `lib/agent-engine/guardrails/camadas-da-org.ts`). Auditável porque muda o
-  // que a IA pode afirmar no WhatsApp da organização (diagnóstico, prescrição,
-  // urgência médica) sem passar por migration nenhuma.
-  "org.nicho_changed",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */
