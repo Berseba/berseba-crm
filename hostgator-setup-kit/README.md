@@ -138,6 +138,15 @@ proxy errado deixa o site no ar sem responder, o instalador mostra o que encontr
 confirmação. Em `bash install.sh --yes` não há a quem perguntar: ele para e pede que você
 declare `REVERSE_PROXY=traefik` no `.env` — aí a escolha é sua e ele segue sem perguntar.
 
+**A página "estamos atualizando" depende de como o proxy acha o CRM.** Enquanto a
+atualização mexe no banco (de 1 a 3 minutos), o CRM fica parado e um aviso assume o lugar
+dele. O aviso é encontrado de dois jeitos: pelo Traefik, que lê os rótulos do contêiner, ou
+pelo Caddy do próprio kit, que procura o apelido `app` na rede interna. Um proxy seu que
+aponta para o **nome do contêiner** (por exemplo `reverse_proxy deskcommcrm-app-1:3000`)
+não acha o aviso: nesses minutos o site responde **502**, e volta sozinho quando a
+atualização termina. Nada quebra, mas quem abrir o CRM vê um erro em vez do aviso. Para
+ver o aviso, roteie pelo Traefik (rótulos) em vez do nome do contêiner.
+
 ## Scripts do kit
 
 | Script | Função |
