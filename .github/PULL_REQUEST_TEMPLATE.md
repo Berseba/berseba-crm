@@ -1,3 +1,9 @@
+<!-- Berseba — three questions before asking for review (the rest of this template is upstream's). -->
+
+- [ ] **Database migration?** Then the triple came together: `supabase/migrations/`, idempotent appendix in `supabase/baseline.sql`, line in `supabase/migrations/MANIFEST.md`. The VPS only applies the baseline.
+- [ ] **Touches a file listed in `BERSEBA.md`?** That is conflict surface with upstream: upstream wins, ours goes alongside.
+- [ ] **Changes something the VPS operator notices?** Then it ships a `.changes/` fragment (`nada_mudou` / `capacidade_nova` / `exige_acao`); `exige_acao` carries the **Requer atenção** block.
+
 <!--
   Se você está abrindo daqui de um FORK: você está no lugar certo.
   Três pessoas já fecharam PRs neste repositório dizendo "abri no repositório

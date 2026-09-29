@@ -64,6 +64,13 @@ const DIR = join(process.cwd(), ".github/workflows");
  * que desliga um job de entrega fica visível em code review.
  */
 const GATILHO_ESPERADO: Record<string, { condicao: string | null; efeito: string }> = {
+  // --- Berseba (at the top on purpose: upstream appends its own below) ---
+  "sync-upstream.yml::sync": {
+    condicao: null,
+    efeito:
+      "This job brings the upstream release into our main every Monday, as a PR. " +
+      "Switching it off makes the fork silently stop tracking upstream — no PR, no warning.",
+  },
   // --- a cadeia que leva o conserto até a VPS ---------------------------------
   "release.yml::abrir-pr-de-release": {
     condicao: "github.event_name == 'workflow_dispatch'",
