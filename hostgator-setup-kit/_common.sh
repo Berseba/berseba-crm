@@ -563,6 +563,11 @@ veredito_da_imagem_do_app() {  # veredito_da_imagem_do_app <versão alvo> <vers�
 }
 
 pausar_o_que_fala_com_o_banco() {
+  # Nobody else may bring containers back up while the schema changes. The
+  # update.sh body already took the lock at its top; this call covers the
+  # update that brings the fix, which still runs the previous body.
+  hold_update_lock \
+    || die "$(t "Outra atualização segue rodando neste servidor. Não mexi no banco. Rode de novo quando ela terminar.")"
   PARADOS="$(supabase_local_containers)"
   c_ylw "$(t "Pausando o sistema para mexer no banco com segurança.")"
   dc stop app worker scheduler >/dev/null 2>&1 || true
@@ -1656,6 +1661,10 @@ setup_event_log_drain_cron() {
   if [ "$(basename "$0")" = update.sh ] && [ -z "${DESKCOMM_AGENT_REPORT:-}" ]; then
     trocar_segredo_do_cron_vazado || true
   fi
+  # The secret that goes into .env.cron-drain is the one in .env NOW. The shell
+  # loaded it at the start of the run; a swap made meanwhile by another process
+  # (agent.sh) is only on disk. See `hold_update_lock`.
+  reload_cron_secrets_from_env
   command -v crontab >/dev/null 2>&1 || { c_ylw "$(t "⚠ 'crontab' não encontrado — instale o pacote 'cron' e rode de novo pra ativar as automações.")"; return 0; }
 
   local secret="${INTERNAL_CRON_SECRET:-}"
@@ -1799,8 +1808,12 @@ trocar_segredo_do_cron_vazado() {
   # Mesmo cadeado do agent.sh: nunca trocar com uma atualização pelo botão em
   # andamento (quem a dirige ainda fala com a senha velha), nem duas vezes ao
   # mesmo tempo (update.sh no terminal e agent.sh no cron).
+  # When this process already holds it (`hold_update_lock`, update.sh in a
+  # terminal), a second flock on a new fd would be refused by our own lock.
   local tem_cadeado=""
-  if command -v flock >/dev/null 2>&1; then
+  if [ -n "${DESKCOMM_UPDATE_LOCK_HELD:-}" ]; then
+    :
+  elif command -v flock >/dev/null 2>&1; then
     exec 8>"${dir}/.update.lock"
     flock -n 8 || { exec 8>&-; return 0; }
     tem_cadeado=1
@@ -1839,6 +1852,90 @@ trocar_segredo_do_cron_vazado() {
   c_ylw "    sudo truncate -s 0 /var/log/syslog && sudo rm -f /var/log/syslog.*"
   c_ylw "    sudo journalctl --rotate && sudo journalctl --vacuum-time=1s"
   return 0
+}
+
+# ── One update at a time, whoever started it ─────────────────────────────────
+# `.update.lock` used to be taken only by agent.sh (the screen button) and by
+# the secret swap above. An update.sh started by hand in a terminal ran without
+# it, so nothing stopped the agent.sh cron from running in the middle of it.
+#
+# Measured on a production VPS on 2026-09-29 (v1.20.3 -> v2.0.0, by hand):
+#   02:34:56  update.sh paused app/worker/scheduler and started the baseline
+#   02:35:00  agent.sh cron fired; `trocar_segredo_do_cron_vazado` took the
+#             lock (free), wrote a new secret to .env and ran `dc up -d` —
+#             bringing the OLD containers back up in the middle of the schema
+#             change — and wrote .env.cron-drain with the new secret
+#   02:36:52  update.sh brought up the new images; its step 7 wrote
+#             .env.cron-drain again with the secret it had loaded at the
+#             start (the OLD one). The host drain got 403 until someone reran
+#             `setup_event_log_drain_cron` by hand.
+#
+# Two fixes, each enough on its own for that timeline:
+#   1. update.sh holds this lock for its whole run (`hold_update_lock`), so the
+#      swap in agent.sh finds it taken and waits for the next round;
+#   2. the cron header is written from the secret in .env on disk at that
+#      moment (`reload_cron_secrets_from_env`), never from what the shell
+#      loaded minutes earlier.
+UPDATE_LOCK_NAME=".update.lock"
+
+# env_file_value <file> <key> — the value of <key> as `load_env` reads it,
+# without touching this shell's variables.
+env_file_value() {
+  ( unset "$2"; load_env "$1" >/dev/null 2>&1 || true; printf '%s' "${!2:-}" )
+}
+
+# The .env on disk wins over this shell for the two cron secrets. A key that is
+# absent from the file keeps the shell value (it did not come from there).
+reload_cron_secrets_from_env() {
+  local envfile="${PROJECT_DIR:-$PWD}/.env" key
+  [ -r "$envfile" ] || return 0
+  for key in INTERNAL_CRON_SECRET INTERNAL_SECRET; do
+    grep -qE "^${key}=" "$envfile" 2>/dev/null || continue
+    printf -v "$key" '%s' "$(env_file_value "$envfile" "$key")"
+    export "${key?}"
+  done
+}
+
+# 0 when some other process holds the update lock right now. Probes and lets
+# go at once (subshell), so it never blocks and never keeps the lock.
+update_lock_busy() {
+  [ -n "${DESKCOMM_UPDATE_LOCK_HELD:-}" ] && return 1
+  command -v flock >/dev/null 2>&1 || return 1
+  local lock="${PROJECT_DIR:-$PWD}/${UPDATE_LOCK_NAME}"
+  if ( exec 6>"$lock" && flock -n 6 ) 2>/dev/null; then return 1; fi
+  return 0
+}
+
+# hold_update_lock [seconds to wait] — takes the update lock for the rest of
+# this process (fd 7). Idempotent. Called at the top of update.sh AND by
+# `pausar_o_que_fala_com_o_banco`: the update that brings this fix runs the
+# PREVIOUS update.sh body (only functions are re-read after the checkout), and
+# the pause is the first new function it calls — right where the window that
+# broke production opens.
+hold_update_lock() {
+  [ -n "${DESKCOMM_UPDATE_LOCK_HELD:-}" ] && return 0
+  # Driven by the screen button: agent.sh already holds the lock (every
+  # published agent.sh takes it before starting update.sh). flock(2) treats a
+  # second open() of the same file as an independent lock, even in a child of
+  # the holder — taking it here would wait on our own parent forever.
+  if [ -n "${DESKCOMM_AGENT_REPORT:-}" ]; then
+    export DESKCOMM_UPDATE_LOCK_HELD=1
+    return 0
+  fi
+  [ -n "${PROJECT_DIR:-}" ] || return 0
+  command -v flock >/dev/null 2>&1 || return 0
+  local wait_s="${1:-${UPDATE_LOCK_WAIT_SECONDS:-1800}}"
+  exec 7>"${PROJECT_DIR}/${UPDATE_LOCK_NAME}" || return 1
+  if ! flock -n 7; then
+    c_ylw "$(t "Outra atualização (ou a troca automática da senha das rotinas) está rodando neste servidor. Espero ela terminar — até {1} min." "$((wait_s / 60))")"
+    if ! flock -w "$wait_s" 7; then
+      exec 7>&-
+      return 1
+    fi
+  fi
+  export DESKCOMM_UPDATE_LOCK_HELD=1
+  # Whoever held the lock may have rewritten .env (the secret swap does).
+  reload_cron_secrets_from_env
 }
 
 # Ativa (idempotente) o cron do agente de atualização: a cada 5 minutos ele
