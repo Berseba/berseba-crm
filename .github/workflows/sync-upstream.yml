@@ -249,6 +249,14 @@ jobs:
             echo "- [ ] Touches a file listed in \`BERSEBA.md\`? Check the customization survived"
             echo "- [ ] Does the \`.changes/\` fragment say \`exige_acao\`? Then read its *Requer atenção* block before updating the VPS"
           } > /tmp/body.md
-          gh pr create --base main --head "$branch" \
-            --title "Sync upstream ${TARGET}$([ "$CONFLICT" = yes ] && echo ' (conflict — finish by hand)')" \
-            --body-file /tmp/body.md
+          # REST, not `gh pr create`: that command goes through the GraphQL
+          # `createPullRequest` mutation, which answers "Resource not accessible by
+          # integration" to an App token when the head branch changes workflow files
+          # — and every upstream release changes .github/workflows. The REST endpoint
+          # accepts the same token (measured 2026-09-29: GraphQL 403, REST 201).
+          title="Sync upstream ${TARGET}$([ "$CONFLICT" = yes ] && echo ' (conflict — finish by hand)')"
+          python3 - "$title" "$branch" > /tmp/pr.json <<'PY'
+          import json, sys
+          print(json.dumps({"title": sys.argv[1], "head": sys.argv[2], "base": "main", "body": open("/tmp/body.md", encoding="utf-8").read()}))
+          PY
+          gh api -X POST "repos/${GITHUB_REPOSITORY}/pulls" --input /tmp/pr.json --jq '.html_url'
