@@ -1,0 +1,254 @@
+name: sync-upstream
+
+# Weekly sync with the upstream product (melgarafael/DeskcommCRM) — Berseba.
+#
+# Every Monday morning (or on "Run workflow"):
+#   1. finds the LATEST upstream release and which release is already in our main;
+#   2. merges it into a `sync/upstream-vX.Y.Z` branch;
+#   3. writes the `.changes/` fragment our own release will consume
+#      (`exige_acao` if any upstream release carried "Requer atenção";
+#      `capacidade_nova` otherwise);
+#   4. opens the PR against main. CI measures it like any other PR; a human merges.
+#
+# Conflicts: CHANGELOG.md is resolved automatically (OURS wins — the numbering
+# is ours, and the upstream notes are linked from the fragment). Any other
+# conflicting file aborts the merge and opens the PR ANYWAY, carrying only the
+# fragment, with the file list and the commands to finish the merge by hand.
+#
+# Upstream tags are NEVER imported (`--no-tags`): they would collide with our
+# own `v*`. Ours are born only in release.yml.
+#
+# Everything that writes (branch, commit, PR) uses the release App token, never
+# GITHUB_TOKEN: a PR opened by GITHUB_TOKEN does not trigger CI (GitHub rule),
+# and a sync PR without CI is a blind merge of dozens of commits.
+#
+# EVERY `gh` call here uses the App token, reads included: the `permissions:`
+# block zeroes `pull-requests`, so `gh pr list` with GITHUB_TOKEN answers 403
+# (release.yml declares `pull-requests: read` for the same reason).
+
+on:
+  schedule:
+    - cron: "0 12 * * 1" # Monday, 09:00 America/Sao_Paulo
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+# One sync at a time: a "Run workflow" near the cron (or two clicks) would race
+# to push the same `sync/upstream-vX.Y.Z` branch — the "PR already open" check
+# is a read before the push, not a lock. No cancel: the first run finishes, the
+# second waits, then sees the open PR and exits.
+concurrency:
+  group: sync-upstream
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: melgarafael/DeskcommCRM
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: token
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ steps.token.outputs.token }}
+
+      - name: Find the target release and the one already synced
+        id: target
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          git remote add upstream "https://github.com/${UPSTREAM}.git"
+          git config remote.upstream.tagOpt --no-tags
+          git fetch --no-tags --quiet upstream main
+
+          # Resolves an upstream tag to its commit (annotated tag → deref).
+          tag_sha() {
+            local obj kind
+            obj=$(gh api "repos/${UPSTREAM}/git/ref/tags/$1" --jq '.object.sha')
+            kind=$(gh api "repos/${UPSTREAM}/git/ref/tags/$1" --jq '.object.type')
+            if [ "$kind" = tag ]; then gh api "repos/${UPSTREAM}/git/tags/${obj}" --jq '.object.sha'; else printf '%s\n' "$obj"; fi
+          }
+
+          target=""; target_sha=""; base=""
+          while read -r tag; do
+            [ -n "$tag" ] || continue
+            sha=$(tag_sha "$tag")
+            git cat-file -e "$sha" 2>/dev/null || git fetch --no-tags --quiet upstream "$sha" || continue
+            if [ -z "$target" ]; then target="$tag"; target_sha="$sha"; fi
+            if git merge-base --is-ancestor "$sha" HEAD; then base="$tag"; break; fi
+          done < <(gh api "repos/${UPSTREAM}/releases?per_page=40" --jq '.[] | select(.draft or .prerelease | not) | .tag_name')
+
+          [ -n "$target" ] || { echo "::error::no release found in ${UPSTREAM}"; exit 1; }
+          [ -n "$base" ] || { echo "::error::none of the last 40 upstream releases is in our main — sync by hand once"; exit 1; }
+          echo "target=${target} (${target_sha:0:10}) · base already in main=${base}"
+          {
+            echo "target=${target}"; echo "target_sha=${target_sha}"; echo "base=${base}"
+            if [ "$target" = "$base" ]; then echo "skip=yes"; else echo "skip=no"; fi
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Is a sync PR for this release already open?
+        if: steps.target.outputs.skip == 'no'
+        id: existing
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          set -euo pipefail
+          n=$(gh pr list --state open --head "sync/upstream-${{ steps.target.outputs.target }}" --json number --jq 'length')
+          echo "open=$([ "$n" -gt 0 ] && echo yes || echo no)" >> "$GITHUB_OUTPUT"
+          [ "$n" -gt 0 ] && echo "sync PR for ${{ steps.target.outputs.target }} is already open — nothing to do" || true
+
+      - name: Merge the upstream release
+        if: steps.target.outputs.skip == 'no' && steps.existing.outputs.open == 'no'
+        id: merge
+        env:
+          TARGET: ${{ steps.target.outputs.target }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+        run: |
+          set -euo pipefail
+          git config user.name  'deskcomm-release[bot]'
+          git config user.email '${{ steps.token.outputs.app-slug }}[bot]@users.noreply.github.com'
+          git checkout -b "sync/upstream-${TARGET}"
+
+          set +e
+          git merge --no-ff --no-commit "$TARGET_SHA" >/tmp/merge.log 2>&1
+          set -e
+          conflicts=$(git diff --name-only --diff-filter=U)
+
+          # CHANGELOG.md: ours wins. The numbering is ours (2.x); the upstream
+          # sections are linked from the fragment — see the header.
+          if printf '%s\n' "$conflicts" | grep -qx 'CHANGELOG.md'; then
+            git checkout --ours CHANGELOG.md && git add CHANGELOG.md
+            conflicts=$(printf '%s\n' "$conflicts" | grep -vx 'CHANGELOG.md' || true)
+          fi
+
+          if [ -n "$conflicts" ]; then
+            printf '%s\n' "$conflicts" > /tmp/conflicts.txt
+            git merge --abort
+            echo "conflict=yes" >> "$GITHUB_OUTPUT"
+            echo "::warning::conflict in: $(paste -sd' ' /tmp/conflicts.txt) — the PR goes out with the fragment and instructions only"
+          else
+            git commit --quiet -m "sync: upstream ${TARGET}"
+            echo "conflict=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Release fragment in .changes/
+        if: steps.target.outputs.skip == 'no' && steps.existing.outputs.open == 'no'
+        env:
+          TARGET: ${{ steps.target.outputs.target }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+          BASE: ${{ steps.target.outputs.base }}
+        run: |
+          set -euo pipefail
+          git show "${TARGET_SHA}:CHANGELOG.md" > /tmp/upstream-changelog.md
+          # The fragment BODY is in Portuguese on purpose: it lands in the
+          # CHANGELOG and on the operator's changelog screen (customer-facing).
+          python3 - <<'PY'
+          import os, re
+          target, base, upstream = os.environ["TARGET"], os.environ["BASE"], os.environ["UPSTREAM"]
+          key = lambda v: tuple(int(x) for x in v.lstrip("v").split("."))
+          text = open("/tmp/upstream-changelog.md", encoding="utf-8").read()
+          parts = re.split(r"^## \[(\d+\.\d+\.\d+)\][^\n]*\n", text, flags=re.M)
+          versions, attention = [], []
+          for i in range(1, len(parts), 2):
+              v, body = parts[i], parts[i + 1]
+              if not (key(base) < key(v) <= key(target)):
+                  continue
+              versions.append(v)
+              m = re.search(r"^### .*Requer atenção[^\n]*\n(.*?)(?=^## |^### |\Z)", body, flags=re.M | re.S)
+              if m and m.group(1).strip():
+                  attention.append(f"**v{v}**\n\n{m.group(1).strip()}")
+          if not versions:
+              # The upstream CHANGELOG format changed (heading, suffix, spacing): with no
+              # section read, this script would decide the impact blind. Fail LOUD.
+              raise SystemExit(
+                  f"no `## [X.Y.Z]` section between {base} and {target} in the upstream CHANGELOG — "
+                  "the format changed; fix the parser in sync-upstream.yml before syncing"
+              )
+          for i in range(1, len(parts), 2):
+              v, body = parts[i], parts[i + 1]
+              # An attention heading the structured regex did not recognise (renamed or
+              # different level) is still operator action. Only counts in a HEADING or in
+              # BOLD, and never preceded by "não" ("não requer atenção especial" is the
+              # false positive a plain substring match would let through).
+              loose = re.search(r"^(?:#+ |\*\*)[^\n]*(?<!não )requer atenção", body, flags=re.M | re.I)
+              if v in versions and loose and not any(f"**v{v}**" in a for a in attention):
+                  attention.append(f"**v{v}** — o fornecedor pediu atenção nesta versão num formato que este script não recorta; leia as notas: https://github.com/{upstream}/releases/tag/v{v}")
+          impact = "exige_acao" if attention else "capacidade_nova"
+          links = "\n".join(f"- [v{v}](https://github.com/{upstream}/releases/tag/v{v})" for v in versions)
+          body = (
+              "---\n"
+              f"impacto: {impact}\n"
+              "secao: alterado\n"
+              f"titulo: Sincronização com o DeskcommCRM {target} (vinha da {base})\n"
+              "---\n\n"
+              f"O produto passa a incluir tudo o que o fornecedor lançou entre a {base} e a {target}. "
+              "As notas de cada versão estão nas releases dele:\n\n"
+              f"{links}\n"
+          )
+          if attention:
+              body += "\n## Requer atenção\n\nO fornecedor pediu ação do operador nestas versões — leia antes de atualizar:\n\n" + "\n\n".join(attention) + "\n"
+          os.makedirs(".changes", exist_ok=True)
+          open(f".changes/sync-upstream-{target}.md", "w", encoding="utf-8").write(body)
+          print(f"fragment: impact={impact}, versions={versions}")
+          PY
+          git add .changes
+          git commit --quiet -m "sync: release fragment for upstream ${TARGET}"
+
+      - name: Push and open the PR
+        if: steps.target.outputs.skip == 'no' && steps.existing.outputs.open == 'no'
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          TARGET: ${{ steps.target.outputs.target }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+          BASE: ${{ steps.target.outputs.base }}
+          CONFLICT: ${{ steps.merge.outputs.conflict }}
+        run: |
+          set -euo pipefail
+          branch="sync/upstream-${TARGET}"
+          git push origin "$branch"
+          {
+            echo "Upstream sync: **${BASE} → ${TARGET}** (\`${TARGET_SHA:0:10}\`)."
+            echo
+            echo "Upstream notes: https://github.com/${UPSTREAM}/releases"
+            echo
+            if [ "$CONFLICT" = yes ]; then
+              echo "## ⚠️ Conflict — the merge is NOT on this branch"
+              echo
+              echo "The automatic merge stopped on these files:"
+              echo
+              sed 's/^/- `/; s/$/`/' /tmp/conflicts.txt
+              echo
+              echo "This branch carries only the fragment. To finish, in your clone:"
+              echo
+              echo '```bash'
+              echo "git fetch origin && git checkout ${branch}"
+              echo "git remote add upstream https://github.com/${UPSTREAM}.git 2>/dev/null; git config remote.upstream.tagOpt --no-tags"
+              echo "git fetch --no-tags upstream ${TARGET_SHA}"
+              echo "git merge ${TARGET_SHA}   # resolve: upstream wins, ours goes alongside (BERSEBA.md)"
+              echo "git checkout --ours CHANGELOG.md && git add CHANGELOG.md   # if CHANGELOG conflicts"
+              echo "git commit && git push"
+              echo '```'
+            else
+              echo "Clean merge. If CHANGELOG.md conflicted, ours was kept (the numbering is ours)."
+            fi
+            echo
+            echo "## Before approving"
+            echo
+            echo "- [ ] New database migration? (\`supabase/migrations/\` and the \`baseline.sql\` appendix) — the VPS applies it on \`update.sh\`"
+            echo "- [ ] Touches a file listed in \`BERSEBA.md\`? Check the customization survived"
+            echo "- [ ] Does the \`.changes/\` fragment say \`exige_acao\`? Then read its *Requer atenção* block before updating the VPS"
+          } > /tmp/body.md
+          gh pr create --base main --head "$branch" \
+            --title "Sync upstream ${TARGET}$([ "$CONFLICT" = yes ] && echo ' (conflict — finish by hand)')" \
+            --body-file /tmp/body.md

@@ -244,6 +244,11 @@ describe("o kit aponta para o que o CI realmente publica", () => {
       expect(texto).toContain(`REPO_URL="\${REPO_URL:-${repo}.git}"`);
     }
     expect(COMUM).toContain(`local url="\${1:-${repo}.git}" ref`);
+    // Berseba: the CHANGELOG compare link is born in scripts/cortar-release.ts and
+    // ends up on the VPS changelog screen — between tags that only exist HERE.
+    expect(fs.readFileSync(path.join(RAIZ, "scripts/cortar-release.ts"), "utf8")).toContain(
+      `const REPO = "${DONO_DESTE_REPO}/${NOME_DESTE_REPO}";`,
+    );
     for (const dockerfile of ["Dockerfile", "Dockerfile.worker", "Dockerfile.scheduler"]) {
       expect(fs.readFileSync(path.join(RAIZ, dockerfile), "utf8")).toContain(
         `org.opencontainers.image.source="${repo}"`,

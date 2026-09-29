@@ -24,7 +24,9 @@ import { aplicarNoChangelog, montarSecao } from "../lib/release/montar-secao";
 const RAIZ = path.resolve(__dirname, "..");
 const DIR_FRAGMENTOS = path.join(RAIZ, ".changes");
 const CHANGELOG = path.join(RAIZ, "CHANGELOG.md");
-const REPO = "melgarafael/DeskcommCRM";
+// Berseba: CHANGELOG compare links are between OUR tags, which only exist in
+// this repository (upstream tags are never imported — BERSEBA.md).
+const REPO = "berseba/berseba-crm";
 
 const compararUrl = (de: string, para: string) => `https://github.com/${REPO}/compare/${de}...${para}`;
 
