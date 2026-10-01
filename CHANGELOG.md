@@ -8,6 +8,25 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.1.0] — 2026-10-01
+
+### Adicionado
+
+- **Relatório por etiqueta — volume, espera e desfecho de cada assunto no período** Quem opera agora pode perguntar à API **qual assunto ocupou a operação em um período e quanto tempo o cliente esperou**. `GET /api/v1/reports/tags` devolve, para cada etiqueta em uso, quantos atendimentos começaram no período, quantos ainda estão abertos e quantos foram encerrados, a espera média pela nossa resposta e a fatia de cada etiqueta sobre o total. A lista de etiquetas vem das que existem de fato nas conversas: uma etiqueta sem atendimento no período aparece com zero em vez de sumir, e um período sem dado nenhum diz isso na resposta em vez de devolver uma tabela de zeros. O pedido aceita `de`, `ate` (datas válidas, até 90 dias) e `tz`, porque a janela é contada no fuso de quem lê. Quando a janela tem mais conversas do que a leitura alcança, a resposta avisa que está cortada. É só leitura, sem migration e ainda sem tela: a tela vem depois. Contribuição de @webtecnica (#1888).
+
+### Alterado
+
+- **Sincronização com o DeskcommCRM v1.62.0 (vinha da v1.60.0)** O produto passa a incluir tudo o que o fornecedor lançou entre a v1.60.0 e a v1.62.0. As notas de cada versão estão nas releases dele:
+
+  - [v1.62.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.62.0)
+  - [v1.61.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.61.0)
+
+### Corrigido
+
+- **Atualização pelo terminal não disputa mais com o agente, e os backups ficam só para o dono** Rodar `update.sh` no terminal agora segura a mesma trava que a atualização pela tela usa. Antes, o agente que roda a cada 5 minutos podia entrar no meio: numa instalação real ele trocou a senha interna das rotinas e religou o CRM antigo enquanto o banco estava sendo atualizado, e no fim o agendamento das automações ficou com a senha velha, recusado até alguém corrigir à mão. Agora o agente espera a atualização terminar, e o arquivo que as automações usam é sempre gravado com a senha que está no `.env` naquele momento. Se duas atualizações forem pedidas ao mesmo tempo, a segunda avisa na tela "Outra atualização (ou a troca automática da senha das rotinas) está rodando neste servidor. Espero ela terminar — até 30 min." e espera; se a primeira passar desse tempo, a segunda para dizendo "Outra atualização segue rodando neste servidor" e não mexe em nada. Basta rodar de novo depois.
+
+  Os backups (`backups/db-*.sql.gz`, `backups/waha-*.tgz` e os anexos) passam a ser gravados legíveis só pelo dono, e a pasta `backups/` fica fechada para os outros usuários do servidor. Quem aponta `BACKUP_DIR` para uma pasta própria continua com a permissão que deu a ela; só os arquivos de backup ficam fechados. Os backups antigos, que estavam abertos para leitura, são fechados no próximo backup, sem nenhum passo manual.
+
 ## [2.0.0] — 2026-09-29
 
 ### ⚠️ Requer atenção
@@ -9280,7 +9299,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.0.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.1.0...HEAD
+[2.1.0]: https://github.com/berseba/berseba-crm/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/berseba/berseba-crm/compare/0440d4fc3ffe036521b7619763cba4311617b8a1...v2.0.0
 [1.60.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.59.0...v1.60.0
 [1.59.0]: https://github.com/melgarafael/DeskcommCRM/compare/v1.58.1...v1.59.0
