@@ -225,6 +225,33 @@ check "the update finished (exit 0)" [ "$UPDATE_RC" = 0 ]
 check "the cron header carries the agent's NEW secret, not the one loaded at start" header_matches_env five
 check "the old secret is nowhere in the header" bash -c '! grep -q "$1" "$2"' _ "$OLD" "$WORK/five/proj/.env.cron-drain"
 
+echo "6. an empty read from .env never erases a good secret in the shell"
+mkdir -p "$WORK/six"
+reload_in() {  # reload_in <.env content> → INTERNAL_CRON_SECRET after the reload
+  printf '%s\n' "$1" > "$WORK/six/.env"
+  ( set +eu; source "$KIT/_common.sh" >/dev/null 2>&1; set +e
+    PROJECT_DIR="$WORK/six" INTERNAL_CRON_SECRET="good-secret-in-shell"
+    reload_cron_secrets_from_env; printf '%s' "$INTERNAL_CRON_SECRET" )
+}
+check "key present but empty: the shell keeps its secret" [ "$(reload_in 'INTERNAL_CRON_SECRET=""')" = "good-secret-in-shell" ]
+check "key absent: the shell keeps its secret" [ "$(reload_in 'OTHER=1')" = "good-secret-in-shell" ]
+check "control: a value on disk wins over the shell" [ "$(reload_in 'INTERNAL_CRON_SECRET="newer-on-disk"')" = "newer-on-disk" ]
+check "a value with \$ and quotes reads as load_env wrote it" \
+  [ "$(reload_in 'INTERNAL_CRON_SECRET="a\$b\"c"')" = 'a$b"c' ]
+
+echo "7. without flock the update says the lock is off, instead of a silent ok"
+# A PATH with the basics and no flock — the state of a host without util-linux.
+mkdir -p "$WORK/noflock"
+for tool in bash dirname uname sed grep cat tr date mkdir rm basename head cut wc; do
+  src="$(command -v "$tool" 2>/dev/null)" && ln -sf "$src" "$WORK/noflock/$tool"
+done
+NOFLOCK_OUT="$(cd "$WORK" && env PATH="$WORK/noflock" "$WORK/noflock/bash" -c '
+  source "$1/_common.sh" >/dev/null 2>&1; set +e
+  PROJECT_DIR="$2"; hold_update_lock; echo "rc=$?"; hold_update_lock; echo "rc=$?"' _ "$KIT" "$WORK/six" 2>&1)"
+check "it still goes on (rc=0)" bash -c '[ "$(printf "%s\n" "$1" | grep -c "^rc=0")" = 2 ]' _ "$NOFLOCK_OUT"
+check "and warns that the update lock could not be turned on" bash -c 'printf "%s" "$1" | grep -q "trava de atualização"' _ "$NOFLOCK_OUT"
+check "once, not on every call" [ "$(printf '%s\n' "$NOFLOCK_OUT" | grep -c 'trava de atualização')" = 1 ]
+
 echo
 if [ "$FAILS" -gt 0 ]; then echo "✗ $FAILS failure(s)"; exit 1; fi
 echo "✓ update lock and cron secret: all cases passed"

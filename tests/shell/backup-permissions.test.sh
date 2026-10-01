@@ -79,5 +79,18 @@ check "an old 644 dump was closed to 600" mode_is "$PROJ/backups/db-20260101-030
 check "an old 644 snapshot was closed to 600" mode_is "$PROJ/backups/waha-20260101-030000.tgz" 600
 check "no .parcial left behind" bash -c '! ls -A "$1" | grep -q parcial' _ "$PROJ/backups"
 
+echo "backup.sh with BACKUP_DIR set by the operator:"
+# A shared mount another user or a copy job reads: the kit must not change the
+# folder's mode, only close its own files.
+CUSTOM="$WORK/shared-mount"
+mkdir -p "$CUSTOM"; chmod 755 "$CUSTOM"
+( cd "$PROJ" && umask 022 && BACKUP_DIR="$CUSTOM" bash "$KIT_DIR/backup.sh" ) > "$WORK/out-custom.txt" 2>&1
+RC=$?
+[ "$RC" = 0 ] || sed 's/^/    | /' "$WORK/out-custom.txt"
+check "finished (exit 0)" [ "$RC" = 0 ]
+check "the operator's folder keeps its 755" mode_is "$CUSTOM" 755
+check "the dump inside it is still 600" mode_is "$(ls -t "$CUSTOM"/db-*.sql.gz | head -1)" 600
+check "the WhatsApp snapshot inside it is still 600" mode_is "$(ls -t "$CUSTOM"/waha-*.tgz | head -1)" 600
+
 [ "$FAILS" -eq 0 ] || { echo "✗ $FAILS failure(s)" >&2; exit 1; }
 echo "✓ backup permissions: all cases passed"

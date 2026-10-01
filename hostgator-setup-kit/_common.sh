@@ -1880,18 +1880,33 @@ UPDATE_LOCK_NAME=".update.lock"
 
 # env_file_value <file> <key> — the value of <key> as `load_env` reads it,
 # without touching this shell's variables.
+#
+# Deliberately NOT `valor_do_env`: that one strips one layer of quotes and
+# stops, while `load_env` also undoes the `\"`, `\$` and backquote escapes
+# `envq` writes. The question here is "did the value the shell loaded at start
+# change on disk?", so the answer has to come from the same parser that loaded
+# it — with `valor_do_env`, a secret holding `$` would read as changed when it
+# is not. The two cron secrets are hex today; this keeps it right if they ever
+# are not.
 env_file_value() {
   ( unset "$2"; load_env "$1" >/dev/null 2>&1 || true; printf '%s' "${!2:-}" )
 }
 
-# The .env on disk wins over this shell for the two cron secrets. A key that is
-# absent from the file keeps the shell value (it did not come from there).
+# The .env on disk wins over this shell for the two cron secrets — but only
+# with a value. A key absent from the file, or a read that comes back empty,
+# keeps what the shell has: an empty read must never erase a good secret, or
+# `setup_event_log_drain_cron` would skip the cron saying "falta
+# INTERNAL_SECRET" about a variable that is in the .env. (`set_env_var` swaps
+# the file with a `mv`, so a reader never sees it half written; this guards the
+# rest.)
 reload_cron_secrets_from_env() {
-  local envfile="${PROJECT_DIR:-$PWD}/.env" key
+  local envfile="${PROJECT_DIR:-$PWD}/.env" key value
   [ -r "$envfile" ] || return 0
   for key in INTERNAL_CRON_SECRET INTERNAL_SECRET; do
     grep -qE "^${key}=" "$envfile" 2>/dev/null || continue
-    printf -v "$key" '%s' "$(env_file_value "$envfile" "$key")"
+    value="$(env_file_value "$envfile" "$key")"
+    [ -n "$value" ] || continue
+    printf -v "$key" '%s' "$value"
     export "${key?}"
   done
 }
@@ -1922,8 +1937,19 @@ hold_update_lock() {
     export DESKCOMM_UPDATE_LOCK_HELD=1
     return 0
   fi
+  # No PROJECT_DIR means this file was sourced outside a project (a test):
+  # every kit script runs `enter_project`, which sets it, before getting here.
   [ -n "${PROJECT_DIR:-}" ] || return 0
-  command -v flock >/dev/null 2>&1 || return 0
+  # Without flock (util-linux, essential on every Ubuntu/Debian) there is
+  # nothing to lock with. Say so once instead of a silent "all good": this is
+  # the protection a production race made necessary.
+  if ! command -v flock >/dev/null 2>&1; then
+    if [ -z "${UPDATE_LOCK_UNAVAILABLE_WARNED:-}" ]; then
+      UPDATE_LOCK_UNAVAILABLE_WARNED=1
+      c_ylw "$(t "⚠ Não consegui ativar a trava de atualização (falta o comando 'flock', do pacote util-linux). Sem ela, o agente da tela pode rodar no meio desta atualização.")"
+    fi
+    return 0
+  fi
   local wait_s="${1:-${UPDATE_LOCK_WAIT_SECONDS:-1800}}"
   exec 7>"${PROJECT_DIR}/${UPDATE_LOCK_NAME}" || return 1
   if ! flock -n 7; then
