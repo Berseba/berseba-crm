@@ -224,6 +224,10 @@ INTERNAL_SECRET=segredo
 NUVEMSHOP_OAUTH_ENCRYPTION_KEY=chave
 ENV
 chmod 600 "$PROJ/.env"
+# update.sh holds `.update.lock` for its whole run, so the file exists in the
+# tree. The real repo ignores it (.gitignore); without the same line here the
+# fixture's `git add -A` commits it into a tag and the next checkout refuses.
+printf '.update.lock\n' > "$PROJ/.gitignore"
 
 cd "$PROJ" || exit 1
 git init --quiet

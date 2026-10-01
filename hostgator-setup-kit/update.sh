@@ -37,6 +37,13 @@ done
 # em 401. Ver `recusar_projeto_de_outra_arvore` em _common.sh.
 recusar_projeto_de_outra_arvore || die "Atualização interrompida para não quebrar a instalação que está no ar."
 
+# ── 0-. One update at a time, including this one started by hand ─────────────
+# The same `.update.lock` agent.sh takes, held until this script exits. Without
+# it the agent.sh cron ran in the middle of a manual update and restarted the
+# old containers during the schema change (production, 2026-09-29). See
+# `hold_update_lock` in _common.sh.
+hold_update_lock || die "Outra atualização segue rodando neste servidor (pelo botão da tela ou em outro terminal). Não mexi em nada. Rode de novo quando ela terminar."
+
 # Single-server: o Supabase desta VPS também tem dono. E o e-mail de acesso
 # (GoTrue) acompanha o SMTP do CRM AQUI, antes da decisão de versão: é este
 # comando que o instalador ensina a rodar depois de configurar /admin/email, e

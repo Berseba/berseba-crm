@@ -52,7 +52,13 @@ recusar_projeto_de_outra_arvore log_err || exit 0
 # Depois da troca, `setup_event_log_drain_cron` reescreve a linha do crontab
 # (numa instalação que atualizou por um update.sh antigo, ela ainda carrega a
 # senha escrita) e o SECRET desta execução passa a ser o novo.
-if [ ! -e "${PROJECT_DIR}/${MARCA_SEGREDO_DO_CRON_NOME}" ]; then
+#
+# While an update holds the lock (a manual update.sh, or another agent.sh
+# driving one), this round touches nothing on the host: no secret swap, no
+# container restart, no .env write. The heartbeat still goes out.
+UPDATE_RUNNING=""
+update_lock_busy && UPDATE_RUNNING=1
+if [ -z "$UPDATE_RUNNING" ] && [ ! -e "${PROJECT_DIR}/${MARCA_SEGREDO_DO_CRON_NOME}" ]; then
   if trocar_segredo_do_cron_vazado >/dev/null 2>&1; then
     if [ -n "${SEGREDO_DO_CRON_TROCADO:-}" ]; then
       setup_event_log_drain_cron >/dev/null 2>&1 || true
@@ -259,7 +265,8 @@ fi
 # Preenche a lacuna sozinho, e só a lacuna. O estado dura no máximo um ciclo de
 # cron (5 min) em vez de durar até alguém rodar o update de novo — que era o que
 # acontecia, porque a tela dizia "concluída" e ninguém volta.
-PIN_CORRIGIDO="$(completar_pin_ausente .env)" || PIN_CORRIGIDO=""
+PIN_CORRIGIDO=""
+[ -n "$UPDATE_RUNNING" ] || PIN_CORRIGIDO="$(completar_pin_ausente .env)" || PIN_CORRIGIDO=""
 [ -n "$PIN_CORRIGIDO" ] && log_err "fixei a versão de $PIN_CORRIGIDO no .env (estava sem versão fixa; usei a que já estava rodando)"
 
 # O que sobra depois de corrigir: valor explícito em canal móvel, que é decisão
@@ -285,6 +292,7 @@ RUN_ID="$(json_field "$RESP" run_id)" || true
 # ── 2. Alguém pediu. Uma atualização por vez. ────────────────────────────────
 exec 9>"$LOCK"
 flock -n 9 || exit 0
+export DESKCOMM_UPDATE_LOCK_HELD=1
 
 report() { post "{\"kind\":\"run_progress\",\"run_id\":\"${RUN_ID}\",\"step\":\"$1\"}" >/dev/null; }
 
