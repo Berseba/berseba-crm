@@ -72,11 +72,11 @@ export type ContactPatch = z.infer<typeof contactPatchSchema>;
 /**
  * O documento do titular vem do PERFIL DO PAÍS da organização (issue #1033).
  *
- * `contactCreateSchema` continua sendo a régua brasileira — é o schema que as
- * telas de cliente usam e o comportamento de quem já instalou. Estas fábricas
- * só trocam o campo do documento: tudo o mais é o MESMO schema, estendido, e
- * não uma segunda cópia — duas listas de campos divergem no dia em que uma
- * ganhar um campo novo.
+ * `contactCreateSchema` continua sendo a régua brasileira, para quem não tem um
+ * perfil em mãos. Estas fábricas trocam o campo do documento e a MENSAGEM do
+ * telefone (o E.164 é universal; o exemplo não era): tudo o mais é o MESMO
+ * schema, estendido, e não uma segunda cópia — duas listas de campos divergem
+ * no dia em que uma ganhar um campo novo.
  *
  * Por que fábrica e não ler o país aqui dentro: o schema é síncrono e puro, e a
  * resposta certa vem do banco (`perfilDaOrganizacao`), resolvida uma vez por
@@ -90,7 +90,20 @@ export function contactCreateSchemaDoPais(perfil: PerfilDoPais) {
       .string()
       .refine(perfil.documento.valida, perfil.documento.mensagemInvalido)
       .optional(),
+    phone_number: telefoneDoPais(perfil),
   });
+}
+
+/**
+ * O E.164 é universal; o EXEMPLO não. A mensagem de erro cravava
+ * `+5511999998888`, então a tela mostrava o exemplo do país no campo e ensinava
+ * o DDI brasileiro assim que a pessoa errava — dentro do mesmo formulário.
+ */
+function telefoneDoPais(perfil: PerfilDoPais) {
+  return z
+    .string()
+    .regex(PHONE_REGEX, `Telefone deve estar em formato E.164 (${perfil.telefoneExemplo})`)
+    .optional();
 }
 
 /** O mesmo, para o PATCH (`app/api/v1/contacts/[id]/route.ts`). */
@@ -100,6 +113,7 @@ export function contactPatchSchemaDoPais(perfil: PerfilDoPais) {
       .string()
       .refine(perfil.documento.valida, perfil.documento.mensagemInvalido)
       .optional(),
+    phone_number: telefoneDoPais(perfil),
   });
 }
 
@@ -146,6 +160,19 @@ export const contactListQuerySchema = z.object({
    */
   modo: z.enum(MODOS_DE_ETIQUETA).optional(),
   source: z.string().optional(),
+  /**
+   * Só pessoais / esconder pessoais (spec 21, etapa 13).
+   *
+   * `"true"`/`"false"` como TEXTO — vem de `searchParams`, que só conhece
+   * texto — e não `z.coerce.boolean()`, que transformaria `"false"` em `true`
+   * (o mesmo aviso de `is_group` em `lib/schemas/messaging.ts`). Aceita
+   * boolean de verdade porque o MCP chama este schema direto, sem URL no
+   * meio. Ausente = excluir pessoais: o padrão da lista e do MCP search.
+   */
+  pessoais: z
+    .union([z.boolean(), z.enum(["true", "false"])])
+    .optional()
+    .transform((v) => v === true || v === "true"),
   cursor: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(50),
   order_by: z.enum(CONTACT_ORDER_BY).default("last_activity_at"),

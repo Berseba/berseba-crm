@@ -37,6 +37,10 @@ const triggerConfigSchema = z
             start: z.string(),
             end: z.string(),
             weekdays: z.array(z.number().int().min(0).max(6)),
+            // Aviso de fora do horário (#1926). Sem esta linha o Zod descarta o
+            // campo ao salvar e o aviso nunca liga pela tela. O teto é o mesmo
+            // de TAMANHO_MAXIMO_DO_TEXTO em aviso-fora-do-horario.ts.
+            notice: z.string().max(1000).nullable().optional(),
           })
           .nullable()
           .optional()
@@ -169,6 +173,15 @@ const versionShapeSchema = z
     // pelo pacing anti-ban. Defaults espelham a migration 0059.
     split_messages: z.boolean().default(false),
     split_max_chars: z.number().int().min(80).max(4000).default(600),
+    /**
+     * Janela de coalescência de rajada inbound para ESTE agente (ms).
+     *
+     * `null`/ausente = usa o `INBOUND_DEBOUNCE_MS` da instalação (comportamento
+     * de sempre — regressão zero). 0 desliga a coalescência de rajada para o
+     * agente (job imediato). 1..60000 define a janela, com TETO de 60s para
+     * ninguém travar o atendimento sem querer (#1856).
+     */
+    inbound_debounce_ms: z.number().int().min(0).max(60000).nullable().optional(),
     followup: followupConfigSchema,
     // ── Papel OPERADOR (spec 16 §3.2) ───────────────────────────────────────
     // Todos com `.default(...)`, e é o que mantém retrocompatível: agent e
