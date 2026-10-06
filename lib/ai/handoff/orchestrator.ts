@@ -62,7 +62,7 @@ export type HandoffReason =
   | "refund_mention"
   /**
    * Freio clínico 1 — urgência médica relatada pelo CONTATO (`checkG4Medical`,
-   * `lib/ai/handoff/triggers.ts`), opt-in por `organizations.settings->>'nicho'
+   * `lib/ai/handoff/medical-emergency.ts`), opt-in por `organizations.settings->>'nicho'
    * = 'saude'`. `motivoDoAviso`/`textoDoAviso` (`lib/escalacao/aviso-ao-lead.ts`)
    * traduzem este motivo para a orientação FIXA de emergência — não a frase
    * genérica de escalação.

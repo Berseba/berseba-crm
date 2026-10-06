@@ -4,7 +4,7 @@
  *
  * O nicho da organização liga, hoje, os dois freios clínicos determinísticos:
  * `checkG4Medical` (urgência médica relatada pelo contato → handoff humano,
- * `lib/ai/handoff/triggers.ts`) e `clinicalScopeGate` (veto de diagnóstico,
+ * `lib/ai/handoff/medical-emergency.ts`) e `clinicalScopeGate` (veto de diagnóstico,
  * prescrição e promessa de cura, `lib/agent-engine/guardrails/escopo-clinico.ts`)
  * — ambos armados só quando `settings->>'nicho' = 'saude'`, via
  * `lerNichoDaOrg`/`nichoEhSaude` (`lib/agent-engine/guardrails/camadas-da-org.ts`).

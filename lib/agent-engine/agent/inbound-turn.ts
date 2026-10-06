@@ -221,7 +221,7 @@ import {
   type ManipulacaoDoJev,
 } from '@/lib/ai/decisao/manipulacao';
 import type { DependenciasDoPonto } from '@/lib/ai/decisao/ponto';
-import { checkG4Medical } from '@/lib/ai/handoff/triggers';
+import { checkG4Medical } from '@/lib/ai/handoff/medical-emergency';
 import { ORIENTACAO_DE_EMERGENCIA_MEDICA } from '@/lib/escalacao/aviso-ao-lead';
 import { fusoDaOrganizacao } from './fuso-da-org';
 import { renderAgora } from '@/lib/tempo/agora';

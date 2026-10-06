@@ -40,13 +40,8 @@ import { renderSystemPrompt } from "@/lib/ai/render-system-prompt";
 import { triggerHandoff } from "@/lib/ai/handoff/orchestrator";
 import { decidirElegibilidadeDaConversaViaSupabase } from "@/lib/ai/elegibilidade/consulta-supabase";
 import { ttlDaAutorizacaoMs } from "@/lib/ai/elegibilidade/gate";
-import {
-  checkG1,
-  checkG3,
-  checkG4Legal,
-  checkG4Medical,
-  checkG4Stage,
-} from "@/lib/ai/handoff/triggers";
+import { checkG1, checkG3, checkG4Legal, checkG4Stage } from "@/lib/ai/handoff/triggers";
+import { checkG4Medical } from "@/lib/ai/handoff/medical-emergency";
 import type {
   BotContext,
   BotResponse,

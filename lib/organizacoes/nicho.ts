@@ -2,7 +2,7 @@
  * O VOCABULÁRIO FECHADO DE NICHO DA ORGANIZAÇÃO — fonte única dos dois lados.
  *
  * `organizations.settings.nicho` liga os dois freios clínicos determinísticos
- * (`checkG4Medical` em `lib/ai/handoff/triggers.ts`, `clinicalScopeGate` via
+ * (`checkG4Medical` em `lib/ai/handoff/medical-emergency.ts`, `clinicalScopeGate` via
  * `lib/agent-engine/guardrails/escopo-clinico.ts`) quando vale `"saude"` — ver
  * `lerNichoDaOrg`/`nichoEhSaude` em `lib/agent-engine/guardrails/camadas-da-org.ts`.
  * Até esta mudança não havia tela para gravar o valor: violava o invariante 6
