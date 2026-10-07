@@ -6,8 +6,9 @@ import { SecurityClient } from "./_client";
 
 /**
  * Berseba: the organization niche picker (BERSEBA.md, "Organization niche").
- * `saude` arms both clinical brakes, so leaving it must say so — a plain
- * "Nicho salvo." hid that a safety control had just been switched off.
+ * `saude` arms the medical-emergency handoff and, when the organization never chose
+ * it, upstream's clinical-claim layer (issue #35). A plain "Nicho salvo." would hide
+ * that a safety control had just changed, so the toast names it.
  */
 
 const patch = vi.hoisted(() => vi.fn());
@@ -64,19 +65,33 @@ describe("Settings › Security — organization niche picker", () => {
     expect(screen.getByRole("combobox", { name: "Nicho da organização" })).toBeTruthy();
   });
 
-  it("leaving saude says the clinical brakes were turned off", async () => {
+  it("leaving saude says the emergency handoff was turned off", async () => {
     renderPicker("saude");
     await pick("Nenhum");
     await waitFor(() => expect(patch).toHaveBeenCalledWith("/api/v1/settings/nicho", { nicho: null }));
     await waitFor(() =>
-      expect(toastSuccess).toHaveBeenCalledWith("Nicho salvo. Os freios clínicos foram desligados."),
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "Nicho salvo. A urgência médica deixou de ir direto para uma pessoa.",
+      ),
     );
   });
 
-  it("any other change keeps the plain message", async () => {
+  it("picking saude says when the clinical-claim layer was switched on", async () => {
+    patch.mockResolvedValue({ data: { nicho: "saude", clinical_claim_layer_enabled: true } });
     renderPicker(null);
     await pick("Saúde");
     await waitFor(() => expect(patch).toHaveBeenCalledWith("/api/v1/settings/nicho", { nicho: "saude" }));
+    await waitFor(() =>
+      expect(toastSuccess).toHaveBeenCalledWith(
+        "Nicho salvo. A conferência “Não fazer afirmação clínica” foi ligada.",
+      ),
+    );
+  });
+
+  it("picking saude when the org already chose the layer keeps the plain message", async () => {
+    patch.mockResolvedValue({ data: { nicho: "saude", clinical_claim_layer_enabled: false } });
+    renderPicker(null);
+    await pick("Saúde");
     await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Nicho salvo."));
   });
 });

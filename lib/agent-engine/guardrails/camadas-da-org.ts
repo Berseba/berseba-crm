@@ -151,14 +151,16 @@ export function camadasEfetivas(
 }
 
 /**
- * O NICHO DA ORGANIZAÇÃO — liga os dois freios clínicos determinísticos
- * (urgência médica no inbound, escopo clínico no outbound), SEM MIGRATION.
+ * O NICHO DA ORGANIZAÇÃO (Berseba) — liga o handoff determinístico de urgência
+ * médica no inbound, SEM MIGRATION. O veto de afirmação clínica no outbound é a
+ * camada `afirmacao_clinica` acima, que a rota do nicho liga ao escolher `saude`
+ * (`app/api/v1/settings/nicho/route.ts`, issue #35) — não este leitor.
  *
  * `organizations.settings` já existe como jsonb livre (é onde `llm`, `atrito`,
  * `security` e outras chaves de configuração já moram — ver os outros
  * `settings->` deste repo). `nicho` é mais uma chave dele: nenhuma tabela
- * nova, nenhum `ALTER TABLE`. Padrão ausente = `null`, e os dois freios ficam
- * DESLIGADOS — zero diferença para todo clone que já existe.
+ * nova, nenhum `ALTER TABLE`. Padrão ausente = `null`, e o freio fica
+ * DESLIGADO — zero diferença para todo clone que já existe.
  *
  * Falha ABERTA para "desligado", não para "ligado": a mesma escolha de
  * `lerCamadasDaOrg` (linha abaixo dela), mas na direção oposta por natureza —
@@ -168,9 +170,8 @@ export function camadasEfetivas(
  * acidente. O preço é um freio que não arma numa falha rara — nunca o
  * inverso (armar um gate que a organização não pediu, numa falha rara).
  */
-// `Pool | PoolClient`: o `before-send.ts` chama sob o lock da conversa, com o
-// client já aberto — os dois expõem o mesmo `.query`, e pedir `Pool` ali
-// obrigaria uma conexão nova fora da transação.
+// `Pool | PoolClient`: os dois expõem o mesmo `.query`; aceitar o client deixa
+// chamar sob uma transação já aberta sem pedir conexão nova.
 export async function lerNichoDaOrg(
   db: pg.Pool | pg.PoolClient,
   organizationId: string,

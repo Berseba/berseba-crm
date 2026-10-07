@@ -4,21 +4,42 @@ import { NextRequest } from "next/server";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { requireSupportWrite } from "@/lib/impersonate/support";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
 import { createClient } from "@/lib/supabase/server";
 import { GET, PATCH } from "./route";
 
 vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
 vi.mock("@/lib/impersonate/support", () => ({ requireSupportWrite: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
-vi.mock("@/lib/supabase/admin", () => ({ createAdminClient: vi.fn() }));
+vi.mock("@/lib/agent-engine/db/request-pool", () => ({ getRequestPool: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ audit: vi.fn() }));
 
 const org = "10000000-0000-4000-8000-000000000001";
 const user = { id: "20000000-0000-4000-8000-000000000002" };
 
 let settingsRow: { settings: Record<string, unknown> | null };
-const update = vi.fn();
+
+/** Fake pool: every statement the PATCH sends, in order, plus what each one answers. */
+const statements: Array<{ sql: string; params: unknown[] }> = [];
+let orgExists = true;
+let layerAlreadyChosen = false;
+const release = vi.fn();
+
+const fakeClient = {
+  release,
+  query: vi.fn(async (sql: string, params: unknown[] = []) => {
+    statements.push({ sql: sql.replace(/\s+/g, " ").trim(), params });
+    if (sql.includes("for update")) {
+      return { rows: orgExists ? [{ nicho: (settingsRow.settings?.nicho as string | null) ?? null }] : [] };
+    }
+    if (sql.includes("insert into org_guardrail_layers")) {
+      return { rows: [], rowCount: layerAlreadyChosen ? 0 : 1 };
+    }
+    return { rows: [], rowCount: 1 };
+  }),
+};
+
+const sqlSent = () => statements.map((s) => s.sql);
 
 function makeQuery() {
   return {
@@ -27,10 +48,6 @@ function makeQuery() {
         maybeSingle: async () => ({ data: settingsRow, error: null }),
       }),
     }),
-    update: (payload: Record<string, unknown>) => {
-      update(payload);
-      return { eq: async () => ({ error: null }) };
-    },
   };
 }
 
@@ -43,6 +60,9 @@ const req = (body: unknown) =>
 beforeEach(() => {
   vi.clearAllMocks();
   settingsRow = { settings: {} };
+  statements.length = 0;
+  orgExists = true;
+  layerAlreadyChosen = false;
   vi.mocked(requireRole).mockResolvedValue({
     ok: true,
     user,
@@ -52,8 +72,8 @@ beforeEach(() => {
   vi.mocked(createClient).mockResolvedValue({ from: () => makeQuery() } as unknown as Awaited<
     ReturnType<typeof createClient>
   >);
-  vi.mocked(createAdminClient).mockReturnValue({ from: () => makeQuery() } as unknown as ReturnType<
-    typeof createAdminClient
+  vi.mocked(getRequestPool).mockReturnValue({ connect: async () => fakeClient } as unknown as ReturnType<
+    typeof getRequestPool
   >);
 });
 
@@ -88,12 +108,12 @@ describe("GET /api/v1/settings/nicho", () => {
 });
 
 describe("PATCH /api/v1/settings/nicho", () => {
-  it("suporte readonly nega antes de tocar em requireRole ou no service role", async () => {
+  it("suporte readonly nega antes de tocar em requireRole ou no banco", async () => {
     vi.mocked(requireSupportWrite).mockResolvedValue(new Response(null, { status: 403 }) as never);
     const response = await PATCH(req({ nicho: "saude" }));
     expect(response.status).toBe(403);
     expect(requireRole).not.toHaveBeenCalled();
-    expect(createAdminClient).not.toHaveBeenCalled();
+    expect(getRequestPool).not.toHaveBeenCalled();
   });
 
   it.each([401, 403])("role viewer/negado recebe %s e não grava", async (status) => {
@@ -103,31 +123,47 @@ describe("PATCH /api/v1/settings/nicho", () => {
     } as Awaited<ReturnType<typeof requireRole>>);
     const response = await PATCH(req({ nicho: "saude" }));
     expect(response.status).toBe(status);
-    expect(update).not.toHaveBeenCalled();
+    expect(statements).toEqual([]);
     expect(audit).not.toHaveBeenCalled();
   });
 
   it("Zod recusa nicho fora do vocabulário fechado, sem gravar nem auditar", async () => {
     const response = await PATCH(req({ nicho: "clinica" }));
     expect(response.status).toBe(422);
-    expect(update).not.toHaveBeenCalled();
+    expect(statements).toEqual([]);
     expect(audit).not.toHaveBeenCalled();
   });
 
-  it("aceita null explícito (voltar para 'nenhum')", async () => {
+  it("merges the key in the UPDATE itself — no read-modify-write of settings (issue #37)", async () => {
+    settingsRow = { settings: { modo_sombra: true, nicho: null } };
+    const response = await PATCH(req({ nicho: "ecommerce", organization_id: "outra-org" }));
+    expect(response.status).toBe(200);
+    const update = statements.find((s) => s.sql.startsWith("update organizations"));
+    expect(update?.sql).toContain("settings = coalesce(settings, '{}'::jsonb) || jsonb_build_object('nicho', $2::text)");
+    // organization from the session, never from the body
+    expect(update?.params).toEqual([org, "ecommerce"]);
+    expect(sqlSent()[0]).toBe("begin");
+    expect(sqlSent().at(-1)).toBe("commit");
+    expect(release).toHaveBeenCalled();
+  });
+
+  it("aceita null explícito (voltar para 'nenhum') sem tocar nas camadas", async () => {
     settingsRow = { settings: { nicho: "saude" } };
     const response = await PATCH(req({ nicho: null }));
     expect(response.status).toBe(200);
-    expect((await response.json()).data).toEqual({ nicho: null });
-    expect(update).toHaveBeenCalledWith({ settings: { nicho: null } });
+    expect((await response.json()).data).toEqual({ nicho: null, clinical_claim_layer_enabled: false });
+    expect(statements.find((s) => s.sql.startsWith("update organizations"))?.params).toEqual([org, null]);
+    expect(sqlSent().some((s) => s.includes("org_guardrail_layers"))).toBe(false);
+    expect(audit).toHaveBeenCalledTimes(1);
   });
 
-  it("grava 'saude', preserva as demais chaves de settings, audita antes/depois e organização vem da sessão (nunca do body)", async () => {
-    settingsRow = { settings: { modo_sombra: true, nicho: null } };
-    const response = await PATCH(req({ nicho: "saude", organization_id: "outra-org" }));
+  it("'saude' switches upstream's afirmacao_clinica layer on when the org never chose, and audits both", async () => {
+    const response = await PATCH(req({ nicho: "saude" }));
     expect(response.status).toBe(200);
-    expect((await response.json()).data).toEqual({ nicho: "saude" });
-    expect(update).toHaveBeenCalledWith({ settings: { modo_sombra: true, nicho: "saude" } });
+    expect((await response.json()).data).toEqual({ nicho: "saude", clinical_claim_layer_enabled: true });
+    const insert = statements.find((s) => s.sql.startsWith("insert into org_guardrail_layers"));
+    expect(insert?.sql).toContain("on conflict (organization_id, layer) do nothing");
+    expect(insert?.params).toEqual([org, "afirmacao_clinica"]);
     expect(audit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "org.nicho_changed",
@@ -136,5 +172,37 @@ describe("PATCH /api/v1/settings/nicho", () => {
         metadata: { antes: null, depois: "saude" },
       }),
     );
+    expect(audit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ai.guardrail_layer_changed",
+        organizationId: org,
+        metadata: { layer: "afirmacao_clinica", enabled: true, source: "niche" },
+      }),
+    );
+  });
+
+  it("'saude' never overrides a layer the org already chose (on conflict do nothing)", async () => {
+    layerAlreadyChosen = true;
+    const response = await PATCH(req({ nicho: "saude" }));
+    expect((await response.json()).data).toEqual({ nicho: "saude", clinical_claim_layer_enabled: false });
+    expect(audit).toHaveBeenCalledTimes(1);
+  });
+
+  it("organização inexistente: 404, rollback, nada auditado", async () => {
+    orgExists = false;
+    const response = await PATCH(req({ nicho: "saude" }));
+    expect(response.status).toBe(404);
+    expect(sqlSent()).toContain("rollback");
+    expect(sqlSent().some((s) => s.startsWith("update"))).toBe(false);
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("sem SUPABASE_DB_URL: 503, nada auditado", async () => {
+    vi.mocked(getRequestPool).mockImplementation(() => {
+      throw new Error("SUPABASE_DB_URL ausente");
+    });
+    const response = await PATCH(req({ nicho: "saude" }));
+    expect(response.status).toBe(503);
+    expect(audit).not.toHaveBeenCalled();
   });
 });
