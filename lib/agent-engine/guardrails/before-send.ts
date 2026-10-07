@@ -777,9 +777,9 @@ export const agendaStallGate: Gate = {
  * resultado clínico ("vai curar", "garantimos que a dor some"). Permitido:
  * falar de avaliação presencial, sessão, exercício, preço.
  *
- * Posição 11 de 12 em `BEFORE_SEND_GATES` (v8) — confira com
- * `BEFORE_SEND_GATES.map(g => g.name).indexOf('clinical_scope')` em vez de
- * confiar neste número (o array só cresce): DEPOIS do `agendaStallGate` e
+ * Posição em `BEFORE_SEND_GATES` (desde a v9): confira com
+ * `BEFORE_SEND_GATES.map(g => g.name).indexOf('clinical_scope')` — o número
+ * não fica escrito aqui porque o array só cresce. DEPOIS do `agendaStallGate` e
  * ANTES do `disclosureGate` — mesma razão do `internalVocabularyGate`/
  * `agendaStallGate` acima: o disclosure pode EMENDAR o corpo, e o que se
  * quer inspecionar é o texto que o MODELO escreveu.
@@ -987,8 +987,9 @@ export const BEFORE_SEND_CHAIN_VERSION = 9;
  *         câncer escritos pelo modelo; só arma com a camada `afirmacao_clinica` ligada;
  *   (6.9) agenda_stall — "vou verificar/confirmar horário" sem ter chamado a ferramenta de
  *         agenda neste turno; antes do disclosure pelo mesmo motivo do internal_vocabulary;
- *   (7) clinical_scope — nunca diagnóstico, nunca prescrição, nunca promessa de cura; opt-in
- *       por `organizations.settings->>'nicho' = 'saude'`; antes do disclosure pelo mesmo motivo;
+ *   (7) clinical_scope (Berseba, v9) — nunca diagnóstico, nunca prescrição, nunca promessa de
+ *       cura; opt-in por `organizations.settings->>'nicho' = 'saude'`; antes do disclosure pelo
+ *       mesmo motivo. Sobrepõe-se ao clinical_claim (6.8) — ver BERSEBA.md;
  *   (8) disclosure — 1ª mensagem se apresenta como assistente virtual (F4-05).
  * (O anti-jailbreak F4-04 é INBOUND advisório, não gate de before_send — não entra aqui.)
  */

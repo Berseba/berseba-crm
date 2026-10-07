@@ -83,6 +83,9 @@ ANTES_DO_FILTRO="v1.63.0"
 TMP="$(mktemp -d "${TMPDIR:-/tmp}/deskcomm-update-sh.XXXXXX")"
 trap 'rm -rf "$TMP"' EXIT
 update_sh_da() {  # update_sh_da <tag> — caminho de uma cópia do update.sh da tag
+  # Berseba: a fork without upstream tags reads the vendored copy (BERSEBA.md).
+  local fixture="$ROOT/tests/fixtures/kit/update-$1.sh.txt"
+  if [ -f "$fixture" ]; then printf '%s' "$fixture"; return; fi
   if ! git -C "$ROOT" rev-parse -q --verify "refs/tags/$1^{commit}" >/dev/null; then
     local profundidade=""
     [ "$(git -C "$ROOT" rev-parse --is-shallow-repository)" = true ] && profundidade="--depth=1"

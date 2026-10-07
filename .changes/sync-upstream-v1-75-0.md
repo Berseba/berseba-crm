@@ -4,6 +4,12 @@ secao: alterado
 titulo: Sincronização com o DeskcommCRM v1.75.0 (vinha da v1.62.0)
 ---
 
+O que muda para quem opera a instalação:
+
+- **A atualização deixa de parar no banco.** Ela travava com `ai_pricing_pkey` (um modelo de IA cadastrado em dois provedores) e com um falso alarme de "regras de isolamento ausentes" do módulo de honorários, que só existe quando é instalado.
+- **A atualização confere antes de parar o sistema** (Docker respondendo e as imagens da versão publicadas) e, se algo falhar no meio, volta para a versão anterior. Vale a partir da próxima atualização depois desta.
+- **O WhatsApp passa a assinar as entregas de mensagem.** O contêiner do WAHA é recriado nesta atualização: espere uma reconexão de alguns segundos. Nenhuma configuração precisa mudar.
+
 O produto passa a incluir tudo o que o fornecedor lançou entre a v1.62.0 e a v1.75.0. As notas de cada versão estão nas releases dele:
 
 - [v1.75.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.75.0)

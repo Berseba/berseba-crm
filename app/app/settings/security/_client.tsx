@@ -33,7 +33,7 @@ import { ROTULO_DO_PAPEL } from "@/lib/auth/types";
 import type { PapelMinimoDeMfa } from "@/lib/auth/politica-mfa";
 import { PainelDeChamadaDeVoz } from "@/components/voice/PainelDeChamadaDeVoz";
 import { apiClient } from "@/lib/api/client";
-import { NICHOS, NICHO_LABELS, type Nicho } from "@/lib/organizacoes/nicho";
+import { NICHOS, NICHO_LABELS, NICHO_SAUDE, type Nicho } from "@/lib/organizacoes/nicho";
 import { useT } from "@/hooks/i18n/useT";
 
 const NENHUM_NICHO = "__nenhum__";
@@ -242,15 +242,19 @@ export function SecurityClient({
                 startMexerNicho(async () => {
                   try {
                     await apiClient.patch("/api/v1/settings/nicho", { nicho: novoNicho });
+                    // Leaving `saude` turns both clinical brakes off: say so, not just "saved".
+                    const desligouFreios = nichoAtual === NICHO_SAUDE && novoNicho !== NICHO_SAUDE;
                     setNichoAtual(novoNicho);
-                    toast.success(t("Nicho salvo."));
+                    toast.success(
+                      t(desligouFreios ? "Nicho salvo. Os freios clínicos foram desligados." : "Nicho salvo."),
+                    );
                   } catch {
                     toast.error(t("Não foi possível salvar. Tente de novo."));
                   }
                 });
               }}
             >
-              <SelectTrigger className="w-64">
+              <SelectTrigger className="w-64" aria-label={t("Nicho da organização")}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

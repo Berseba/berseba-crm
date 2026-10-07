@@ -957,6 +957,9 @@ export const DICIONARIO: Traducoes = {
   // Nicho da organização (`lib/organizacoes/nicho.ts`) — liga os freios clínicos
   "Nicho da organização": { es: "Nicho de la organización" },
   "Nicho salvo.": { es: "Nicho guardado." },
+  "Nicho salvo. Os freios clínicos foram desligados.": {
+    es: "Nicho guardado. Los frenos clínicos se desactivaron.",
+  },
   // Valores de NICHO_LABELS (`lib/organizacoes/nicho.ts`); "Saúde" já existia acima
   "E-commerce": { es: "E-commerce" },
   Imobiliária: { es: "Inmobiliaria" },
