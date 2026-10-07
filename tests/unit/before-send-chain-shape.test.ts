@@ -35,7 +35,6 @@ const ORDEM_ESPERADA = [
   "internal_vocabulary",
   "clinical_claim",
   "agenda_stall",
-  "clinical_scope",
   "disclosure",
 ] as const;
 
@@ -67,8 +66,8 @@ describe("forma da cadeia before_send", () => {
     // O par (tamanho, versão) é o que amarra os dois. Acrescentar um gate sem
     // bumpar deixa o trace de auditoria mentindo sobre qual cadeia rodou — e o
     // trace é justamente a prova que as Fases 0–2 usam para dizer "não regrediu".
-    expect(BEFORE_SEND_GATES).toHaveLength(13);
-    expect(BEFORE_SEND_CHAIN_VERSION).toBe(9);
+    expect(BEFORE_SEND_GATES).toHaveLength(12);
+    expect(BEFORE_SEND_CHAIN_VERSION).toBe(8);
   });
 
   it("internal_vocabulary roda ANTES do disclosure — inspeciona o texto do modelo, não o emendado", () => {
@@ -92,12 +91,6 @@ describe("forma da cadeia before_send", () => {
     const nomes = BEFORE_SEND_GATES.map((g) => g.name);
     expect(nomes.indexOf("clinical_claim")).toBe(nomes.indexOf("internal_vocabulary") + 1);
     expect(nomes.indexOf("agenda_stall")).toBe(nomes.indexOf("clinical_claim") + 1);
-  });
-
-  it("clinical_scope roda ANTES do disclosure e DEPOIS do agenda_stall — mesma razão: texto do modelo, não o emendado", () => {
-    const nomes = BEFORE_SEND_GATES.map((g) => g.name);
-    expect(nomes.indexOf("clinical_scope")).toBeLessThan(nomes.indexOf("disclosure"));
-    expect(nomes.indexOf("clinical_scope")).toBe(nomes.indexOf("agenda_stall") + 1);
   });
 
   it("nenhum gate repetido — nome duplicado quebraria a leitura do trace", () => {
