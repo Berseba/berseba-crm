@@ -6,7 +6,7 @@
  * médica) nos call sites de `workers/ai-response-worker.ts` e
  * `lib/agent-engine/agent/inbound-turn.ts`, e o Freio 2 (`clinicalScopeGate`,
  * `before-send.ts`) via `GateContext.nichoSaude`. `checkG4Medical` em si é
- * nicho-agnóstico de propósito (ver `lib/ai/handoff/triggers.ts`) — quem
+ * nicho-agnóstico de propósito (ver `lib/ai/handoff/medical-emergency.ts`) — quem
  * decide se ele PODE disparar handoff é sempre esta função, no chamador.
  *
  * Este teste prova, sem banco, a garantia central do contrato: nenhuma

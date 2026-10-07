@@ -93,6 +93,7 @@ import {
 import {
   CHECKPOINT_INSTRUCTION,
   checkpointContentSchema,
+  fecharOTurno,
   insertCheckpoint,
   parseCheckpointText,
   type CheckpointContent,
@@ -145,10 +146,11 @@ import {
 } from './entrega-de-capacidade';
 import { composeSystemPrompt, loadOrgMemory, renderOrgMemory } from './org-memory';
 import { matchesHandoffKeyword, type PublishedAgentConfig } from './agent-config';
-import { garantirPerguntaDoRoteiro, prepararRoteiroDoTurno } from './roteiro-no-turno';
+import { garantirPerguntaDoRoteiro, perguntaDoRoteiroPodeSair, prepararRoteiroDoTurno } from './roteiro-no-turno';
 import { validarRespostaDoFluxo } from './flow-validate';
 import { moduloLigadoComMemo } from '@/lib/instalacao/modulos';
 import { msAteAJanelaAbrir } from './janela-de-atendimento';
+import { enviaAvisoForaDoHorario, portasDeProducao } from './aviso-fora-do-horario';
 import { janelaDeEnvioAberta, proximaAberturaDaJanela } from '../pacing/engine';
 import { loadChannelKnobs } from '../pacing/store';
 import { avisarJanelaFechada, resolverAvisoDeJanela } from '../pacing/aviso-de-janela';
@@ -175,7 +177,12 @@ import {
 } from './skills';
 import { readSkillReference, skillHasReferences } from './skill-references';
 import { READ_ONLY_TOOLS, wrapToolsWithBreaker, type ToolBreakerThresholds } from './tool-breaker';
-import { loadChannelProvider, nomesDasFerramentas, runBeforeSend } from '../guardrails/before-send';
+import {
+  loadChannelProvider,
+  nomesDasFerramentas,
+  runBeforeSend,
+  tipoDeEnvio,
+} from '../guardrails/before-send';
 import { isStatusSendable } from '../../channels/meta/template-binding';
 import { capabilitiesOf } from '@/lib/channels/capabilities';
 import { renderTemplateBody } from '@/lib/channels/meta/render-template';
@@ -184,7 +191,11 @@ import { instrucaoDeBolhas, sendInBubbles, splitForSend } from './split-message'
 import type { DisclosureMode } from '../guardrails/disclosure/template';
 import { decidePromise } from '../guardrails/promise/engine';
 import { loadPromiseTable } from '../guardrails/promise/table';
-import { classifyPromise } from '../guardrails/promise/semantic';
+import {
+  carregarFontesQueProvamOferta,
+  criarEvidenciasComerciaisDoTurno,
+} from '../guardrails/promise/evidencias-comerciais';
+import { classifyPromise, memoizarPorCandidata } from '../guardrails/promise/semantic';
 import { expectativaDeAtendimento } from '@/lib/escalacao/disponibilidade';
 import {
   montarBriefingDaPassagem,
@@ -193,6 +204,7 @@ import {
 import { diffCheckpoint } from '@/lib/leads/checkpoint-diff';
 import { emitAgentActivityForContact } from '@/lib/leads/agent-activity';
 import { resolveActiveLeadForContact, type LeadCandidate } from '@/lib/leads/active-lead';
+import { aplicaDestinoDaIntencao } from './destino-da-intencao';
 import { recalculaScoreDoLead } from '@/lib/leads/score-writer';
 import {
   JAILBREAK_ESCALATION_LEVEL,
@@ -209,12 +221,16 @@ import {
   type ManipulacaoDoJev,
 } from '@/lib/ai/decisao/manipulacao';
 import type { DependenciasDoPonto } from '@/lib/ai/decisao/ponto';
-import { checkG4Medical } from '@/lib/ai/handoff/triggers';
+import { checkG4Medical } from '@/lib/ai/handoff/medical-emergency';
 import { ORIENTACAO_DE_EMERGENCIA_MEDICA } from '@/lib/escalacao/aviso-ao-lead';
 import { fusoDaOrganizacao } from './fuso-da-org';
 import { renderAgora } from '@/lib/tempo/agora';
 import { decidirElegibilidadeDaConversa } from '@/lib/ai/elegibilidade/consulta-pg';
-import { anotarUltimaInboundVista, ultimaInboundJaRespondida } from './turno-ja-respondido';
+import {
+  anotarUltimaInboundVista,
+  respostaFicouObsoleta,
+  ultimaInboundJaRespondida,
+} from './turno-ja-respondido';
 
 /**
  * Superfície ESTÁTICA das tools do agente (description + inputSchema) — parte do
@@ -474,6 +490,15 @@ export const AGENT_TOOL_DEFS = {
  * que o modelo não fez não vale um cliente sem resposta.
  */
 export const MAX_VETOS_DE_VOCABULARIO_INTERNO = 2;
+
+/**
+ * Quantos vetos de `clinical_claim` o turno tolera antes do fail-safe. A saída aqui é
+ * a OPOSTA da do vocabulário interno: aquele solta o envio, este NUNCA solta — uma
+ * frase com diagnóstico ou dose não sai por insistência do modelo. O que o fail-safe
+ * faz é chamar a equipe (abre um caso), e aí o modelo tem uma saída honesta: dizer que
+ * a equipe vai falar com a pessoa, que agora é verdade.
+ */
+export const MAX_VETOS_DE_AFIRMACAO_CLINICA = 2;
 
 /**
  * O mesmo degrau para o veto de `false_empty_inbound`, e pela mesma assimetria.
@@ -1117,6 +1142,11 @@ export interface InboundTurnKnobs {
   maxSendsPerTurn?: number;
   /** atraso do reagendamento em veto/queued herdado da F2-06 (SEND_QUEUED_RETRY_MS) */
   queuedRetryDelayMs: number;
+  /**
+   * Teto da régua de resposta obsoleta (RESPOSTA_OBSOLETA_TETO_MS) — ver
+   * `respostaFicouObsoleta`. Ausente = desligada (testes que não a exercitam).
+   */
+  respostaObsoletaTetoMs?: number;
   /** circuit breaker de tools por run (F2-15) — env TOOL_BREAKER_* */
   breaker: ToolBreakerThresholds;
   /**
@@ -1595,6 +1625,9 @@ export async function deteccoesDeterministicasDoAssistido(
         ? deps.channel(pool)
         : new WahaChannelAdapter(pool, { ...deps.crmCfg, agentActorId: agent.agentId }),
       optedOutThisTurn,
+      // #2112: o TIPO do turno decide a janela do aviso — inbound/case respondem,
+      // follow-up dispara. Mesmo discriminador do resto do turno (`eTurnoDeResposta`).
+      origem: tipoDeEnvio(eTurnoDeResposta(job)),
       now: clock(),
       log,
       ...(lgpd !== undefined ? { lgpd } : {}),
@@ -1761,6 +1794,9 @@ export async function runAgentTurn(
             channel: (deps.channel ?? ((p: pg.Pool) => new WahaChannelAdapter(p, deps.crmCfg)))(
               pool,
             ),
+            // #2112: a escolta roda no turno INTEIRO, inclusive num follow-up —
+            // o tipo do turno é o que diz qual janela o gate do aviso avalia.
+            origem: tipoDeEnvio(eTurnoDeResposta(job)),
             now: deps.clock?.() ?? new Date(),
             log: logDaEscolta,
             ...(deps.knobs.disclosureMode !== undefined
@@ -1786,6 +1822,20 @@ export async function runAgentTurn(
  *     planejamento: não abrem o WhatsApp de ninguém.
  *   * `operator_turn` — retaguarda (mexe no funil), nunca fala com o lead.
  */
+/**
+ * ═══ RESPOSTA vs RETOMADA — a distinção que a janela da 0495 faz ═══
+ *
+ * `turnoVaiFalarComOLead` admite `followup_turn`, que RETOMA conversa parada — e
+ * retomar NÃO é responder: abrir `followup_turn` junto faria o número mandar
+ * "e aí, tudo certo?" às 4h para quem dormiu.
+ *
+ * Só a REAÇÃO a uma mensagem recebida lê a janela de resposta. `case_reply_turn`
+ * entra porque responde a um caso em aberto: ninguém "chama" um caso, o caso chama.
+ */
+export function eTurnoDeResposta(job: Pick<JobRow, 'kind'>): boolean {
+  return job.kind === 'inbound_turn' || job.kind === 'case_reply_turn';
+}
+
 function turnoVaiFalarComOLead(job: JobRow): boolean {
   if (job.kind === 'inbound_turn' || job.kind === 'case_reply_turn') return true;
   if (job.kind !== 'followup_turn') return false;
@@ -1926,15 +1976,19 @@ async function executarTurnoDoAgente(
   if (!preview && turnoVaiFalarComOLead(liveJob())) {
     const { knobs } = await loadChannelKnobs(pool, tenantId, input.channelSessionId, runLog);
     const agora = clock();
-    if (!janelaDeEnvioAberta(agora, knobs)) {
-      const abertura = proximaAberturaDaJanela(agora, knobs);
+    const resposta = eTurnoDeResposta(liveJob());
+    // `resposta` separa as janelas: reação a quem escreveu lê `resposta*` (0495,
+    // que herda `window*` quando vazia); retomada e disparo leem `window*`.
+    if (!janelaDeEnvioAberta(agora, knobs, resposta)) {
+      const abertura = proximaAberturaDaJanela(agora, knobs, resposta);
       await rescheduleJob(pool, liveJob().id, ctx.workerId, {
         acquiredAt: claimOfJob(liveJob())?.acquired_at,
         delayMs: Math.max(abertura.getTime() - agora.getTime(), 1_000),
         reason: 'fora da janela anti-ban de envio — turno adiado para a abertura',
       });
       runLog.info('turno adiado — fora da janela anti-ban de envio', {
-        janela: `${knobs.windowStartHour}h-${knobs.windowEndHour}h`,
+        janela: `${resposta ? knobs.respostaStartHour : knobs.windowStartHour}h-${resposta ? knobs.respostaEndHour : knobs.windowEndHour}h`,
+        tipo: resposta ? 'resposta' : 'retomada',
         timezone: knobs.timezone,
         abertura: abertura.toISOString(),
       });
@@ -1951,7 +2005,7 @@ async function executarTurnoDoAgente(
           tenantId,
           channelSessionId: input.channelSessionId,
           abertura,
-          janela: `${knobs.windowStartHour}h-${knobs.windowEndHour}h`,
+          janela: `${resposta ? knobs.respostaStartHour : knobs.windowStartHour}h-${resposta ? knobs.respostaEndHour : knobs.windowEndHour}h`,
           timezone: knobs.timezone,
           domingoDesligado: !knobs.allowSunday,
         });
@@ -1994,6 +2048,10 @@ async function executarTurnoDoAgente(
         inbound: liveJob().kind === 'inbound_turn',
       }, { log: runLog, jev: deps.jev });
   const agentConfig = routed.config;
+  // #2155 — o destino do card. `in` porque o ramo de preview/campanha devolve um
+  // objeto literal SEM estes campos: sem a guarda, o tipo da união recusa a leitura.
+  const destinoPipelineId = 'destinationPipelineId' in routed ? (routed.destinationPipelineId ?? null) : null;
+  const destinoStageId = 'destinationStageId' in routed ? (routed.destinationStageId ?? null) : null;
 
   // FREIO CLÍNICO 1 (ramo ASSISTIDO) — urgência médica relatada pelo contato,
   // opt-in por `organizations.settings->>'nicho' = 'saude'` (sem migration —
@@ -2131,6 +2189,37 @@ async function executarTurnoDoAgente(
   if (!preview && liveJob().kind === 'inbound_turn' && agentConfig?.janelaDeAtendimento != null) {
     const esperaMs = msAteAJanelaAbrir(agentConfig.janelaDeAtendimento, clock());
     if (esperaMs !== null) {
+      // O AVISO DE FORA DO HORÁRIO (#1926) — ANTES do adiamento, para sair na
+      // hora em que a mensagem chegou. É resposta a quem escreveu primeiro (o
+      // pacing lê a janela `resposta*` e o aviso CONTA no ledger); as réguas de
+      // opt-out, teto de envio e LGPD continuam valendo — a ordem e os vetores
+      // moram em `aviso-fora-do-horario.ts`. Qualquer erro aqui só PERDE um
+      // aviso: o turno é adiado de qualquer forma, e a resposta não pode morrer
+      // por causa de um recado.
+      try {
+        const aviso = await enviaAvisoForaDoHorario(
+          portasDeProducao(pool, deps.crmCfg.supabase, runLog),
+          {
+            organizationId: tenantId,
+            conversationId: input.conversationId,
+            contactId: leadId,
+            channelSessionId: input.channelSessionId,
+            texto: agentConfig.avisoForaDoHorario ?? null,
+            janela: agentConfig.janelaDeAtendimento,
+            agora: clock(),
+          },
+        );
+        runLog.info(
+          aviso.enviar
+            ? 'aviso de fora do horário enviado'
+            : 'aviso de fora do horário não enviado',
+          { motivo: aviso.enviar ? 'enviado' : aviso.motivo },
+        );
+      } catch (err) {
+        runLog.warn('aviso de fora do horário falhou — o turno segue adiado para a abertura', {
+          error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+        });
+      }
       await rescheduleJob(pool, liveJob().id, ctx.workerId, {
         acquiredAt: claimOfJob(liveJob())?.acquired_at,
         delayMs: esperaMs,
@@ -2186,6 +2275,54 @@ async function executarTurnoDoAgente(
     } catch (err) {
       runLog.warn('decisão do router não gravada', {
         error: (err instanceof Error ? err.message : String(err)).slice(0, 120),
+      });
+    }
+  }
+  // #2155 — A INTENÇÃO TAMBÉM DIZ PARA ONDE O CARD VAI. O roteador escolhia o
+  // agente e o card ficava no funil de entrada: o agente do produto não escrevia
+  // nele, a conversa morria no time errado. Aplicado DEPOIS da decisão de
+  // roteamento (mesmo agente, mesma intenção) e ANTES do turno do agente, para
+  // que ele já responda com o card no funil certo. Silencioso por design: card
+  // já no destino, destino já ocupado e alvo ambíguo não são erro (ver
+  // `destino-da-intencao.ts`).
+  if (!preview && destinoPipelineId !== null) {
+    try {
+      const destino = await aplicaDestinoDaIntencao({
+        admin: deps.crmCfg.supabase,
+        organizationId: tenantId,
+        contactId: leadId,
+        destinoPipelineId,
+        destinoStageId,
+        handlerCtx: {
+          organization_id: tenantId,
+          actor: {
+            type: 'ai_agent',
+            id: 'agent-engine',
+            role: 'ai_operator',
+            ...(agentConfig === null ? {} : { agent_id: agentConfig.agentId }),
+          },
+          requestId: liveJob().id,
+        },
+      });
+      runLog.info('destino da intenção aplicado', {
+        status: destino.status,
+        pipeline_id: destinoPipelineId,
+        intent: routed.intentName,
+        ...(destino.error === undefined ? {} : { error: destino.error }),
+        ...(destino.origemId === undefined ? {} : { origem: destino.origemId }),
+        ...(destino.cloneId === undefined ? {} : { clone: destino.cloneId }),
+      });
+    } catch (err) {
+      // Nunca derruba a resposta ao lead por causa do destino do card.
+      //
+      // A recusa da RÉGUA (#2297, caminho 1) não chega mais aqui: ela é
+      // capturada dentro de `aplicaDestinoDaIntencao`, que conhece o negócio de
+      // origem e abre o aviso na Central antes de devolver `recusado` — este
+      // `catch` é a rede para o que não é recusa prevista (falha de banco na
+      // leitura, por exemplo), e segue sem aviso porque não há negócio a apontar.
+      runLog.warn('destino da intenção não aplicado', {
+        error: (err instanceof Error ? err.message : String(err)).slice(0, 160),
+        pipeline_id: destinoPipelineId,
       });
     }
   }
@@ -2335,6 +2472,11 @@ async function executarTurnoDoAgente(
     base: {
       channel: liveChannel(),
       optedOutThisTurn,
+      // #2112: o TIPO do turno decide a janela do aviso — `inbound_turn`/
+      // `case_reply_turn` respondem a quem escreveu; `followup_turn` é disparo
+      // (retomada), e o aviso de escalação dentro dele tem de cair na janela de
+      // `window_*`. Mesmo discriminador do resto do turno.
+      origem: tipoDeEnvio(eTurnoDeResposta(liveJob())),
       now: clock(),
       log: runLog,
       lgpd,
@@ -2632,6 +2774,11 @@ async function executarTurnoDoAgente(
   // O que o modelo de fato mandou neste turno (depois da cadeia). A trava "a
   // pergunta saiu?" do roteiro de atendimento lê daqui.
   const corposEnviados: string[] = [];
+  // #1943: o turno foi DESCARTADO como obsoleto (guard `resposta_obsoleta`, #1940)
+  // ainda no run — o cliente escreveu de novo enquanto o modelo pensava. Quando
+  // ligada, NADA mais sai dele, nem a pergunta pendente do roteiro (que segue
+  // feita para o turno da mensagem nova). Ver `perguntaDoRoteiroPodeSair`.
+  let turnoDescartado = false;
   // Teto de mensagens físicas por turno (F2-15b) — `seq` JÁ é a contagem certa: ele só
   // avança quando o envio de fato sai pro canal (send_message + send_template, bolhas
   // incluídas), nunca em veto de gate. Checar `seq` antes de tentar o próximo envio
@@ -2644,24 +2791,45 @@ async function executarTurnoDoAgente(
   // correlacionar tentativa de promessa fora de tabela com o sinal de jailbreak — a
   // detecção NÃO depende do gate estar na cadeia default (a ordem final é da F4-08).
   const promiseTable = (await loadPromiseTable(pool, tenantId))?.table ?? null;
+  // Falha fechada: sem saber o tipo da fonte, nenhum trecho de conhecimento prova
+  // oferta, e a conferência de promessa age como agia antes das evidências.
+  const fontesQueProvamOferta = await carregarFontesQueProvamOferta(
+    pool,
+    tenantId,
+    agentConfig?.knowledgeSourceIds ?? [],
+  ).catch((err: unknown) => {
+    runLog.warn('tipos das fontes de conhecimento indisponíveis — nenhum trecho prova oferta', {
+      error: (err instanceof Error ? err.message : String(err)).slice(0, 160),
+    });
+    return [];
+  });
+  const evidenciasComerciais = criarEvidenciasComerciaisDoTurno(fontesQueProvamOferta);
   // Gate 5 da cadeia (F4-02/F4-08): closure do classificador semântico com tenant/lead/job da
   // ROW do job fechados dentro (regra dura nº 1) — resolvido pelo seam agnóstico. undefined =
   // camada off (gate no-op). CUSTO: uma chamada de modelo POR ENVIO quando ligada.
+  //
+  // Memo POR CORPO e por evidências, por turno (`memoizarPorCandidata`): os
+  // fail-safes de vocabulário e de promessa re-rodam a cadeia com o MESMO texto.
   const semanticClassifier = camadaLigada(
     camadas.promessa_semantica,
     deps.knobs.promiseSemantic?.enabled === true,
   )
-    ? (candidate: string) =>
+    ? memoizarPorCandidata((candidate: string) =>
         classifyPromise(
           pool,
           deps.llmCfg,
           { tenantId, leadId: leadId || null, jobId: job?.id },
           {
             candidate,
+            commercialEvidence: evidenciasComerciais.ler(),
             ...argsAux(deps.knobs.promiseSemantic?.model),
           },
           { ...(deps.registry !== undefined ? { registry: deps.registry } : {}), log: runLog },
-        )
+        ),
+        // As evidências crescem entre o veto e o reenvio; o veredito de antes
+        // da consulta não vale para a mesma frase depois dela.
+        () => JSON.stringify(evidenciasComerciais.ler()),
+      )
     : undefined;
   let outOfTablePromiseAttempted = false;
   // Spec 15 (Wave 4 lê este flag): true quando open_human_case abriu um caso NESTE
@@ -2675,6 +2843,9 @@ async function executarTurnoDoAgente(
   // (`internal_vocabulary_leak`): 1º veto no turno ensina o modelo a reescrever; persistir
   // solta o envio com registro. Por turno (closure), nunca cross-turno.
   let internalVocabularyVetoCount = 0;
+  // Contador do fail-safe do gate de afirmação clínica (`clinical_claim`): 1º veto ensina;
+  // persistir abre caso para a equipe — e o envio continua barrado. Por turno (closure).
+  let clinicalClaimVetoCount = 0;
   // Uma recusa deste tipo devolve o texto confirmado ao modelo para que ele
   // reescreva antes de falar com o cliente. Não gasta envio nem toca no canal.
   let falseEmptyInboundVetoCount = 0;
@@ -2686,6 +2857,19 @@ async function executarTurnoDoAgente(
   // turno com dois vetos ficaria mudo por mais de 20 segundos: o conserto do
   // "rápido demais" viraria o defeito simétrico, mais caro que o original.
   let jaEsperouComoHumano = false;
+  // Knobs de atraso humano por conexão (0499) — lidos UMA vez por turno para a
+  // pausa antes da 1ª bolha (`esperarComoHumano`) e para o jitter entre bolhas
+  // (`throttle_ms + jitter_max_ms`). Sem linha em channel_knobs caem nos defaults
+  // de defaults.ts — que espelham os valores históricos (regressão zero).
+  const pacingDoTurno = !preview
+    ? await loadChannelKnobs(pool, tenantId, input.channelSessionId, runLog)
+    : null;
+  const knobsDeAtrasoHumano = {
+    atrasoNotarMs: pacingDoTurno?.knobs.atrasoNotarMs,
+    msPorCaractere: pacingDoTurno?.knobs.msPorCaractere,
+    atrasoMinimoMs: pacingDoTurno?.knobs.atrasoMinimoMs,
+    atrasoMaximoMs: pacingDoTurno?.knobs.atrasoMaximoMs,
+  };
   // Cap de envio (warm-up/diário) vetado neste turno — capturado aqui porque o veto
   // não empurra outcome nenhum a `outcomes` (ver comentário no ponto de captura, mais
   // abaixo). Diferente da janela horária (checada ANTES do modelo rodar, linha ~1233):
@@ -2717,6 +2901,9 @@ async function executarTurnoDoAgente(
   // as tools do modelo rodam em passos anteriores do mesmo loop, o valor já está certo
   // quando o modelo decide mandar a resposta.
   let agendaToolCalledThisTurn = false;
+  // Lido pelo `casePromiseGate` (#1873): true só depois de `schedule_followup` AGENDAR com
+  // sucesso neste turno. Libera apenas a promessa de retorno do próprio assistente.
+  let followupAgendadoNesteTurno = false;
   const outcomes: ChannelSendResult[] = [];
   // Citações acumuladas por buscas de conhecimento DESTE turno — anexadas à
   // próxima outbound enviada (shape de lib/ai/citations/types, que a UI já lê).
@@ -2942,6 +3129,8 @@ async function executarTurnoDoAgente(
           // Só ESTE gate muda; stop, LGPD e pacing continuam valendo integralmente.
           isTemplate: true,
           optedOutThisTurn,
+          // Resposta do turno, mesmo sendo template: lê a janela de resposta (0495).
+          resposta: eTurnoDeResposta(liveJob()),
           crmDailyLimit: null,
           now: clock(),
           sleep: deps.sleep,
@@ -3008,6 +3197,7 @@ async function executarTurnoDoAgente(
           { log: runLog, embed: deps.embed },
         );
         if (out.ok && out.results.length > 0) {
+          evidenciasComerciais.registrarConhecimento(out);
           // As citações são montadas AQUI, pelo código, a partir do resultado
           // cru — é por isso que os ids podem sair do que vai ao modelo sem
           // perder nada: quem precisa deles é esta linha, não o modelo.
@@ -3072,6 +3262,37 @@ async function executarTurnoDoAgente(
             },
           };
         }
+        // RESPOSTA OBSOLETA: o cliente escreveu de novo enquanto este turno pensava.
+        // Só antes do PRIMEIRO envio — cortar a meio uma resposta já começada é pior
+        // que a duplicata. A mensagem nova tem job próprio, que lê a conversa inteira
+        // e responde a tudo de uma vez. Ver `respostaFicouObsoleta`.
+        if (
+          !preview &&
+          seq === 0 &&
+          (await respostaFicouObsoleta(
+            pool,
+            { organizationId: tenantId, conversationId: input.conversationId, jobId: liveJob().id },
+            deps.knobs.respostaObsoletaTetoMs ?? 0,
+          ))
+        ) {
+          runLog.info('resposta descartada — o cliente escreveu de novo durante o turno', {
+            job_id: liveJob().id,
+            conversation_id: input.conversationId,
+          });
+          // #1943: marca o turno como descartado. NADA mais sai dele, nem a
+          // pergunta pendente do roteiro — ela segue feita para o turno da
+          // mensagem nova. Ver `perguntaDoRoteiroPodeSair` no `enviar`.
+          turnoDescartado = true;
+          return {
+            ok: false,
+            error: {
+              code: 'resposta_obsoleta',
+              message:
+                'O cliente mandou mensagem nova enquanto você escrevia; esta resposta ficou desatualizada e NÃO foi enviada. ' +
+                'NÃO chame send_message de novo neste turno — encerre agora. O próximo turno lê a conversa inteira e responde a tudo de uma vez.',
+            },
+          };
+        }
         // A foto do produto (ideia de @vgamkt, #1130): preparada ANTES da cadeia e
         // fora do lock do número — a cópia no Storage é rede. Código errado volta
         // ao modelo sem enviar nada; foto que não copiou sai do envio e o texto
@@ -3125,6 +3346,10 @@ async function executarTurnoDoAgente(
             channelSessionId: input.channelSessionId,
             body,
             optedOutThisTurn,
+            // `inbound_turn`/`case_reply_turn` respondem a quem escreveu e leem a
+            // janela de RESPOSTA (0495). `followup_turn` retoma conversa parada e
+            // continua na janela de DISPARO.
+            resposta: eTurnoDeResposta(liveJob()),
             // ponytail: channel_sessions.daily_message_limit do CRM ainda não é lido
             // no runtime — null cai nos degraus de warm-up (conservadores). Injetar
             // aqui quando o drain expuser o limite da sessão.
@@ -3148,6 +3373,11 @@ async function executarTurnoDoAgente(
             // não é dele, e a única saída seria o silêncio. O follow-up determinístico
             // idem (ver GateContext.internalVocabularyEnforced).
             enforceInternalVocabulary: true,
+            // Afirmação clínica: mesma razão do vocabulário (só o corpo do MODELO), e
+            // só para a organização que ligou a camada — ver
+            // `GateContext.clinicalClaimEnforced`. Sem linha, desligada: não há padrão de
+            // ambiente para uma proteção que só faz sentido em saúde.
+            enforceClinicalClaim: camadaLigada(camadas.afirmacao_clinica, false),
             // Mesmo padrão do vocabulário interno: só o `send_message` arma — é o único
             // corpo escrito pelo modelo. `active` é ter QUALQUER ferramenta de agenda:
             // um agente que só CONSULTA promete "vou verificar" igual, e enquanto a
@@ -3157,6 +3387,10 @@ async function executarTurnoDoAgente(
               active: agentConfig !== null && temFerramentaDeAgenda(agentConfig.toolIds),
               ferramentas: agentConfig === null ? [] : ferramentasDeAgendaDoAgente(agentConfig.toolIds),
               toolCalledThisTurn: agendaToolCalledThisTurn,
+            },
+            followup: {
+              disponivel: rawTools.schedule_followup !== undefined,
+              agendadoNesteTurno: followupAgendadoNesteTurno,
             },
             ...(deps.knobs.disclosureMode !== undefined
               ? { disclosureMode: deps.knobs.disclosureMode }
@@ -3198,6 +3432,9 @@ async function executarTurnoDoAgente(
                     agentConfig?.splitMaxChars ?? 600,
                     Math.max(1, maxSendsPerTurn - seq),
                   )[0] ?? body,
+                // Os quatro números do atraso por conexão (0499). Vazios (sem
+                // linha em channel_knobs / preview) = defaults históricos.
+                knobs: knobsDeAtrasoHumano,
                 // `processamentoMs` é a contribuição do #849 (@Teowfb): a pausa humana desconta o
                 // tempo que o turno JÁ gastou pensando, em vez de somar em cima dele. Sem este
                 // argumento o `gasto` de `atraso-humano.ts` cai no `?? 0` e o desconto não acontece —
@@ -3221,7 +3458,13 @@ async function executarTurnoDoAgente(
               corposEnviados.push(finalBody);
               const sleep =
                 deps.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
-              const jitter = () => 1200 + Math.floor(Math.random() * 800); // piso no throttle anti-ban (1.2s) — bolhas são mensagens físicas
+              const jitter = () =>
+                // Piso no throttle anti-ban do número (1.2s default) — bolhas são
+                // mensagens físicas. Lê os knobs da CONEXÃO (throttle_ms + jitter_max_ms,
+                // 0499) e não o literal: desde a 0010 os dois já são configuração por
+                // número, e o call site estava cravando `1200 + rand*800` ignorando-a.
+                (pacingDoTurno?.knobs.throttleMs ?? 1200) +
+                Math.floor(Math.random() * (pacingDoTurno?.knobs.jitterMaxMs ?? 800));
               const enviar = (
                 corpo: string,
                 media?: FotoParaEnvio,
@@ -3307,6 +3550,54 @@ async function executarTurnoDoAgente(
               hasOpenCase: true,
               openedCaseThisTurn: true,
             });
+          }
+          if (chain.status === 'vetoed' && chain.code === 'clinical_claim') {
+            // Fail-safe do gate de afirmação clínica. Ao contrário do vocabulário interno,
+            // este NUNCA solta o envio: não existe "frase com diagnóstico, mas melhor que
+            // silêncio". O que muda na insistência é que o sistema chama a equipe — abre um
+            // caso com a frase barrada — e o erro devolvido ao modelo passa a dizer que a
+            // equipe foi acionada, para ele avisar a pessoa sem repetir a afirmação. A
+            // resposta seguinte passa pelo `case_promise` porque o caso agora existe.
+            clinicalClaimVetoCount += 1;
+            if (
+              clinicalClaimVetoCount >= MAX_VETOS_DE_AFIRMACAO_CLINICA &&
+              agentConfig?.casesEnabled === true &&
+              !openedCaseThisTurn &&
+              !hasOpenCase
+            ) {
+              const auto = await openCase(
+                pool,
+                {
+                  tenantId,
+                  conversationId: input.conversationId,
+                  agentId: agentConfig?.agentId ?? null,
+                },
+                {
+                  title: 'Pergunta clínica que precisa de um profissional',
+                  summary: body, // a mensagem que o assistente tentou enviar e foi barrada
+                  blocker:
+                    'Aberto automaticamente: o assistente insistiu numa afirmação clínica ' +
+                    '(diagnóstico, remédio, promessa de resultado ou câncer) e o envio foi barrado.',
+                  source: 'guardrail_autofallback',
+                  contextSnapshot: buildCaseContextSnapshot(),
+                },
+              );
+              if (auto.ok) {
+                openedCaseThisTurn = true;
+                moverParaHandoffBestEffort('clinical_claim_autofallback');
+                return {
+                  ok: false,
+                  error: {
+                    code: chain.code,
+                    message:
+                      'A mensagem continua barrada. A equipe já foi acionada: diga à pessoa, ' +
+                      'em uma frase, que um profissional da equipe vai falar com ela, sem ' +
+                      'repetir nada sobre diagnóstico, remédio ou resultado.',
+                  },
+                };
+              }
+            }
+            return { ok: false, error: { code: chain.code, message: chain.message } };
           }
           if (chain.status === 'vetoed' && chain.code === 'internal_vocabulary_leak') {
             // Fail-safe do gate de vazamento — O CLIENTE NUNCA FICA SEM RESPOSTA.
@@ -3470,6 +3761,7 @@ async function executarTurnoDoAgente(
               tenantId,
               leadId,
               toStage: update.transition.to,
+              ...(agentConfig !== null ? { pipelineIds: agentConfig.pipelineIds } : {}),
               ...(update.transition.reason !== undefined
                 ? { reason: update.transition.reason }
                 : {}),
@@ -3622,6 +3914,10 @@ async function executarTurnoDoAgente(
               conversationSummary: buildHandoffSummary(previous),
               contextoDoTurno: { checkpoint: previous, pendentesDoCliente: inboundsPendentes },
               avisoAoLead: aviso,
+              // #2210: com a mensagem na mão o handoff pergunta ao banco se a
+              // derivação da mídia ainda estava em aberto — e aí grava a marca
+              // que permite devolver o atendimento sozinho quando o texto chegar.
+              gatilho: { inboundMessageId: input.inboundMessageId },
               log: runLog,
             },
             raw,
@@ -3664,6 +3960,7 @@ async function executarTurnoDoAgente(
           if (!res.ok) {
             return res; // erro de ensino (payload / data no passado / fora da janela)
           }
+          followupAgendadoNesteTurno = true;
           return {
             ok: true,
             status: 'agendado',
@@ -3875,7 +4172,7 @@ async function executarTurnoDoAgente(
           {
             organizationId: tenantId,
             jobId: preview?.runId ?? liveJob().id,
-            ...(leadId ? { contactId: leadId } : {}),
+            contactId: leadId || null,
           },
           configDoTurno,
           runLog,
@@ -3885,6 +4182,24 @@ async function executarTurnoDoAgente(
           mcpCleanup = mcp.cleanup;
           for (const [name, mcpTool] of Object.entries(mcp.tools)) {
             if (name in rawTools) continue;
+            if (
+              (name === 'crm_search_products' || name === 'crm_search_knowledge') &&
+              typeof mcpTool.execute === 'function'
+            ) {
+              const executeOriginal = mcpTool.execute.bind(mcpTool);
+              rawTools[name] = {
+                ...mcpTool,
+                execute: (async (...args: Parameters<typeof executeOriginal>) => {
+                  const resultado = await executeOriginal(...args);
+                  // O modelo escolhe a consulta, nunca fornece a autorização.
+                  // A ponte MCP já aplica organização, papel e escopo de leitura.
+                  if (name === 'crm_search_products') evidenciasComerciais.registrarCatalogo(resultado);
+                  else evidenciasComerciais.registrarConhecimento(resultado);
+                  return resultado;
+                }) as typeof mcpTool.execute,
+              };
+              continue;
+            }
             // Marca a EXECUÇÃO (não só a decisão de chamar) — é isso que o agendaStallGate
             // precisa saber para não vetar um turno que já checou a agenda de verdade.
             if (AGENDA_TOOL_NAMES.has(name) && typeof mcpTool.execute === 'function') {
@@ -4297,7 +4612,10 @@ async function executarTurnoDoAgente(
           roteiro,
           corposEnviados,
           enviar: async (texto) => {
-            if (seq >= maxSendsPerTurn) return false;
+            // #1943: turno descartado como obsoleto → a pergunta do roteiro NÃO
+            // sai (segue pendente para o turno seguinte). Também vigia o teto
+            // de mensagens físicas do turno (F2-15b).
+            if (!perguntaDoRoteiroPodeSair({ turnoDescartado, seq, maxSendsPerTurn })) return false;
             const chain = await runBeforeSend({
               pool,
               log: runLog,
@@ -4308,6 +4626,9 @@ async function executarTurnoDoAgente(
               channelSessionId: input.channelSessionId,
               body: texto,
               optedOutThisTurn,
+              // Sai no MESMO turno da resposta: sem isto, às 3h com a janela de
+              // resposta aberta, o agente responde e a pergunta do roteiro é vetada.
+              resposta: eTurnoDeResposta(liveJob()),
               crmDailyLimit: null,
               // A pergunta repete por design (foi feita e não respondida); o
               // anti-blast vetaria justamente o que esta trava garante. Mesmo
@@ -4374,40 +4695,45 @@ async function executarTurnoDoAgente(
       avisarSemCandidato(preview);
       return;
     }
-    const closing = await runModelCall(
-      pool,
-      deps.llmCfg,
-      {
-        tenantId,
-        leadId: leadId || null,
-        jobId: job?.id,
-        purpose: 'checkpoint',
-        ...(agentConfig !== null
-          ? {
-              model: agentConfig.model,
-              llmOverride: {
-                provider: agentConfig.provider,
-                credentialId: agentConfig.credentialId,
-              },
-            }
-          : {}),
-        system,
-        messages: [
-          // prune: o checkpoint reusa a abertura só como texto — a mídia nativa (cara) já
-          // fez seu trabalho na 1ª chamada e não precisa ir de novo.
-          ...openingTextOnly,
-          ...responseMessages,
-          { role: 'user', content: CHECKPOINT_INSTRUCTION },
-        ],
+    // Uma correção antes de re-tentar o turno inteiro (`fecharOTurno`): o JSON
+    // recusado volta ao modelo com o problema, numa 2ª chamada de fechamento.
+    const { content, resposta: closing } = await fecharOTurno({
+      pedir: async (correcao) => {
+        const chamada = await runModelCall(
+          pool,
+          deps.llmCfg,
+          {
+            tenantId,
+            leadId: leadId || null,
+            jobId: job?.id,
+            purpose: 'checkpoint',
+            ...(agentConfig !== null
+              ? {
+                  model: agentConfig.model,
+                  llmOverride: {
+                    provider: agentConfig.provider,
+                    credentialId: agentConfig.credentialId,
+                  },
+                }
+              : {}),
+            system,
+            messages: [
+              // prune: o checkpoint reusa a abertura só como texto — a mídia nativa (cara) já
+              // fez seu trabalho na 1ª chamada e não precisa ir de novo.
+              ...openingTextOnly,
+              ...responseMessages,
+              { role: 'user', content: CHECKPOINT_INSTRUCTION },
+              ...correcao,
+            ],
+          },
+          { registry: deps.registry, log: runLog },
+        );
+        return { text: chamada.result.text, callId: chamada.callId };
       },
-      { registry: deps.registry, log: runLog },
-    );
-    const content = parseCheckpointText(
-      closing.result.text.replace(
-        /https:\/\/meet\.google\.com\/[a-zA-Z0-9-]+/g,
-        '[link da reunião disponível na Agenda]',
-      ),
-    );
+      ajustar: (text) =>
+        text.replace(/https:\/\/meet\.google\.com\/[a-zA-Z0-9-]+/g, '[link da reunião disponível na Agenda]'),
+      log: runLog,
+    });
 
     if (preview) {
       preview.result.checkpoint = content;

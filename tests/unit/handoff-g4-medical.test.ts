@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { checkG4Medical } from "@/lib/ai/handoff/triggers";
+import { checkG4Medical } from "@/lib/ai/handoff/medical-emergency";
 
 /** Frases que PRECISAM disparar o handoff de urgência médica (PT-BR). */
 const URGENCIA_MEDICA_PT = [

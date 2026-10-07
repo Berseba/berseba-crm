@@ -88,22 +88,37 @@ export function scrubMessage(input: string): string {
 }
 
 function apagarCpfETelefone(trecho: string): string {
-  return trecho
-    // Telefone como se escreve no Brasil: +55 opcional, DDD opcional (com ou
-    // sem parênteses), 8 ou 9 dígitos (o 9 da frente pode vir solto), e hífen,
-    // ponto, espaço ou nada entre os blocos — `11-98765-4321` e `11.98765.4321`
-    // saíam inteiros enquanto a tela prometia apagar o telefone. Com 8 dígitos
-    // o padrão é curto, e a borda (`[^\w-]` antes, `(?![\w-])` depois) o tira de
-    // dentro de hash: sem ela, 1.390 de 5.000 SHA-1 saíam alterados. Os dois
-    // padrões de baixo seguem pegando o número colado em outro texto.
-    .replace(
-      /(^|[^\w-])(?:\+?55\s?)?(?:\(?\d{2}\)?[-.\s]?)?(?:9[-.\s]?\d{4}|\d{4,5})[-.\s]?\d{4}(?![\w-])/g,
-      "$1[PHONE]",
-    )
-    // CPF com qualquer separador entre os blocos (ponto, espaço, hífen ou nada):
-    // `123 456 789 09` e `123.456.789.09` também são CPF de quem digita rápido.
-    .replace(/\d{3}[.\s-]?\d{3}[.\s-]?\d{3}[.\s-]?\d{2}/g, "[CPF]")
-    .replace(/\+?\d{2}\s?\d{4,5}-?\d{4}/g, "[PHONE]");
+  return (
+    trecho
+      // Números em formato internacional (+DDI), ANTES de tudo: sem esta
+      // passada o `+351912345678` caía no padrão de CPF e saía como
+      // `+[CPF]8` (issue #2345). Cobre `+351912345678` e `+351 912 345 678`;
+      // os +55 ficam com o padrão brasileiro logo abaixo — o `(?!55)` cumpre
+      // isso e mantém o número brasileiro saindo exatamente como antes. O último
+      // bloco é `\d{3,}`, não `\d{3,4}`, para não sobrar dígito no fim de número
+      // estrangeiro (`+49 30 12345678` saía `[PHONE]8`). Sem as duas peças,
+      // `+55 11 987654321` saía `[PHONE]21`.
+      .replace(/\+(?!55)\d{1,3}[\s.-]?\(?\d{2,3}\)?[\s.-]?\d{3}[\s.-]?\d{3,}/g, "[PHONE]")
+      // Telefone como se escreve no Brasil: +55 opcional, DDD opcional (com ou
+      // sem parênteses), 8 ou 9 dígitos (o 9 da frente pode vir solto), e hífen,
+      // ponto, espaço ou nada entre os blocos — `11-98765-4321` e `11.98765.4321`
+      // saíam inteiros enquanto a tela prometia apagar o telefone. Com 8 dígitos
+      // o padrão é curto, e a borda (`[^\w-]` antes, `(?![\w-])` depois) o tira de
+      // dentro de hash: sem ela, 1.390 de 5.000 SHA-1 saíam alterados. Os dois
+      // padrões de baixo seguem pegando o número colado em outro texto.
+      .replace(
+        /(^|[^\w-])(?:\+?55\s?)?(?:\(?\d{2}\)?[-.\s]?)?(?:9[-.\s]?\d{4}|\d{4,5})[-.\s]?\d{4}(?![\w-])/g,
+        "$1[PHONE]",
+      )
+      // CPF com qualquer separador entre os blocos (ponto, espaço, hífen ou nada):
+      // `123 456 789 09` e `123.456.789.09` também são CPF de quem digita rápido.
+      .replace(/\d{3}[.\s-]?\d{3}[.\s-]?\d{3}[.\s-]?\d{2}/g, "[CPF]")
+      // 9 dígitos em três blocos (`123 456 789`) — o NIF português e o telemóvel
+      // nacional. Vem DEPOIS do CPF para não partir um CPF separado
+      // (`123.456.789-09`) em `[PHONE]-09`.
+      .replace(/\b\d{3}[.\s-]\d{3}[.\s-]\d{3}\b/g, "[PHONE]")
+      .replace(/\+?\d{2}\s?\d{4,5}-?\d{4}/g, "[PHONE]")
+  );
 }
 
 /**
@@ -126,6 +141,26 @@ function apagarCpfETelefone(trecho: string): string {
  */
 const CREDENTIAL_PATH =
   /(\/api\/v1\/webhooks\/[^/?#\s]+\/|\/team\/accept-invite\/)[^/?#\s]+/g;
+
+/** Parâmetro de query (ou de fragmento) que carrega credencial: `token_hash`, `code`… */
+const CREDENTIAL_PARAM = /token|code|secret|password|otp|^sig$/i;
+
+/**
+ * A URL carrega credencial: no path (as rotas acima) ou num parâmetro com nome de
+ * credencial. É o critério de quem NÃO pode gravar a URL crua (o Replay, em
+ * `./replay`), não de quem a redige — `scrubUrl` apaga todo valor de query.
+ */
+export function urlComCredencial(input: string): boolean {
+  if (input.search(CREDENTIAL_PATH) >= 0) return true;
+  let url: URL;
+  try {
+    url = new URL(input, "http://x");
+  } catch {
+    return false;
+  }
+  const nomes = [...url.searchParams.keys(), ...new URLSearchParams(url.hash.slice(1)).keys()];
+  return nomes.some((nome) => CREDENTIAL_PARAM.test(nome));
+}
 
 /**
  * Redige credencial de path e valor de query string, preservando as CHAVES da query.
@@ -198,6 +233,10 @@ function scrubHeaders(headers: unknown): void {
   const record = headers as Record<string, string>;
   for (const key of Object.keys(record)) {
     if (isSensitiveHeader(key)) delete record[key];
+    // O `Referer` é a URL da página anterior — com o token dela, se tinha um.
+    else if (/^referer$/i.test(key) && typeof record[key] === "string") {
+      record[key] = scrubUrl(record[key]);
+    }
   }
 }
 
@@ -271,9 +310,12 @@ export const sentryScrubHooks = {
     if (typeof breadcrumb.message === "string") {
       breadcrumb.message = scrubUrl(breadcrumb.message);
     }
-    const url = breadcrumb.data?.url;
-    if (typeof url === "string" && breadcrumb.data) {
-      breadcrumb.data.url = scrubUrl(url);
+    // `from`/`to` são da navegação (troca de rota): a rota de onde se saiu pode
+    // ter o token no path.
+    const data = breadcrumb.data;
+    for (const campo of ["url", "from", "to"]) {
+      const valor = data?.[campo];
+      if (data && typeof valor === "string") data[campo] = scrubUrl(valor);
     }
     return breadcrumb;
   },

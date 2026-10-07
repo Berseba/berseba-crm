@@ -43,6 +43,7 @@ const base: Lead = {
   owner_agent_id: null,
   assigned_at: null,
   last_activity_at: null,
+  stage_changed_at: "2026-07-20T10:00:00Z",
   expected_close_date: null,
   closed_at: null,
   source: "manual",

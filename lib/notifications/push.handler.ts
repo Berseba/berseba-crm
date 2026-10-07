@@ -26,7 +26,7 @@ async function handleInbound(row: EventRow): Promise<HandlerResult> {
     const admin = createAdminClient();
     const { data } = await admin
       .from("contacts")
-      .select("display_name, name, phone_number, avatar_storage_path, is_anonymized")
+      .select("display_name, name, phone_number, avatar_storage_path, is_anonymized, is_personal")
       .eq("id", contactId)
       .eq("organization_id", row.organization_id)
       .maybeSingle();
@@ -36,7 +36,12 @@ async function handleInbound(row: EventRow): Promise<HandlerResult> {
       phone_number?: string | null;
       avatar_storage_path?: string | null;
       is_anonymized?: boolean | null;
+      is_personal?: boolean | null;
     } | null;
+    // Pessoal não empurra nada no bolso (spec 21, etapa 10, caminho 3): sem push.
+    if (c?.is_personal === true) {
+      return { consumer_key: WEB_PUSH_INBOUND_KEY, status: "skipped", detail: "contato_pessoal" };
+    }
     // A cadeia CANÔNICA, e não a de dois campos remontada aqui: aquela deixava
     // passar o identificador técnico do WhatsApp — a notificação chegaria à tela
     // de bloqueio do celular escrita "Contato 543134@lid". `rotuloDoContato`
@@ -148,6 +153,7 @@ async function enviarParaUsuario(
 
 export const webPushInboundHandler: EventHandler = {
   key: WEB_PUSH_INBOUND_KEY,
+  naOrgParada: "pula",
   events: [
     "message.received",
     "message.group_received",
