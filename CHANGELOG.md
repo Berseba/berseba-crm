@@ -8,6 +8,14 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.3.0] — 2026-10-08
+
+### Alterado
+
+- **O nicho Saúde liga a conferência “Não fazer afirmação clínica”, agora com vocabulário de fisioterapia e pilates** O veto que impede a IA de afirmar diagnóstico, indicar remédio ou prometer cura passa a ser um só: a conferência “Não fazer afirmação clínica”, no painel de segurança do agente. Ela ganhou o vocabulário de fisioterapia e pilates (tendinite, hérnia de disco, lesão muscular, ibuprofeno, dipirona, “vai curar”, entre outros). Se a IA insistir duas vezes numa frase barrada e o agente estiver com “Pedir ajuda sem sair da conversa” ligado, a equipe é chamada por um caso; sem isso, a mensagem continua barrada e a IA recebe a instrução de reescrever.
+
+  Escolher Saúde em Configurações › Segurança agora liga essa conferência quando a organização ainda não tinha escolhido. Uma escolha já feita no painel é mantida — e, enquanto o nicho for Saúde e a conferência estiver desligada, a tela de Segurança mostra um aviso fixo com o caminho para ligá-la. Organizações que já estavam em Saúde antes desta versão não recebem a conferência sozinhas: abra Configurações › Segurança e siga o aviso, ou escolha Saúde de novo. Sair de Saúde só desliga o encaminhamento de urgência médica. Ao salvar o nicho, outra configuração da organização salva no mesmo instante deixou de ser apagada.
+
 ## [2.2.0] — 2026-10-07
 
 ### Alterado
@@ -9333,7 +9341,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.2.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.3.0...HEAD
+[2.3.0]: https://github.com/berseba/berseba-crm/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/berseba/berseba-crm/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/berseba/berseba-crm/compare/v2.0.0...v2.1.0
 [2.0.0]: https://github.com/berseba/berseba-crm/compare/0440d4fc3ffe036521b7619763cba4311617b8a1...v2.0.0
