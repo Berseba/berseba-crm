@@ -15,7 +15,7 @@ describe("NICHOS — vocabulário fechado", () => {
     expect(NICHOS).toEqual(["saude", "ecommerce", "imobiliaria", "infoproduto", "servicos"]);
   });
 
-  it("NICHO_SAUDE é o valor que arma os freios clínicos", () => {
+  it("NICHO_SAUDE é o valor que arma a urgência médica e a camada de afirmação clínica", () => {
     expect(NICHO_SAUDE).toBe("saude");
     expect(NICHOS).toContain(NICHO_SAUDE);
   });

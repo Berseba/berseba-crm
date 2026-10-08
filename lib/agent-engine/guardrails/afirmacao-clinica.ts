@@ -60,6 +60,46 @@ export interface AchadoClinico {
   categorias: CategoriaClinica[];
 }
 
+// ── Berseba ──────────────────────────────────────────────────────────────────
+// Upstream's vocabulary is dermatology + general practice. Clínica FitVision is
+// physiotherapy/pilates, and before this layer replaced our own `clinical_scope`
+// gate (issue Berseba/berseba-crm#35) it let 9 of that gate's 12 veto cases
+// through. The additions live here, in one fenced block, so an upstream sync
+// touching this file conflicts on as few lines as possible. Corpus (both
+// directions, both languages): `afirmacao-clinica.berseba.test.ts`.
+// Declared before DOENCAS because DOENCAS reads it at module load.
+
+/** Musculoskeletal conditions — joins DOENCAS, so only "você tem / isso é <X>" bars. */
+const BERSEBA_PHYSIO_CONDITIONS =
+  'tendinite|tendinopatia|tendinitis|bursite|bursitis|h[eé]rnia(?:\\s+de\\s+disco)?|' +
+  'fasc[ií]?ite(?:\\s+plantar)?|fascitis(?:\\s+plantar)?|artrose|artrosis|artrite|artritis|' +
+  'escoliose|escoliosis|les[aã]o(?:\\s+muscular)?|lesi[oó]n(?:\\s+muscular)?|ruptura|' +
+  'distens[aã]o|contratura|entorse|esguince|luxa[cç][aã]o|luxaci[oó]n|fratura|fractura|' +
+  'protrus[aã]o(?:\\s+discal)?|estenose|estenosis|ciatalgia|ci[aá]tica|' +
+  's[ií]ndrome\\s+do\\s+t[uú]nel\\s+do\\s+carpo|epicondilite|epicondilitis|labirintite|' +
+  'fibromialgia|condromal[aá]cia|lombalgia|lumbalgia|cervicalgia';
+
+/**
+ * Drugs by NAME. Unlike REMEDIOS (a generic form: "creme", "pomada"), a drug name near
+ * a use verb is a prescription even with a dose or quantity in between ("tome 2
+ * comprimidos de ibuprofeno"), so it gets its own rule with a short gap.
+ */
+const BERSEBA_DRUG_NAMES =
+  String.raw`analg[eé]sicos?|ibuprofeno|dipirona|metamizol|paracetamol|diclofenaco|nimesulida|` +
+  String.raw`relaxante\s+muscular|relajante\s+muscular|naproxeno|cetoprofeno|ketoprofeno|` +
+  String.raw`ciclobenzaprina|meloxicam|dorflex|torsilax`;
+
+/**
+ * Cure promises without upstream's "com certeza"/"garanto o resultado" anchor. A negation
+ * or an "if" up to three words back ("não posso dizer que vai curar", "ninguém pode dizer
+ * se vai curar") releases it: that is the disclaimer the veto asks the model to write.
+ */
+const BERSEBA_CURE_PROMISE =
+  String.raw`(?<!(?:n[aã]o|nunca|nem|sem|se|ningu[eé]m|no|ni|si|nadie)\s+(?:[\p{L}]+\s+){0,3})(?:vai|ir[aá]|va\s+a)\s+(?:te\s+)?(?:curar|sanar)|` +
+  String.raw`garant(?:o|imos|izamos)\s+que\s+(?:a\s+dor|el\s+dolor)\s+(?:some|passa|desaparece|vai\s+(?:sumir|passar)|va\s+a\s+desaparecer)|` +
+  String.raw`garant(?:imos|izamos)\s+(?:a\s+|la\s+)?cura`;
+// ── end of the Berseba block ─────────────────────────────────────────────────
+
 /**
  * Doenças e achados que, ditos como "você tem / está com", viram diagnóstico.
  * Lista curta e de dermatologia + clínica geral: é o vocabulário que aparece em
@@ -72,7 +112,9 @@ const DOENCAS =
   'urtic[aá]?ria|alergia|infec[cç][aã]o|infecci[oó]n|inflama[cç][aã]o|inflamaci[oó]n|fungo|hongos?|' +
   'bact[eé]ria|bacteria|v[ií]rus|virus|verruga|cisto|quiste|lipoma|queratose|ceratose|queratosis|' +
   'alopecia|calv[ií]?cie|hidradenit(?:e|is)|l[uú]pus|c[aâá]ncer|melanoma|carcinoma|tumor|' +
-  'nevo at[ií]pico|les[aã]o maligna|lesi[oó]n maligna';
+  'nevo at[ií]pico|les[aã]o maligna|lesi[oó]n maligna' +
+  // Berseba: physiotherapy/pilates vocabulary — see BERSEBA_PHYSIO_CONDITIONS below.
+  '|' + BERSEBA_PHYSIO_CONDITIONS;
 
 /** Tumores malignos: a afirmação mais grave, com regra própria. */
 const ONCOLOGICO = 'c[aâá]ncer(?: de piel)?|melanoma|carcinoma|tumor maligno|cbc|cec';
@@ -165,6 +207,8 @@ const REGRAS: ReadonlyArray<{ categoria: CategoriaClinica; padrao: RegExp; hipot
         String.raw`${INICIO}\d+(?:[.,]\d+)?\s?(?:mg|mcg)${FIM}`,
         // Dose líquida só com o verbo: "tome 5 ml do xarope".
         String.raw`${NAO_NEGADO}${palavra(VERBOS_DE_USO)}\s+\d+(?:[.,]\d+)?\s?(?:ml|gotas)${FIM}`,
+        // Berseba: a named drug up to 30 characters after the use verb.
+        String.raw`${NAO_NEGADO}${palavra(VERBOS_DE_USO)}\s+[^.!?\n]{0,30}?${palavra(BERSEBA_DRUG_NAMES)}`,
       ].join('|'),
       'iu',
     ),
@@ -180,7 +224,7 @@ const REGRAS: ReadonlyArray<{ categoria: CategoriaClinica; padrao: RegExp; hipot
           String.raw`garanto\s+(?:o\s+resultado|a\s+cura|que\s+(?:vai|ir[aá])\s+(?:curar|sarar|sumir|melhorar|resolver))|` +
           String.raw`garantizo\s+(?:el\s+resultado|la\s+cura|que\s+(?:va|va\s+a)\s+(?:curar|sanar|desaparecer|mejorar|resolverse?))|` +
           String.raw`(?:vai|ir[aá])\s+(?:curar|sumir)\s+com\s+certeza|(?:va|va\s+a)\s+(?:curar|desaparecer)\s+con\s+certeza`,
-      ),
+      ) + `|${palavra(BERSEBA_CURE_PROMISE)}`, // Berseba
       'iu',
     ),
     hipoteseDesarma: false,

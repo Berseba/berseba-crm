@@ -58,10 +58,6 @@ const NAO_AVALIAVEIS_SEM_TURNO: ReadonlyArray<{ gate: string; porque: string }> 
     porque:
       "depende de a organização ter ligado \"Não fazer afirmação clínica\" em Segurança; quando ligada, a prévia do motor aplica",
   },
-  {
-    gate: "clinical_scope",
-    porque: "depende do nicho da organização — só liga em saúde, e o teste não sabe de qual organização é",
-  },
 ];
 
 /**

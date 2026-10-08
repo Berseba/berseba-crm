@@ -34,11 +34,12 @@ export const AUDIT_ACTIONS = [
   // this list on every release, and that is exactly where the v1.61.0 merge
   // conflicted. At the top, no sync touches this line.
   //
-  // Organization niche (`app/api/v1/settings/nicho/route.ts`) — turns the two
-  // deterministic clinical brakes on/off (`lerNichoDaOrg`/`nichoEhSaude`,
-  // `lib/agent-engine/guardrails/camadas-da-org.ts`). Audited because it changes
-  // what the AI may state on the organization's WhatsApp (diagnosis,
-  // prescription, medical emergency) with no migration involved.
+  // Organization niche (`app/api/v1/settings/nicho/route.ts`) — `saude` arms the
+  // medical-emergency handoff (`lerNichoDaOrg`/`nichoEhSaude`,
+  // `lib/agent-engine/guardrails/camadas-da-org.ts`) and may switch upstream's
+  // clinical-claim layer on (that one is audited as `ai.guardrail_layer_changed`).
+  // Audited because it changes how the AI handles a patient on the organization's
+  // WhatsApp, with no migration involved.
   "org.nicho_changed",
   // ── end of the Berseba block ─────────────────────────────────────────────
   "ad_tracking_link.saved",

@@ -1,10 +1,11 @@
 /**
  * O VOCABULÁRIO FECHADO DE NICHO DA ORGANIZAÇÃO — fonte única dos dois lados.
  *
- * `organizations.settings.nicho` liga os dois freios clínicos determinísticos
- * (`checkG4Medical` em `lib/ai/handoff/medical-emergency.ts`, `clinicalScopeGate` via
- * `lib/agent-engine/guardrails/escopo-clinico.ts`) quando vale `"saude"` — ver
- * `lerNichoDaOrg`/`nichoEhSaude` em `lib/agent-engine/guardrails/camadas-da-org.ts`.
+ * `organizations.settings.nicho = "saude"` arms the medical-emergency handoff
+ * (`checkG4Medical` em `lib/ai/handoff/medical-emergency.ts`, read through
+ * `lerNichoDaOrg`/`nichoEhSaude` em `lib/agent-engine/guardrails/camadas-da-org.ts`),
+ * and choosing it switches upstream's `afirmacao_clinica` layer on when the
+ * organization never chose it (`app/api/v1/settings/nicho/route.ts`, issue #35).
  * Até esta mudança não havia tela para gravar o valor: violava o invariante 6
  * da doutrina do sistema vivo ("toda configuração tem superfície").
  *
@@ -38,9 +39,9 @@ export const NICHOS = [
 export type Nicho = (typeof NICHOS)[number];
 
 /**
- * O único nicho que arma os freios clínicos hoje — reexportado por
+ * O único nicho com efeito hoje (urgência médica + camada de afirmação clínica) — reexportado por
  * `camadas-da-org.ts` para quem já importa dali. Mudar este valor sem mudar
- * os freios seria o mesmo bug que este módulo existe para prevenir do lado
+ * quem o lê seria o mesmo bug que este módulo existe para prevenir do lado
  * oposto (vocabulário divergente).
  */
 export const NICHO_SAUDE: Nicho = "saude";

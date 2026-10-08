@@ -954,20 +954,23 @@ export const DICIONARIO: Traducoes = {
     es: "Abre la acción correspondiente en el CRM o en el calendario para confirmar.",
   },
   "Feedback para a próxima sugestão": { es: "Comentarios para la próxima sugerencia" },
-  // Nicho da organização (`lib/organizacoes/nicho.ts`) — liga os freios clínicos
+  // Nicho da organização (`lib/organizacoes/nicho.ts`) — urgência médica e afirmação clínica
   "Nicho da organização": { es: "Nicho de la organización" },
   "Nicho salvo.": { es: "Nicho guardado." },
-  "Nicho salvo. Os freios clínicos foram desligados.": {
-    es: "Nicho guardado. Los frenos clínicos se desactivaron.",
+  "Nicho salvo. A conferência “Não fazer afirmação clínica” foi ligada.": {
+    es: "Nicho guardado. Se activó la verificación “No hacer afirmaciones clínicas”.",
+  },
+  "Nicho salvo. A urgência médica deixou de ir direto para uma pessoa.": {
+    es: "Nicho guardado. La urgencia médica ya no pasa directamente a una persona.",
   },
   // Valores de NICHO_LABELS (`lib/organizacoes/nicho.ts`); "Saúde" já existia acima
   "E-commerce": { es: "E-commerce" },
   Imobiliária: { es: "Inmobiliaria" },
   Infoproduto: { es: "Infoproducto" },
   Serviços: { es: "Servicios" },
-  "Escolher Saúde liga dois freios: urgência médica relatada pelo contato vai para uma pessoa na hora, com orientação de emergência; e a IA nunca afirma diagnóstico, receita remédio ou promete cura.":
+  "Escolher Saúde faz a urgência médica relatada pelo contato ir para uma pessoa na hora, com orientação de emergência, e liga a conferência “Não fazer afirmação clínica”: a IA não afirma diagnóstico, não indica remédio nem promete cura. Essa conferência fica no painel de segurança do agente, onde também pode ser desligada.":
     {
-      es: "Elegir Salud activa dos frenos: una urgencia médica relatada por el contacto pasa a una persona de inmediato, con orientación de emergencia; y la IA nunca afirma un diagnóstico, receta medicamentos ni promete cura.",
+      es: "Elegir Salud hace que una urgencia médica relatada por el contacto pase a una persona de inmediato, con orientación de emergencia, y activa la verificación “No hacer afirmaciones clínicas”: la IA no afirma diagnósticos, no indica medicamentos ni promete cura. Esa verificación está en el panel de seguridad del agente, donde también se puede desactivar.",
     },
   "Para os outros nichos, hoje isso não muda nada — o valor fica reservado para uso futuro.":
     {

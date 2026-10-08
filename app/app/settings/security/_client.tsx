@@ -241,12 +241,22 @@ export function SecurityClient({
                 const novoNicho = valor === NENHUM_NICHO ? null : (valor as Nicho);
                 startMexerNicho(async () => {
                   try {
-                    await apiClient.patch("/api/v1/settings/nicho", { nicho: novoNicho });
-                    // Leaving `saude` turns both clinical brakes off: say so, not just "saved".
-                    const desligouFreios = nichoAtual === NICHO_SAUDE && novoNicho !== NICHO_SAUDE;
+                    const resposta = await apiClient.patch<{
+                      data?: { clinical_claim_layer_enabled?: boolean };
+                    }>("/api/v1/settings/nicho", { nicho: novoNicho });
+                    // A safety control changed: say which, not just "saved". Leaving `saude`
+                    // turns the emergency handoff off; the clinical-claim layer stays as is.
+                    const ligouConferencia = resposta?.data?.clinical_claim_layer_enabled === true;
+                    const desligouUrgencia = nichoAtual === NICHO_SAUDE && novoNicho !== NICHO_SAUDE;
                     setNichoAtual(novoNicho);
                     toast.success(
-                      t(desligouFreios ? "Nicho salvo. Os freios clínicos foram desligados." : "Nicho salvo."),
+                      t(
+                        ligouConferencia
+                          ? "Nicho salvo. A conferência “Não fazer afirmação clínica” foi ligada."
+                          : desligouUrgencia
+                            ? "Nicho salvo. A urgência médica deixou de ir direto para uma pessoa."
+                            : "Nicho salvo.",
+                      ),
                     );
                   } catch {
                     toast.error(t("Não foi possível salvar. Tente de novo."));
@@ -268,7 +278,7 @@ export function SecurityClient({
             </Select>
             <p className="text-xs text-muted-foreground">
               {t(
-                "Escolher Saúde liga dois freios: urgência médica relatada pelo contato vai para uma pessoa na hora, com orientação de emergência; e a IA nunca afirma diagnóstico, receita remédio ou promete cura.",
+                "Escolher Saúde faz a urgência médica relatada pelo contato ir para uma pessoa na hora, com orientação de emergência, e liga a conferência “Não fazer afirmação clínica”: a IA não afirma diagnóstico, não indica remédio nem promete cura. Essa conferência fica no painel de segurança do agente, onde também pode ser desligada.",
               )}
               <span className="mt-1 block">
                 {t(
