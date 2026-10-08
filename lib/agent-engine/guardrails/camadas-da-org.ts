@@ -162,13 +162,14 @@ export function camadasEfetivas(
  * nova, nenhum `ALTER TABLE`. Padrão ausente = `null`, e o freio fica
  * DESLIGADO — zero diferença para todo clone que já existe.
  *
- * Falha ABERTA para "desligado", não para "ligado": a mesma escolha de
- * `lerCamadasDaOrg` (linha abaixo dela), mas na direção oposta por natureza —
- * aqui não há "ambiente" para cair, só a org. Uma leitura que estourar (banco
- * fora do ar por um instante, coluna ainda não migrada num clone antigo)
- * devolve `null`, e `null` nunca liga um gate de segurança CLÍNICO por
- * acidente. O preço é um freio que não arma numa falha rara — nunca o
- * inverso (armar um gate que a organização não pediu, numa falha rara).
+ * A read error PROPAGATES (issue #36). It used to return `null`, and `null` is
+ * "no niche": a database blip at the moment a patient wrote "dor no peito"
+ * silently disarmed the brake — no handoff, no 192 message, no log. The only
+ * callers (`inbound-turn.ts`, both "FREIO CLÍNICO 1" blocks) read the niche
+ * only AFTER the emergency regex matched, so throwing never touches a normal
+ * turn: it fails the job, the queue retries it with backoff and, past
+ * `max_attempts`, marks it dead and opens a `job_dead` item for the team
+ * (`failJob`, `lib/agent-engine/queue/queue.ts`).
  */
 // `Pool | PoolClient`: os dois expõem o mesmo `.query`; aceitar o client deixa
 // chamar sob uma transação já aberta sem pedir conexão nova.
@@ -176,15 +177,11 @@ export async function lerNichoDaOrg(
   db: pg.Pool | pg.PoolClient,
   organizationId: string,
 ): Promise<string | null> {
-  try {
-    const { rows } = await db.query<{ nicho: string | null }>(
-      `select settings->>'nicho' as nicho from organizations where id = $1`,
-      [organizationId],
-    );
-    return rows[0]?.nicho ?? null;
-  } catch {
-    return null;
-  }
+  const { rows } = await db.query<{ nicho: string | null }>(
+    `select settings->>'nicho' as nicho from organizations where id = $1`,
+    [organizationId],
+  );
+  return rows[0]?.nicho ?? null;
 }
 
 /**

@@ -2096,11 +2096,12 @@ async function executarTurnoDoAgente(
           refId: input.conversationId,
         },
         'kind_e_ref',
-      ).catch((err) => {
-        runLog.warn('alerta de urgência médica (modo assistido) falhou (best-effort)', {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
+      );
+      // No `.catch` (issue #36): this alert IS the whole reaction in assisted mode —
+      // nothing is sent and the turn returns below. A failed insert must fail the job,
+      // so the queue retries it (`kind_e_ref` keeps the retry from duplicating the item)
+      // and, past max_attempts, escalates it as `job_dead`. Logging success after a
+      // swallowed failure left the patient with no reply and nobody notified.
       runLog.info(
         'urgência médica detectada no inbound — modo assistido, rascunho aberto sem envio',
         { kind: liveJob().kind },
