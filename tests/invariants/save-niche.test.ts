@@ -64,7 +64,7 @@ describe("saveNiche — against the baseline", () => {
     expect(await settings()).toEqual({ nicho: "ecommerce" });
   });
 
-  it("another key of settings survives, and null clears the niche", async () => {
+  it("another key of settings survives, and null stores `nicho: null` (readers use ->>, so SQL null)", async () => {
     await pool.query(`update organizations set settings = '{"security":{"mfa_required":true}}' where id = $1`, [
       ORG,
     ]);
@@ -108,8 +108,24 @@ describe("saveNiche — against the baseline", () => {
         `update organizations set settings = coalesce(settings, '{}'::jsonb) || '{"sounds":{"on":true}}' where id = $1`,
         [ORG],
       );
-      const pending = saveNiche(pool, ORG, "saude"); // blocks on the row lock
-      await new Promise((r) => setTimeout(r, 200));
+      let settled = false;
+      const pending = saveNiche(pool, ORG, "saude").finally(() => {
+        settled = true;
+      });
+      // Observable wait, not a sleep: a backend of this database is blocked on a lock.
+      await expect
+        .poll(
+          async () =>
+            (
+              await pool.query<{ n: number }>(
+                `select count(*)::int as n from pg_stat_activity
+                  where datname = current_database() and wait_event_type = 'Lock'`,
+              )
+            ).rows[0]!.n,
+          { timeout: 5000, interval: 50 },
+        )
+        .toBeGreaterThan(0);
+      expect(settled).toBe(false);
       await other.query("commit");
       expect((await pending)?.clinicalClaimLayer).toBe("enabled_now");
     } finally {

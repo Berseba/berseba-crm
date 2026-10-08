@@ -41,7 +41,10 @@ beforeEach(() => {
   toastWarning.mockReset();
 });
 
-function renderPicker(nicho: React.ComponentProps<typeof SecurityClient>["nicho"]) {
+function renderPicker(
+  nicho: React.ComponentProps<typeof SecurityClient>["nicho"],
+  clinicalClaimLayerOn = false,
+) {
   return render(
     <SecurityClient
       mfaEnrolled={true}
@@ -51,6 +54,7 @@ function renderPicker(nicho: React.ComponentProps<typeof SecurityClient>["nicho"
       diasDeCarencia={0}
       podeConfigurarNicho={true}
       nicho={nicho}
+      clinicalClaimLayerOn={clinicalClaimLayerOn}
     />,
   );
 }
@@ -103,9 +107,36 @@ describe("Settings › Security — organization niche picker", () => {
     await pick("Saúde");
     await waitFor(() =>
       expect(toastWarning).toHaveBeenCalledWith(
-        "Nicho salvo, mas a conferência “Não fazer afirmação clínica” está desligada no painel de segurança do agente. Ligue-a lá para a IA não afirmar diagnóstico, remédio ou cura.",
+        "Nicho salvo, mas a conferência “Não fazer afirmação clínica” está desligada.",
       ),
     );
     expect(toastSuccess).not.toHaveBeenCalled();
+    // the toast goes away; the notice under the picker stays
+    expect(screen.getByTestId("aviso-conferencia-clinica-desligada").textContent).toContain("Abrir Agentes");
+  });
+
+  it("on load, saude with the layer off shows the persistent notice with a link to Agentes", () => {
+    renderPicker("saude", false);
+    const aviso = screen.getByTestId("aviso-conferencia-clinica-desligada");
+    expect(aviso.getAttribute("role")).toBe("status");
+    expect(aviso.querySelector("a")?.getAttribute("href")).toBe("/app/ai/agents");
+  });
+
+  it("no notice when the layer is on", () => {
+    renderPicker("saude", true);
+    expect(screen.queryByTestId("aviso-conferencia-clinica-desligada")).toBeNull();
+  });
+
+  it("no notice outside saude", () => {
+    renderPicker("ecommerce", false);
+    expect(screen.queryByTestId("aviso-conferencia-clinica-desligada")).toBeNull();
+  });
+
+  it("switching the layer on by picking saude removes the notice", async () => {
+    patch.mockResolvedValue({ data: { nicho: "saude", clinical_claim_layer: "enabled_now" } });
+    renderPicker(null, false);
+    await pick("Saúde");
+    await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
+    expect(screen.queryByTestId("aviso-conferencia-clinica-desligada")).toBeNull();
   });
 });

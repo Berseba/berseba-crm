@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -46,6 +47,7 @@ export function SecurityClient({
   diasDeCarencia,
   podeConfigurarNicho = false,
   nicho = null,
+  clinicalClaimLayerOn = false,
 }: {
   mfaEnrolled: boolean;
   /** A política obriga esta pessoa a ter a verificação? */
@@ -63,6 +65,8 @@ export function SecurityClient({
    */
   podeConfigurarNicho?: boolean;
   nicho?: Nicho | null;
+  /** Is upstream's `afirmacao_clinica` layer on? Read only when the niche is `saude`. */
+  clinicalClaimLayerOn?: boolean;
 }) {
   const t = useT();
   const [codes, setCodes] = useState<string[] | null>(null);
@@ -94,6 +98,7 @@ export function SecurityClient({
     });
   }
   const [nichoAtual, setNichoAtual] = useState<Nicho | null>(nicho);
+  const [conferenciaLigada, setConferenciaLigada] = useState(clinicalClaimLayerOn);
   const [mexendoNicho, startMexerNicho] = useTransition();
 
   function handleRegenerate() {
@@ -251,12 +256,10 @@ export function SecurityClient({
                     const ligouConferencia = camada === "enabled_now";
                     const desligouUrgencia = nichoAtual === NICHO_SAUDE && novoNicho !== NICHO_SAUDE;
                     setNichoAtual(novoNicho);
+                    if (camada !== null) setConferenciaLigada(camada !== "off_by_choice");
                     if (camada === "off_by_choice") {
-                      toast.warning(
-                        t(
-                          "Nicho salvo, mas a conferência “Não fazer afirmação clínica” está desligada no painel de segurança do agente. Ligue-a lá para a IA não afirmar diagnóstico, remédio ou cura.",
-                        ),
-                      );
+                      // The persistent notice under the picker carries the detail and the link.
+                      toast.warning(t("Nicho salvo, mas a conferência “Não fazer afirmação clínica” está desligada."));
                       return;
                     }
                     toast.success(
@@ -296,6 +299,20 @@ export function SecurityClient({
                 )}
               </span>
             </p>
+            {nichoAtual === NICHO_SAUDE && !conferenciaLigada ? (
+              <p
+                role="status"
+                data-testid="aviso-conferencia-clinica-desligada"
+                className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs"
+              >
+                {t(
+                  "A conferência “Não fazer afirmação clínica” está desligada: a IA pode afirmar diagnóstico, indicar remédio ou prometer cura. Ligue-a em Agentes › agente › Confere antes de enviar.",
+                )}{" "}
+                <Link href="/app/ai/agents" className="font-medium underline">
+                  {t("Abrir Agentes")}
+                </Link>
+              </p>
+            ) : null}
           </div>
         </Card>
       ) : null}

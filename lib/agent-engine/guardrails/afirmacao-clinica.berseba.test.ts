@@ -53,6 +53,21 @@ const bars: Array<[CategoriaClinica, string]> = [
   // a conditional promise is still a promise, with or without the comma
   ['promessa_de_resultado', 'Se fizer as sessões vai curar.'],
   ['promessa_de_resultado', 'Se fizer as sessões, vai curar.'],
+  // words that merely END in "no" are not a negation (review of #42)
+  ['promessa_de_resultado', 'O treino vai curar a sua dor.'],
+  ['promessa_de_resultado', 'Esse plano vai curar sua lombalgia.'],
+  ['promessa_de_resultado', 'O corpo humano vai curar sozinho.'],
+  ['prescricao', 'Depois do treino tome ibuprofeno.'],
+  ['prescricao', 'Antes do treino tome 2 comprimidos.'],
+  ['prescricao', 'No fim do treino recomendo ibuprofeno.'],
+  // "sem" and "não tenha dúvida" are not disclaimers
+  ['promessa_de_resultado', 'Sem dúvida vai curar.'],
+  ['promessa_de_resultado', 'Sem dúvida nenhuma vai curar em poucas sessões.'],
+  ['promessa_de_resultado', 'Não tenha dúvida que vai curar.'],
+  // efficacy in plural and periphrasis
+  ['prescricao', 'Analgésicos ajudam bastante nessa dor.'],
+  ['prescricao', 'Ibuprofeno vai ajudar nessa dor.'],
+  ['prescricao', 'O ibuprofeno costuma aliviar.'],
   // ─── Spanish ─────────────────────────────────────────────────────────────────
   ['diagnostico', 'Usted tiene tendinitis en el hombro.'],
   ['diagnostico', 'Tienes una hernia de disco.'],
@@ -62,6 +77,8 @@ const bars: Array<[CategoriaClinica, string]> = [
   ['promessa_de_resultado', 'Esto va a curar rápido.'],
   ['promessa_de_resultado', 'Garantizamos que el dolor desaparece en una semana.'],
   ['prescricao', 'Le recomiendo ibuprofeno.'],
+  ['promessa_de_resultado', 'Sin duda va a curar.'],
+  ['promessa_de_resultado', 'El tratamiento va a curar su lombalgia.'],
 ];
 
 const passes: string[] = [
@@ -90,6 +107,13 @@ const passes: string[] = [
   'Sem avaliação, ninguém pode dizer se vai curar.',
   'Não precisa tomar ibuprofeno antes da sessão.',
   'Você não precisa tomar nenhum analgésico antes da aula.',
+  // referral and questions about a drug are not prescriptions (review of #42)
+  'Recomendo consultar o médico sobre o ibuprofeno.',
+  'Recomendo falar com o médico sobre ibuprofeno.',
+  'Sugiro perguntar ao seu médico sobre o ibuprofeno.',
+  'Não recomendo tomar ibuprofeno sem avaliação.',
+  'O paracetamol serve para quê? Quem avalia é o médico.',
+  'Quem define se o ibuprofeno é indicado é o médico.',
   // drug name without a use verb is information, not a prescription
   'O ibuprofeno que você comentou é assunto para o seu médico.',
   'A fisioterapia vai ajudar na sua recuperação.',
@@ -100,6 +124,12 @@ const passes: string[] = [
   'No tome ibuprofeno antes de la sesión.',
   'Eso no va a curar solo, por eso la evaluación es importante.',
   'No podemos asegurar que va a curar; quien evalúa es el fisioterapeuta.',
+  'No sé si va a curar.',
+  'No sabemos si va a curar.',
+  'No te puedo prometer que va a curar.',
+  'No puedo garantizarle que va a curar.',
+  'No es posible asegurar que va a curar.',
+  'Recomiendo consultar al médico sobre el ibuprofeno.',
 ];
 
 describe('detectarAfirmacaoClinica — physiotherapy/pilates (Berseba)', () => {

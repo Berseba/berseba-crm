@@ -64,21 +64,7 @@ export async function saveNiche(
     );
     let clinicalClaimLayer: ClinicalClaimLayerState | null = null;
     if (nicho === NICHO_SAUDE) {
-      const inserted = await client.query(
-        `insert into org_guardrail_layers (organization_id, layer, enabled)
-         values ($1, $2, true)
-         on conflict (organization_id, layer) do nothing`,
-        [organizationId, CLINICAL_CLAIM_LAYER],
-      );
-      if (inserted.rowCount === 1) {
-        clinicalClaimLayer = "enabled_now";
-      } else {
-        const { rows: layer } = await client.query<{ enabled: boolean }>(
-          `select enabled from org_guardrail_layers where organization_id = $1 and layer = $2`,
-          [organizationId, CLINICAL_CLAIM_LAYER],
-        );
-        clinicalClaimLayer = layer[0]?.enabled === true ? "already_on" : "off_by_choice";
-      }
+      clinicalClaimLayer = await switchClinicalClaimLayerOn(client, organizationId);
     }
     await client.query("commit");
     return { previous: nichoSchema.catch(null).parse(rows[0]?.nicho ?? null), clinicalClaimLayer };
@@ -88,4 +74,41 @@ export async function saveNiche(
   } finally {
     client.release();
   }
+}
+
+/**
+ * Inserts the layer as enabled unless the organization already chose, and says which
+ * happened — in one statement, so the answer cannot be built from two different moments.
+ * The outer select does not see the CTE's own insert (same snapshot), which is why
+ * `inserted` is read first. A row committed by someone else after this statement's
+ * snapshot makes `on conflict` skip while `current` is still null; a second plain select
+ * (a new snapshot under READ COMMITTED) reads it. Never folded into `off_by_choice`: that is
+ * the one state that makes the screen warn the owner.
+ */
+async function switchClinicalClaimLayerOn(
+  client: pg.PoolClient,
+  organizationId: string,
+): Promise<ClinicalClaimLayerState> {
+  const { rows } = await client.query<{ inserted: boolean | null; current: boolean | null }>(
+    `with ins as (
+       insert into org_guardrail_layers (organization_id, layer, enabled)
+       values ($1, $2, true)
+       on conflict (organization_id, layer) do nothing
+       returning enabled
+     )
+     select (select enabled from ins) as inserted,
+            (select enabled from org_guardrail_layers where organization_id = $1 and layer = $2) as current`,
+    [organizationId, CLINICAL_CLAIM_LAYER],
+  );
+  if (rows[0]?.inserted != null) return "enabled_now";
+  let current = rows[0]?.current ?? null;
+  if (current === null) {
+    const again = await client.query<{ enabled: boolean }>(
+      `select enabled from org_guardrail_layers where organization_id = $1 and layer = $2`,
+      [organizationId, CLINICAL_CLAIM_LAYER],
+    );
+    current = again.rows[0]?.enabled ?? null;
+  }
+  if (current === null) throw new Error("clinical-claim layer state unreadable after insert");
+  return current ? "already_on" : "off_by_choice";
 }

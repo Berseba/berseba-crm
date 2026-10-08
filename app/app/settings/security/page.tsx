@@ -6,7 +6,8 @@ import {
 } from "@/lib/auth/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { empresaExigeMfa, politicaDaEmpresa, type PapelMinimoDeMfa } from "@/lib/auth/politica-mfa";
-import { nichoSchema, type Nicho } from "@/lib/organizacoes/nicho";
+import { NICHO_SAUDE, nichoSchema, type Nicho } from "@/lib/organizacoes/nicho";
+import { CLINICAL_CLAIM_LAYER } from "@/lib/organizacoes/save-niche";
 import { SecurityClient } from "./_client";
 import { traduzir } from "@/lib/i18n/dicionario";
 
@@ -35,6 +36,9 @@ export default async function SecurityPage() {
   let papelMinimo: PapelMinimoDeMfa = "none";
   let diasDeCarencia = 0;
   let nicho: Nicho | null = null;
+  // Berseba: whether the clinical-claim layer is on, so the niche picker can warn on
+  // load — not only right after a save (BERSEBA.md, "Organization niche").
+  let clinicalClaimLayerOn = false;
   if (org) {
     const { data } = await createAdminClient()
       .from("organizations")
@@ -50,6 +54,15 @@ export default async function SecurityPage() {
     diasDeCarencia = cfg.diasDeCarencia;
     const settings = data?.settings as Record<string, unknown> | null;
     nicho = nichoSchema.catch(null).parse(settings?.nicho ?? null);
+    if (nicho === NICHO_SAUDE) {
+      const { data: layer } = await createAdminClient()
+        .from("org_guardrail_layers")
+        .select("enabled")
+        .eq("organization_id", org.orgId)
+        .eq("layer", CLINICAL_CLAIM_LAYER)
+        .maybeSingle();
+      clinicalClaimLayerOn = layer?.enabled === true;
+    }
   }
 
   // A mesma função que o layout usa para decidir o bloqueio — a tela não pode
@@ -83,6 +96,7 @@ export default async function SecurityPage() {
         diasDeCarencia={diasDeCarencia}
         podeConfigurarNicho={org?.role === "admin"}
         nicho={nicho}
+        clinicalClaimLayerOn={clinicalClaimLayerOn}
       />
     </div>
   );

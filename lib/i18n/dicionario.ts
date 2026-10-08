@@ -972,10 +972,14 @@ export const DICIONARIO: Traducoes = {
     {
       es: "Elegir Salud hace que una urgencia médica relatada por el contacto pase a una persona de inmediato, con orientación de emergencia, y, si nadie lo eligió antes, activa la verificación “No hacer afirmaciones clínicas”: la IA no afirma diagnósticos, no indica medicamentos ni promete cura. Esa verificación está en el panel de seguridad del agente, donde se puede activar o desactivar.",
     },
-  "Nicho salvo, mas a conferência “Não fazer afirmação clínica” está desligada no painel de segurança do agente. Ligue-a lá para a IA não afirmar diagnóstico, remédio ou cura.":
+  "Nicho salvo, mas a conferência “Não fazer afirmação clínica” está desligada.": {
+    es: "Nicho guardado, pero la verificación “No hacer afirmaciones clínicas” está desactivada.",
+  },
+  "A conferência “Não fazer afirmação clínica” está desligada: a IA pode afirmar diagnóstico, indicar remédio ou prometer cura. Ligue-a em Agentes › agente › Confere antes de enviar.":
     {
-      es: "Nicho guardado, pero la verificación “No hacer afirmaciones clínicas” está desactivada en el panel de seguridad del agente. Actívela allí para que la IA no afirme diagnósticos, medicamentos ni cura.",
+      es: "La verificación “No hacer afirmaciones clínicas” está desactivada: la IA puede afirmar diagnósticos, indicar medicamentos o prometer cura. Actívela en Agentes › agente › Revisa antes de enviar.",
     },
+  "Abrir Agentes": { es: "Abrir Agentes" },
   "Para os outros nichos, hoje isso não muda nada — o valor fica reservado para uso futuro.":
     {
       es: "Para los demás nichos, hoy esto no cambia nada — el valor queda reservado para uso futuro.",

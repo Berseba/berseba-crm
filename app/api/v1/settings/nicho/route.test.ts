@@ -34,7 +34,11 @@ const fakeClient = {
       return { rows: orgExists ? [{ nicho: (settingsRow.settings?.nicho as string | null) ?? null }] : [] };
     }
     if (sql.includes("insert into org_guardrail_layers")) {
-      return { rows: [], rowCount: layerRow === null ? 1 : 0 };
+      // one statement: what this call inserted, and the row as it stood before
+      return {
+        rows: [{ inserted: layerRow === null ? true : null, current: layerRow }],
+        rowCount: 1,
+      };
     }
     if (sql.includes("select enabled from org_guardrail_layers")) {
       return { rows: layerRow === null ? [] : [{ enabled: layerRow }] };
@@ -165,7 +169,7 @@ describe("PATCH /api/v1/settings/nicho", () => {
     const response = await PATCH(req({ nicho: "saude" }));
     expect(response.status).toBe(200);
     expect((await response.json()).data).toEqual({ nicho: "saude", clinical_claim_layer: "enabled_now" });
-    const insert = statements.find((s) => s.sql.startsWith("insert into org_guardrail_layers"));
+    const insert = statements.find((s) => s.sql.includes("insert into org_guardrail_layers"));
     expect(insert?.sql).toContain("on conflict (organization_id, layer) do nothing");
     expect(insert?.params).toEqual([org, "afirmacao_clinica"]);
     expect(audit).toHaveBeenCalledWith(

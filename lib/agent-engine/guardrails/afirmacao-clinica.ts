@@ -82,11 +82,13 @@ const BERSEBA_PHYSIO_CONDITIONS =
 // already bars it.
 
 /**
- * Drugs by NAME. Unlike REMEDIOS (a generic form: "creme", "pomada"), a drug name near
- * a use or recommending verb is a prescription even with a dose or quantity in between
- * ("tome 2 comprimidos de ibuprofeno", "recomendo ibuprofeno"), and so is a claim that the
- * drug works ("ibuprofeno ajuda nessa dor"). A bare mention is information, on purpose:
- * "o ibuprofeno que você comentou é assunto para o seu médico" is the reply we want.
+ * Drugs by NAME. Unlike REMEDIOS (a generic form: "creme", "pomada"), a drug name near a
+ * use verb is a prescription even with a dose or quantity in between ("tome 2 comprimidos
+ * de ibuprofeno"); after a RECOMMENDING verb only when it follows directly ("recomendo
+ * ibuprofeno", "sugiro tomar um analgésico") — "recomendo consultar o médico sobre o
+ * ibuprofeno" is the referral we want. A claim that the drug works bars too ("ibuprofeno
+ * ajuda nessa dor"). A bare mention is information, on purpose: "o ibuprofeno que você
+ * comentou é assunto para o seu médico".
  */
 const BERSEBA_DRUG_NAMES =
   String.raw`analg[eé]sicos?|ibuprofeno|dipirona|metamizol|paracetamol|diclofenaco|nimesulida|` +
@@ -100,23 +102,30 @@ const BERSEBA_RECOMMENDING_VERBS =
 
 /**
  * The negation that turns our rules into guidance. Upstream's NAO_NEGADO covers "não pode";
- * a receptionist also says "não precisa tomar ibuprofeno antes da sessão".
+ * a receptionist also says "não precisa tomar ibuprofeno" and "não recomendo tomar
+ * ibuprofeno sem avaliação". The negator is word-anchored: "treino", "plano" and "humano"
+ * end in "no", and "depois do treino tome ibuprofeno" is a prescription.
  */
-const BERSEBA_NOT_NEGATED = String.raw`(?<!(?:n[aã]o|no|nem|ni|nunca|evite)\s+(?:(?:pode|puede|precisa|necesita|deve|debe)\s+)?)`;
+const BERSEBA_NOT_NEGATED =
+  String.raw`(?<!(?<![\p{L}\p{N}_])(?:n[aã]o|no|nem|ni|nunca|evite)\s+` +
+  String.raw`(?:(?:pode|puede|precisa|necesita|deve|debe|recomendo|recomendamos|sugiro|indico|aconselho|recomiendo|sugiero)\s+)?)`;
 
 /**
  * Cure promises without upstream's "com certeza"/"garanto o resultado" anchor. An
- * unambiguous negation up to three words back ("não posso garantir que vai curar",
- * "ninguém pode dizer se vai curar") releases it: that is the disclaimer the veto asks the
- * model to write. Spanish `no` only counts right before the verb ("no va a curar") or in
- * "no puedo/podemos asegurar que…": in Portuguese `no` is "em + o" ("no seu caso vai
- * curar" is a promise). An "if" never releases it — "se fizer as sessões vai curar" is a
- * conditional promise, still a promise.
+ * unambiguous, word-anchored negation up to three words back ("não posso garantir que vai
+ * curar", "ninguém pode dizer se vai curar") releases it: that is the disclaimer the veto
+ * asks the model to write. Spanish `no` only counts right before the verb ("no va a curar")
+ * or in "no sé si / no te puedo prometer que / no es posible asegurar que…": in Portuguese
+ * `no` is "em + o" ("no seu caso vai curar" is a promise), and "treino", "plano", "humano"
+ * merely end in it. "Sem" is not a negator ("sem dúvida vai curar"), and an "if" never
+ * releases it — "se fizer as sessões vai curar" is a conditional promise, still a promise.
+ * "Não tenha dúvida que vai curar" is a promise wearing a negation, so it has its own line.
  */
 const BERSEBA_CURE_PROMISE =
-  String.raw`(?<!(?:n[aã]o|nunca|jamais|nem|sem|ningu[eé]m|nadie)\s+(?:[\p{L}]+\s+){0,3})` +
-  String.raw`(?<!no\s+(?:(?:puedo|podemos|se\s+puede)\s+(?:asegurar|garantizar|prometer|decir)\s+(?:que\s+|si\s+)?)?)` +
+  String.raw`(?<!(?<![\p{L}\p{N}_])(?:n[aã]o|nunca|jamais|nem|ningu[eé]m|nadie)\s+(?:[\p{L}]+\s+){0,3})` +
+  String.raw`(?<!(?<![\p{L}\p{N}_])no\s+(?:(?:te|le|les|me|nos)\s+)?(?:(?:(?:puedo|podemos|puede|pueden|se\s+puede|es\s+posible)\s+(?:asegurar|garantizar|prometer|decir|afirmar)(?:te|le|les|lo)?|(?:s[eé]|sabemos|sabe))\s+(?:que\s+|si\s+)?)?)` +
   String.raw`(?:vai|ir[aá]|va\s+a)\s+(?:te\s+)?(?:curar|sanar)|` +
+  String.raw`n[aã]o\s+(?:tenha|h[aá])\s+d[uú]vida(?:\s+nenhuma)?\s+(?:de\s+)?que\s+(?:vai|ir[aá])\s+(?:te\s+)?curar|` +
   String.raw`garant(?:o|imos|izamos)\s+que\s+(?:a\s+dor|el\s+dolor)\s+(?:some|passa|desaparece|vai\s+(?:sumir|passar)|va\s+a\s+desaparecer)|` +
   String.raw`garant(?:imos|izamos)\s+(?:a\s+|la\s+)?cura`;
 // ── end of the Berseba block ─────────────────────────────────────────────────
@@ -228,11 +237,12 @@ const REGRAS: ReadonlyArray<{ categoria: CategoriaClinica; padrao: RegExp; hipot
         String.raw`${INICIO}\d+(?:[.,]\d+)?\s?(?:mg|mcg)${FIM}`,
         // Dose líquida só com o verbo: "tome 5 ml do xarope".
         String.raw`${NAO_NEGADO}${palavra(VERBOS_DE_USO)}\s+\d+(?:[.,]\d+)?\s?(?:ml|gotas)${FIM}`,
-        // Berseba: a named drug or a pill count after a use/recommending verb, or a claim
-        // that the drug works — see BERSEBA_DRUG_NAMES.
-        String.raw`${BERSEBA_NOT_NEGATED}${palavra(`${VERBOS_DE_USO}|${BERSEBA_RECOMMENDING_VERBS}`)}\s+[^.!?\n]{0,30}?${palavra(BERSEBA_DRUG_NAMES)}`,
+        // Berseba: a named drug or a pill count after a use verb; a drug right after a
+        // recommending verb; a claim that the drug works — see BERSEBA_DRUG_NAMES.
+        String.raw`${BERSEBA_NOT_NEGATED}${palavra(VERBOS_DE_USO)}\s+[^.!?\n]{0,30}?${palavra(BERSEBA_DRUG_NAMES)}`,
+        String.raw`${BERSEBA_NOT_NEGATED}${palavra(BERSEBA_RECOMMENDING_VERBS)}\s+(?:(?:tomar|usar)\s+)?(?:(?:o|a|um|uma|el|la|un|una)\s+)?${palavra(BERSEBA_DRUG_NAMES)}`,
         String.raw`${BERSEBA_NOT_NEGATED}${palavra(`${VERBOS_DE_USO}|${BERSEBA_RECOMMENDING_VERBS}`)}\s+(?:[\p{L}]+\s+){0,2}\d+\s+(?:comprimidos?|c[aá]psulas?|gotas|pastillas?)${FIM}`,
-        String.raw`${palavra(BERSEBA_DRUG_NAMES)}\s+(?:ajuda|alivia|resolve|melhora|funciona|serve|cura|ayuda|alivia|resuelve|[eé]\s+(?:bom|[oó]timo|indicado)|es\s+(?:bueno|indicado))${FIM}`,
+        String.raw`${palavra(BERSEBA_DRUG_NAMES)}\s+(?:(?:vai|va\s+a|costuma|costumam|suele|suelen)\s+)?(?:ajudar|aliviar|resolver|curar|melhorar|ayudar|resolver|ajuda|ajudam|alivia|aliviam|resolve|resolvem|melhora|melhoram|funciona|funcionam|cura|curam|ayuda|ayudan|resuelve|resuelven|[eé]\s+(?:bom|[oó]timo)|son?\s+buenos?|es\s+bueno)${FIM}`,
       ].join('|'),
       'iu',
     ),
