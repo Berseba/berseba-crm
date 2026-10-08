@@ -13,9 +13,10 @@ import { SecurityClient } from "./_client";
 
 const patch = vi.hoisted(() => vi.fn());
 const toastSuccess = vi.hoisted(() => vi.fn());
+const toastWarning = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/api/client", () => ({ apiClient: { patch } }));
-vi.mock("sonner", () => ({ toast: { success: toastSuccess, error: vi.fn() } }));
+vi.mock("sonner", () => ({ toast: { success: toastSuccess, warning: toastWarning, error: vi.fn() } }));
 vi.mock("@/app/actions/settings/regenerateRecoveryCodes", () => ({ regenerateRecoveryCodes: vi.fn() }));
 vi.mock("@/app/actions/settings/signOutEverywhere", () => ({ signOutEverywhere: vi.fn() }));
 vi.mock("@/app/actions/auth/politicaDeMfa", () => ({
@@ -37,6 +38,7 @@ beforeAll(() => {
 beforeEach(() => {
   patch.mockReset().mockResolvedValue({ data: {} });
   toastSuccess.mockReset();
+  toastWarning.mockReset();
 });
 
 function renderPicker(nicho: React.ComponentProps<typeof SecurityClient>["nicho"]) {
@@ -77,7 +79,7 @@ describe("Settings › Security — organization niche picker", () => {
   });
 
   it("picking saude says when the clinical-claim layer was switched on", async () => {
-    patch.mockResolvedValue({ data: { nicho: "saude", clinical_claim_layer_enabled: true } });
+    patch.mockResolvedValue({ data: { nicho: "saude", clinical_claim_layer: "enabled_now" } });
     renderPicker(null);
     await pick("Saúde");
     await waitFor(() => expect(patch).toHaveBeenCalledWith("/api/v1/settings/nicho", { nicho: "saude" }));
@@ -88,10 +90,22 @@ describe("Settings › Security — organization niche picker", () => {
     );
   });
 
-  it("picking saude when the org already chose the layer keeps the plain message", async () => {
-    patch.mockResolvedValue({ data: { nicho: "saude", clinical_claim_layer_enabled: false } });
+  it("picking saude with the layer already on keeps the plain message", async () => {
+    patch.mockResolvedValue({ data: { nicho: "saude", clinical_claim_layer: "already_on" } });
     renderPicker(null);
     await pick("Saúde");
     await waitFor(() => expect(toastSuccess).toHaveBeenCalledWith("Nicho salvo."));
+  });
+
+  it("picking saude with the layer off by choice warns instead of saying all is well", async () => {
+    patch.mockResolvedValue({ data: { nicho: "saude", clinical_claim_layer: "off_by_choice" } });
+    renderPicker(null);
+    await pick("Saúde");
+    await waitFor(() =>
+      expect(toastWarning).toHaveBeenCalledWith(
+        "Nicho salvo, mas a conferência “Não fazer afirmação clínica” está desligada no painel de segurança do agente. Ligue-a lá para a IA não afirmar diagnóstico, remédio ou cura.",
+      ),
+    );
+    expect(toastSuccess).not.toHaveBeenCalled();
   });
 });

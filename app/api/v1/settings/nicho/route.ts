@@ -13,13 +13,13 @@
  *    organization's choice, shown and editable where upstream shows it. Issue
  *    Berseba/berseba-crm#35 replaced our own `clinical_scope` gate with this.
  *
- * The write is ONE transaction on the raw pool (issue Berseba/berseba-crm#37): the key
- * is merged into `settings` by the UPDATE itself (`settings || jsonb_build_object`),
- * never read, spread and written back — a concurrent write to another key of
- * `settings` (the MFA policy saved from the same screen) is no longer lost. The pool
- * bypasses RLS, so `organization_id` comes from `requireRole` (session), never from
- * the body (anti-pattern 10). `admin` because it changes what the AI may state on the
- * organization's WhatsApp, the same bar as "Exigir de quem administra".
+ * The write lives in `lib/organizacoes/save-niche.ts`: one transaction on the raw pool
+ * that merges the key in the UPDATE, so saving the niche never drops another key of
+ * `settings` (issue Berseba/berseba-crm#37 — the other writers of `settings` are still
+ * read-spread-write; see that file). The pool bypasses RLS, so `organization_id` comes from
+ * `requireRole` (session), never from the body (anti-pattern 10). `admin` because it changes
+ * what the AI may state on the organization's WhatsApp, the same bar as "Exigir de quem
+ * administra".
  */
 import { randomUUID } from "node:crypto";
 import type pg from "pg";
@@ -27,12 +27,13 @@ import type { NextRequest } from "next/server";
 import { z } from "zod";
 
 import { getRequestPool } from "@/lib/agent-engine/db/request-pool";
-import type { CamadaSemantica } from "@/lib/agent-engine/guardrails/camadas-da-org";
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
 import { requireSupportWrite } from "@/lib/impersonate/support";
-import { NICHO_SAUDE, nichoSchema, type Nicho } from "@/lib/organizacoes/nicho";
+import { logger } from "@/lib/logger";
+import { nichoSchema } from "@/lib/organizacoes/nicho";
+import { CLINICAL_CLAIM_LAYER, saveNiche, type SavedNiche } from "@/lib/organizacoes/save-niche";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -88,7 +89,13 @@ export async function PATCH(req: NextRequest): Promise<Response> {
   try {
     saved = await saveNiche(pool, activeOrg.orgId, parsed.data.nicho);
   } catch (err) {
-    return fail("internal_error", err instanceof Error ? err.message : "save failed", 500, { requestId });
+    // The pg message can carry table and constraint names: log it, never return it.
+    logger.error("[settings/nicho] save failed", {
+      organization_id: activeOrg.orgId,
+      request_id: requestId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return fail("internal_error", "Não foi possível salvar o nicho.", 500, { requestId });
   }
   if (saved === null) return fail("not_found", "Organização não encontrada.", 404, { requestId });
 
@@ -101,7 +108,7 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     requestId,
     metadata: { antes: saved.previous, depois: parsed.data.nicho },
   });
-  if (saved.clinicalClaimLayerEnabled) {
+  if (saved.clinicalClaimLayer === "enabled_now") {
     // Same action and shape as upstream's `PUT /api/v1/ai/guardrail-layers`, so the
     // trail of a layer reads the same whoever switched it on.
     void audit({
@@ -115,57 +122,5 @@ export async function PATCH(req: NextRequest): Promise<Response> {
     });
   }
 
-  return ok(
-    { nicho: parsed.data.nicho, clinical_claim_layer_enabled: saved.clinicalClaimLayerEnabled },
-    { requestId },
-  );
-}
-
-const CLINICAL_CLAIM_LAYER: CamadaSemantica = "afirmacao_clinica";
-
-interface SavedNiche {
-  previous: Nicho | null;
-  /** True only when THIS call created the layer row (the org had never chosen). */
-  clinicalClaimLayerEnabled: boolean;
-}
-
-/** `null` when the organization does not exist. */
-async function saveNiche(pool: pg.Pool, organizationId: string, nicho: Nicho | null): Promise<SavedNiche | null> {
-  const client = await pool.connect();
-  try {
-    await client.query("begin");
-    // The lock is only for a consistent `previous` in the audit; the merge below would
-    // not lose a concurrent key without it.
-    const { rows } = await client.query<{ nicho: string | null }>(
-      `select settings->>'nicho' as nicho from organizations where id = $1 for update`,
-      [organizationId],
-    );
-    if (rows.length === 0) {
-      await client.query("rollback");
-      return null;
-    }
-    await client.query(
-      `update organizations
-          set settings = coalesce(settings, '{}'::jsonb) || jsonb_build_object('nicho', $2::text)
-        where id = $1`,
-      [organizationId, nicho],
-    );
-    let clinicalClaimLayerEnabled = false;
-    if (nicho === NICHO_SAUDE) {
-      const inserted = await client.query(
-        `insert into org_guardrail_layers (organization_id, layer, enabled)
-         values ($1, $2, true)
-         on conflict (organization_id, layer) do nothing`,
-        [organizationId, CLINICAL_CLAIM_LAYER],
-      );
-      clinicalClaimLayerEnabled = inserted.rowCount === 1;
-    }
-    await client.query("commit");
-    return { previous: nichoSchema.catch(null).parse(rows[0]?.nicho ?? null), clinicalClaimLayerEnabled };
-  } catch (err) {
-    await client.query("rollback").catch(() => {});
-    throw err;
-  } finally {
-    client.release();
-  }
+  return ok({ nicho: parsed.data.nicho, clinical_claim_layer: saved.clinicalClaimLayer }, { requestId });
 }

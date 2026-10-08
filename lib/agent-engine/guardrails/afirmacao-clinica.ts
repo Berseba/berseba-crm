@@ -71,31 +71,52 @@ export interface AchadoClinico {
 
 /** Musculoskeletal conditions — joins DOENCAS, so only "você tem / isso é <X>" bars. */
 const BERSEBA_PHYSIO_CONDITIONS =
-  'tendinite|tendinopatia|tendinitis|bursite|bursitis|h[eé]rnia(?:\\s+de\\s+disco)?|' +
+  'tendinite|tendinopatia|tendinitis|bursite|bursopatia|bursitis|h[eé]rnia(?:\\s+de\\s+disco)?|' +
   'fasc[ií]?ite(?:\\s+plantar)?|fascitis(?:\\s+plantar)?|artrose|artrosis|artrite|artritis|' +
-  'escoliose|escoliosis|les[aã]o(?:\\s+muscular)?|lesi[oó]n(?:\\s+muscular)?|ruptura|' +
+  'escoliose|escoliosis|les[aã]o(?:\\s+muscular)?|lesi[oó]n(?:\\s+muscular)?|ruptura|rompimento|' +
   'distens[aã]o|contratura|entorse|esguince|luxa[cç][aã]o|luxaci[oó]n|fratura|fractura|' +
-  'protrus[aã]o(?:\\s+discal)?|estenose|estenosis|ciatalgia|ci[aá]tica|' +
+  'protrus[aã]o(?:\\s+discal)?|estenose|estenosis|compress[aã]o\\s+nervosa|ciatalgia|ci[aá]tica|' +
   's[ií]ndrome\\s+do\\s+t[uú]nel\\s+do\\s+carpo|epicondilite|epicondilitis|labirintite|' +
   'fibromialgia|condromal[aá]cia|lombalgia|lumbalgia|cervicalgia';
+// "inflamação crônica" from the old gate needs no entry: upstream's `inflama[cç][aã]o`
+// already bars it.
 
 /**
  * Drugs by NAME. Unlike REMEDIOS (a generic form: "creme", "pomada"), a drug name near
- * a use verb is a prescription even with a dose or quantity in between ("tome 2
- * comprimidos de ibuprofeno"), so it gets its own rule with a short gap.
+ * a use or recommending verb is a prescription even with a dose or quantity in between
+ * ("tome 2 comprimidos de ibuprofeno", "recomendo ibuprofeno"), and so is a claim that the
+ * drug works ("ibuprofeno ajuda nessa dor"). A bare mention is information, on purpose:
+ * "o ibuprofeno que você comentou é assunto para o seu médico" is the reply we want.
  */
 const BERSEBA_DRUG_NAMES =
   String.raw`analg[eé]sicos?|ibuprofeno|dipirona|metamizol|paracetamol|diclofenaco|nimesulida|` +
   String.raw`relaxante\s+muscular|relajante\s+muscular|naproxeno|cetoprofeno|ketoprofeno|` +
   String.raw`ciclobenzaprina|meloxicam|dorflex|torsilax`;
 
+/** Verbs that recommend rather than order — upstream's VERBOS_DE_USO only has the orders. */
+const BERSEBA_RECOMMENDING_VERBS =
+  String.raw`recomendo|recomendamos|sugiro|sugerimos|indico|indicamos|aconselho|aconselhamos|` +
+  String.raw`recomiendo|sugiero|aconsejo`;
+
 /**
- * Cure promises without upstream's "com certeza"/"garanto o resultado" anchor. A negation
- * or an "if" up to three words back ("não posso dizer que vai curar", "ninguém pode dizer
- * se vai curar") releases it: that is the disclaimer the veto asks the model to write.
+ * The negation that turns our rules into guidance. Upstream's NAO_NEGADO covers "não pode";
+ * a receptionist also says "não precisa tomar ibuprofeno antes da sessão".
+ */
+const BERSEBA_NOT_NEGATED = String.raw`(?<!(?:n[aã]o|no|nem|ni|nunca|evite)\s+(?:(?:pode|puede|precisa|necesita|deve|debe)\s+)?)`;
+
+/**
+ * Cure promises without upstream's "com certeza"/"garanto o resultado" anchor. An
+ * unambiguous negation up to three words back ("não posso garantir que vai curar",
+ * "ninguém pode dizer se vai curar") releases it: that is the disclaimer the veto asks the
+ * model to write. Spanish `no` only counts right before the verb ("no va a curar") or in
+ * "no puedo/podemos asegurar que…": in Portuguese `no` is "em + o" ("no seu caso vai
+ * curar" is a promise). An "if" never releases it — "se fizer as sessões vai curar" is a
+ * conditional promise, still a promise.
  */
 const BERSEBA_CURE_PROMISE =
-  String.raw`(?<!(?:n[aã]o|nunca|nem|sem|se|ningu[eé]m|no|ni|si|nadie)\s+(?:[\p{L}]+\s+){0,3})(?:vai|ir[aá]|va\s+a)\s+(?:te\s+)?(?:curar|sanar)|` +
+  String.raw`(?<!(?:n[aã]o|nunca|jamais|nem|sem|ningu[eé]m|nadie)\s+(?:[\p{L}]+\s+){0,3})` +
+  String.raw`(?<!no\s+(?:(?:puedo|podemos|se\s+puede)\s+(?:asegurar|garantizar|prometer|decir)\s+(?:que\s+|si\s+)?)?)` +
+  String.raw`(?:vai|ir[aá]|va\s+a)\s+(?:te\s+)?(?:curar|sanar)|` +
   String.raw`garant(?:o|imos|izamos)\s+que\s+(?:a\s+dor|el\s+dolor)\s+(?:some|passa|desaparece|vai\s+(?:sumir|passar)|va\s+a\s+desaparecer)|` +
   String.raw`garant(?:imos|izamos)\s+(?:a\s+|la\s+)?cura`;
 // ── end of the Berseba block ─────────────────────────────────────────────────
@@ -207,8 +228,11 @@ const REGRAS: ReadonlyArray<{ categoria: CategoriaClinica; padrao: RegExp; hipot
         String.raw`${INICIO}\d+(?:[.,]\d+)?\s?(?:mg|mcg)${FIM}`,
         // Dose líquida só com o verbo: "tome 5 ml do xarope".
         String.raw`${NAO_NEGADO}${palavra(VERBOS_DE_USO)}\s+\d+(?:[.,]\d+)?\s?(?:ml|gotas)${FIM}`,
-        // Berseba: a named drug up to 30 characters after the use verb.
-        String.raw`${NAO_NEGADO}${palavra(VERBOS_DE_USO)}\s+[^.!?\n]{0,30}?${palavra(BERSEBA_DRUG_NAMES)}`,
+        // Berseba: a named drug or a pill count after a use/recommending verb, or a claim
+        // that the drug works — see BERSEBA_DRUG_NAMES.
+        String.raw`${BERSEBA_NOT_NEGATED}${palavra(`${VERBOS_DE_USO}|${BERSEBA_RECOMMENDING_VERBS}`)}\s+[^.!?\n]{0,30}?${palavra(BERSEBA_DRUG_NAMES)}`,
+        String.raw`${BERSEBA_NOT_NEGATED}${palavra(`${VERBOS_DE_USO}|${BERSEBA_RECOMMENDING_VERBS}`)}\s+(?:[\p{L}]+\s+){0,2}\d+\s+(?:comprimidos?|c[aá]psulas?|gotas|pastillas?)${FIM}`,
+        String.raw`${palavra(BERSEBA_DRUG_NAMES)}\s+(?:ajuda|alivia|resolve|melhora|funciona|serve|cura|ayuda|alivia|resuelve|[eé]\s+(?:bom|[oó]timo|indicado)|es\s+(?:bueno|indicado))${FIM}`,
       ].join('|'),
       'iu',
     ),

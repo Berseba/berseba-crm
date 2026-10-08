@@ -242,13 +242,23 @@ export function SecurityClient({
                 startMexerNicho(async () => {
                   try {
                     const resposta = await apiClient.patch<{
-                      data?: { clinical_claim_layer_enabled?: boolean };
+                      data?: { clinical_claim_layer?: "enabled_now" | "already_on" | "off_by_choice" | null };
                     }>("/api/v1/settings/nicho", { nicho: novoNicho });
                     // A safety control changed: say which, not just "saved". Leaving `saude`
-                    // turns the emergency handoff off; the clinical-claim layer stays as is.
-                    const ligouConferencia = resposta?.data?.clinical_claim_layer_enabled === true;
+                    // turns the emergency handoff off; the clinical-claim layer stays as is,
+                    // and a layer switched off by choice is not overridden — so warn.
+                    const camada = resposta?.data?.clinical_claim_layer ?? null;
+                    const ligouConferencia = camada === "enabled_now";
                     const desligouUrgencia = nichoAtual === NICHO_SAUDE && novoNicho !== NICHO_SAUDE;
                     setNichoAtual(novoNicho);
+                    if (camada === "off_by_choice") {
+                      toast.warning(
+                        t(
+                          "Nicho salvo, mas a conferência “Não fazer afirmação clínica” está desligada no painel de segurança do agente. Ligue-a lá para a IA não afirmar diagnóstico, remédio ou cura.",
+                        ),
+                      );
+                      return;
+                    }
                     toast.success(
                       t(
                         ligouConferencia
@@ -278,7 +288,7 @@ export function SecurityClient({
             </Select>
             <p className="text-xs text-muted-foreground">
               {t(
-                "Escolher Saúde faz a urgência médica relatada pelo contato ir para uma pessoa na hora, com orientação de emergência, e liga a conferência “Não fazer afirmação clínica”: a IA não afirma diagnóstico, não indica remédio nem promete cura. Essa conferência fica no painel de segurança do agente, onde também pode ser desligada.",
+                "Escolher Saúde faz a urgência médica relatada pelo contato ir para uma pessoa na hora, com orientação de emergência, e, se ninguém tiver escolhido antes, liga a conferência “Não fazer afirmação clínica”: a IA não afirma diagnóstico, não indica remédio nem promete cura. Essa conferência fica no painel de segurança do agente, onde pode ser ligada ou desligada.",
               )}
               <span className="mt-1 block">
                 {t(
