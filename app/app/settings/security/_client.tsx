@@ -1,4 +1,5 @@
 "use client";
+import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
@@ -46,6 +47,7 @@ export function SecurityClient({
   diasDeCarencia,
   podeConfigurarNicho = false,
   nicho = null,
+  clinicalClaimLayerOn = false,
 }: {
   mfaEnrolled: boolean;
   /** A política obriga esta pessoa a ter a verificação? */
@@ -63,6 +65,8 @@ export function SecurityClient({
    */
   podeConfigurarNicho?: boolean;
   nicho?: Nicho | null;
+  /** Is upstream's `afirmacao_clinica` layer on? Read only when the niche is `saude`. */
+  clinicalClaimLayerOn?: boolean;
 }) {
   const t = useT();
   const [codes, setCodes] = useState<string[] | null>(null);
@@ -94,6 +98,7 @@ export function SecurityClient({
     });
   }
   const [nichoAtual, setNichoAtual] = useState<Nicho | null>(nicho);
+  const [conferenciaLigada, setConferenciaLigada] = useState(clinicalClaimLayerOn);
   const [mexendoNicho, startMexerNicho] = useTransition();
 
   function handleRegenerate() {
@@ -242,13 +247,21 @@ export function SecurityClient({
                 startMexerNicho(async () => {
                   try {
                     const resposta = await apiClient.patch<{
-                      data?: { clinical_claim_layer_enabled?: boolean };
+                      data?: { clinical_claim_layer?: "enabled_now" | "already_on" | "off_by_choice" | null };
                     }>("/api/v1/settings/nicho", { nicho: novoNicho });
                     // A safety control changed: say which, not just "saved". Leaving `saude`
-                    // turns the emergency handoff off; the clinical-claim layer stays as is.
-                    const ligouConferencia = resposta?.data?.clinical_claim_layer_enabled === true;
+                    // turns the emergency handoff off; the clinical-claim layer stays as is,
+                    // and a layer switched off by choice is not overridden — so warn.
+                    const camada = resposta?.data?.clinical_claim_layer ?? null;
+                    const ligouConferencia = camada === "enabled_now";
                     const desligouUrgencia = nichoAtual === NICHO_SAUDE && novoNicho !== NICHO_SAUDE;
                     setNichoAtual(novoNicho);
+                    if (camada !== null) setConferenciaLigada(camada !== "off_by_choice");
+                    if (camada === "off_by_choice") {
+                      // The persistent notice under the picker carries the detail and the link.
+                      toast.warning(t("Nicho salvo, mas a conferência “Não fazer afirmação clínica” está desligada."));
+                      return;
+                    }
                     toast.success(
                       t(
                         ligouConferencia
@@ -278,7 +291,7 @@ export function SecurityClient({
             </Select>
             <p className="text-xs text-muted-foreground">
               {t(
-                "Escolher Saúde faz a urgência médica relatada pelo contato ir para uma pessoa na hora, com orientação de emergência, e liga a conferência “Não fazer afirmação clínica”: a IA não afirma diagnóstico, não indica remédio nem promete cura. Essa conferência fica no painel de segurança do agente, onde também pode ser desligada.",
+                "Escolher Saúde faz a urgência médica relatada pelo contato ir para uma pessoa na hora, com orientação de emergência, e, se ninguém tiver escolhido antes, liga a conferência “Não fazer afirmação clínica”: a IA não afirma diagnóstico, não indica remédio nem promete cura. Essa conferência fica no painel de segurança do agente, onde pode ser ligada ou desligada.",
               )}
               <span className="mt-1 block">
                 {t(
@@ -286,6 +299,20 @@ export function SecurityClient({
                 )}
               </span>
             </p>
+            {nichoAtual === NICHO_SAUDE && !conferenciaLigada ? (
+              <p
+                role="status"
+                data-testid="aviso-conferencia-clinica-desligada"
+                className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-xs"
+              >
+                {t(
+                  "A conferência “Não fazer afirmação clínica” está desligada: a IA pode afirmar diagnóstico, indicar remédio ou prometer cura. Ligue-a em Agentes › agente › Confere antes de enviar.",
+                )}{" "}
+                <Link href="/app/ai/agents" className="font-medium underline">
+                  {t("Abrir Agentes")}
+                </Link>
+              </p>
+            ) : null}
           </div>
         </Card>
       ) : null}

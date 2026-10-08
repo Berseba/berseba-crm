@@ -22,7 +22,8 @@ let settingsRow: { settings: Record<string, unknown> | null };
 /** Fake pool: every statement the PATCH sends, in order, plus what each one answers. */
 const statements: Array<{ sql: string; params: unknown[] }> = [];
 let orgExists = true;
-let layerAlreadyChosen = false;
+/** `null` = the org never chose the layer; otherwise the row's `enabled`. */
+let layerRow: boolean | null = null;
 const release = vi.fn();
 
 const fakeClient = {
@@ -33,7 +34,14 @@ const fakeClient = {
       return { rows: orgExists ? [{ nicho: (settingsRow.settings?.nicho as string | null) ?? null }] : [] };
     }
     if (sql.includes("insert into org_guardrail_layers")) {
-      return { rows: [], rowCount: layerAlreadyChosen ? 0 : 1 };
+      // one statement: what this call inserted, and the row as it stood before
+      return {
+        rows: [{ inserted: layerRow === null ? true : null, current: layerRow }],
+        rowCount: 1,
+      };
+    }
+    if (sql.includes("select enabled from org_guardrail_layers")) {
+      return { rows: layerRow === null ? [] : [{ enabled: layerRow }] };
     }
     return { rows: [], rowCount: 1 };
   }),
@@ -62,7 +70,7 @@ beforeEach(() => {
   settingsRow = { settings: {} };
   statements.length = 0;
   orgExists = true;
-  layerAlreadyChosen = false;
+  layerRow = null;
   vi.mocked(requireRole).mockResolvedValue({
     ok: true,
     user,
@@ -151,7 +159,7 @@ describe("PATCH /api/v1/settings/nicho", () => {
     settingsRow = { settings: { nicho: "saude" } };
     const response = await PATCH(req({ nicho: null }));
     expect(response.status).toBe(200);
-    expect((await response.json()).data).toEqual({ nicho: null, clinical_claim_layer_enabled: false });
+    expect((await response.json()).data).toEqual({ nicho: null, clinical_claim_layer: null });
     expect(statements.find((s) => s.sql.startsWith("update organizations"))?.params).toEqual([org, null]);
     expect(sqlSent().some((s) => s.includes("org_guardrail_layers"))).toBe(false);
     expect(audit).toHaveBeenCalledTimes(1);
@@ -160,8 +168,8 @@ describe("PATCH /api/v1/settings/nicho", () => {
   it("'saude' switches upstream's afirmacao_clinica layer on when the org never chose, and audits both", async () => {
     const response = await PATCH(req({ nicho: "saude" }));
     expect(response.status).toBe(200);
-    expect((await response.json()).data).toEqual({ nicho: "saude", clinical_claim_layer_enabled: true });
-    const insert = statements.find((s) => s.sql.startsWith("insert into org_guardrail_layers"));
+    expect((await response.json()).data).toEqual({ nicho: "saude", clinical_claim_layer: "enabled_now" });
+    const insert = statements.find((s) => s.sql.includes("insert into org_guardrail_layers"));
     expect(insert?.sql).toContain("on conflict (organization_id, layer) do nothing");
     expect(insert?.params).toEqual([org, "afirmacao_clinica"]);
     expect(audit).toHaveBeenCalledWith(
@@ -181,11 +189,32 @@ describe("PATCH /api/v1/settings/nicho", () => {
     );
   });
 
-  it("'saude' never overrides a layer the org already chose (on conflict do nothing)", async () => {
-    layerAlreadyChosen = true;
+  it("'saude' with the layer already on reports already_on and audits only the niche", async () => {
+    layerRow = true;
     const response = await PATCH(req({ nicho: "saude" }));
-    expect((await response.json()).data).toEqual({ nicho: "saude", clinical_claim_layer_enabled: false });
+    expect((await response.json()).data).toEqual({ nicho: "saude", clinical_claim_layer: "already_on" });
     expect(audit).toHaveBeenCalledTimes(1);
+  });
+
+  it("'saude' never overrides a layer switched off by choice — and says so (off_by_choice)", async () => {
+    layerRow = false;
+    const response = await PATCH(req({ nicho: "saude" }));
+    expect((await response.json()).data).toEqual({ nicho: "saude", clinical_claim_layer: "off_by_choice" });
+    expect(sqlSent().some((s) => s.startsWith("update org_guardrail_layers"))).toBe(false);
+    expect(audit).toHaveBeenCalledTimes(1);
+  });
+
+  it("a database error answers 500 without leaking the pg message", async () => {
+    fakeClient.query.mockImplementationOnce(async () => ({ rows: [] })); // begin
+    fakeClient.query.mockImplementationOnce(async () => {
+      throw new Error('relation "organizations" violates constraint "x"');
+    });
+    const response = await PATCH(req({ nicho: "saude" }));
+    expect(response.status).toBe(500);
+    const body = JSON.stringify(await response.json());
+    expect(body).not.toContain("organizations");
+    expect(body).not.toContain("constraint");
+    expect(audit).not.toHaveBeenCalled();
   });
 
   it("organização inexistente: 404, rollback, nada auditado", async () => {

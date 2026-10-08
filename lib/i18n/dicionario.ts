@@ -968,10 +968,18 @@ export const DICIONARIO: Traducoes = {
   Imobiliária: { es: "Inmobiliaria" },
   Infoproduto: { es: "Infoproducto" },
   Serviços: { es: "Servicios" },
-  "Escolher Saúde faz a urgência médica relatada pelo contato ir para uma pessoa na hora, com orientação de emergência, e liga a conferência “Não fazer afirmação clínica”: a IA não afirma diagnóstico, não indica remédio nem promete cura. Essa conferência fica no painel de segurança do agente, onde também pode ser desligada.":
+  "Escolher Saúde faz a urgência médica relatada pelo contato ir para uma pessoa na hora, com orientação de emergência, e, se ninguém tiver escolhido antes, liga a conferência “Não fazer afirmação clínica”: a IA não afirma diagnóstico, não indica remédio nem promete cura. Essa conferência fica no painel de segurança do agente, onde pode ser ligada ou desligada.":
     {
-      es: "Elegir Salud hace que una urgencia médica relatada por el contacto pase a una persona de inmediato, con orientación de emergencia, y activa la verificación “No hacer afirmaciones clínicas”: la IA no afirma diagnósticos, no indica medicamentos ni promete cura. Esa verificación está en el panel de seguridad del agente, donde también se puede desactivar.",
+      es: "Elegir Salud hace que una urgencia médica relatada por el contacto pase a una persona de inmediato, con orientación de emergencia, y, si nadie lo eligió antes, activa la verificación “No hacer afirmaciones clínicas”: la IA no afirma diagnósticos, no indica medicamentos ni promete cura. Esa verificación está en el panel de seguridad del agente, donde se puede activar o desactivar.",
     },
+  "Nicho salvo, mas a conferência “Não fazer afirmação clínica” está desligada.": {
+    es: "Nicho guardado, pero la verificación “No hacer afirmaciones clínicas” está desactivada.",
+  },
+  "A conferência “Não fazer afirmação clínica” está desligada: a IA pode afirmar diagnóstico, indicar remédio ou prometer cura. Ligue-a em Agentes › agente › Confere antes de enviar.":
+    {
+      es: "La verificación “No hacer afirmaciones clínicas” está desactivada: la IA puede afirmar diagnósticos, indicar medicamentos o prometer cura. Actívela en Agentes › agente › Revisa antes de enviar.",
+    },
+  "Abrir Agentes": { es: "Abrir Agentes" },
   "Para os outros nichos, hoje isso não muda nada — o valor fica reservado para uso futuro.":
     {
       es: "Para los demás nichos, hoy esto no cambia nada — el valor queda reservado para uso futuro.",
