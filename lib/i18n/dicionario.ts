@@ -37,6 +37,9 @@ import type { Idioma } from "./idiomas";
 type Traducoes = Record<string, Partial<Record<Exclude<Idioma, "pt-BR">, string>>>;
 
 export const DICIONARIO: Traducoes = {
+  // Berseba: collapse control of the reply suggestion panel (ReplyReviewPanel).
+  "Mostrar sugestão": { es: "Mostrar sugerencia" },
+  "Recolher sugestão": { es: "Contraer sugerencia" },
   // Roteador do Jev sob demanda e resultados.
   "Como o roteador consulta as IAs": { es: "Cómo consulta el enrutador a las IA" },
   "Modo do roteador salvo.": { es: "Se guardó el modo del enrutador." },
