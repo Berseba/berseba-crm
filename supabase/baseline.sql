@@ -47445,3 +47445,34 @@ alter table public.campaign_recipients
   ));
 
 notify pgrst, 'reload schema';
+
+-- ---- gpt-6-luna in the catalog and in the bill (migration 9003) ----
+-- Idempotent mirror of migration 9003; this appendix is what reaches every
+-- self-host (install.sh and update.sh apply only the baseline). Both tables
+-- move together so the catalog x pricing invariant keeps the two sides equal.
+-- Price from OpenAI's pricing page (developers.openai.com/api/docs/pricing),
+-- read 2026-10-21: US$ 0.10 / 0.50 per 1M = 10/50 cents, the same numbers as
+-- lib/agent-engine/edge/llm/pricing.ts.
+insert into public.ai_models
+  (provider, model_id, display_name, description,
+   input_price_per_million_cents, output_price_per_million_cents, supports_tools)
+values
+  ('openai', 'gpt-6-luna', 'GPT-6 Luna',
+   'O mais barato da linha 6, rápido para atendimento e tarefas simples.', 10, 50, true)
+on conflict (provider, model_id) do update set
+  display_name = excluded.display_name,
+  description = excluded.description,
+  input_price_per_million_cents = excluded.input_price_per_million_cents,
+  output_price_per_million_cents = excluded.output_price_per_million_cents,
+  supports_tools = excluded.supports_tools,
+  deprecated_at = null;
+
+insert into public.ai_pricing
+  (model, prompt_cents_per_million_tokens, completion_cents_per_million_tokens, notes)
+values
+  ('gpt-6-luna', 10, 50, 'catálogo 9003 — OpenAI pricing page, read 2026-10-21: US$ 0.10 / 0.50 per 1M, cached input 0.01; same numbers as pricing.ts')
+on conflict (model) do update set
+  prompt_cents_per_million_tokens = excluded.prompt_cents_per_million_tokens,
+  completion_cents_per_million_tokens = excluded.completion_cents_per_million_tokens,
+  notes = excluded.notes,
+  superseded_at = null;
