@@ -196,7 +196,7 @@ describe("flywheel run", () => {
     const ours = (c: ModelCall) => c.tenantId === orgA || c.tenantId === orgB;
 
     // Run 1: 10 of A (quota) + the 1 of B.
-    await runFlywheelOnce(pool as never, {} as never, { limitPerOrg: 10, log: LOG });
+    await runFlywheelOnce(pool as never, {} as never, { limit: 10, log: LOG });
     const run1 = calls.filter(ours);
     expect(run1.filter((c) => c.purpose === "flywheel_judge" && c.tenantId === orgA)).toHaveLength(10);
     expect(run1.filter((c) => c.purpose === "flywheel_judge" && c.tenantId === orgB)).toHaveLength(1);
@@ -226,13 +226,13 @@ describe("flywheel run", () => {
 
     // Run 2: only the 2 of A left over by the quota.
     calls.length = 0;
-    await runFlywheelOnce(pool as never, {} as never, { limitPerOrg: 10, log: LOG });
+    await runFlywheelOnce(pool as never, {} as never, { limit: 10, log: LOG });
     const run2Judge = calls.filter((c) => ours(c) && c.purpose === "flywheel_judge");
     expect(run2Judge.map((c) => c.tenantId)).toEqual([orgA, orgA]);
 
     // Run 3: nothing new, nothing paid.
     calls.length = 0;
-    await runFlywheelOnce(pool as never, {} as never, { limitPerOrg: 10, log: LOG });
+    await runFlywheelOnce(pool as never, {} as never, { limit: 10, log: LOG });
     expect(calls.filter(ours)).toEqual([]);
     expect(await rowsByOrg("flywheel_judge_verdicts", orgA)).toBe(12);
   });

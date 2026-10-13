@@ -427,7 +427,7 @@ export async function startWorker(
       ? runFlywheelLoop(
           pool,
           llmEdgeConfigFromEnv(env),
-          { intervalMs: env.FLYWHEEL_INTERVAL_MS, limitPerOrg: env.FLYWHEEL_BATCH_LIMIT, log },
+          { intervalMs: env.FLYWHEEL_INTERVAL_MS, limit: env.FLYWHEEL_BATCH_LIMIT, log },
           loopsAbort.signal,
         )
       : Promise.resolve();

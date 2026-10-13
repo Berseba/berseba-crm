@@ -68,7 +68,7 @@ describe("flywheel round per organization", () => {
     const { pool, collectParams } = fakePool();
     const { runFlywheelOnce } = await import("../../lib/agent-engine/flywheel/live");
 
-    await runFlywheelOnce(pool, {} as never, { limitPerOrg: 3, log: LOG });
+    await runFlywheelOnce(pool, {} as never, { limit: 3, log: LOG });
 
     // [dataset, dimension, limitPerOrg, lookbackDays]
     expect(collectParams).toEqual([["live", "memory_hygiene", 3, 7]]);
@@ -78,7 +78,7 @@ describe("flywheel round per organization", () => {
     const { pool, inserts } = fakePool();
     const { runFlywheelOnce } = await import("../../lib/agent-engine/flywheel/live");
 
-    const result = await runFlywheelOnce(pool, {} as never, { limitPerOrg: 10, log: LOG });
+    const result = await runFlywheelOnce(pool, {} as never, { limit: 10, log: LOG });
 
     // Positive control: all three turns went through judge + distiller.
     expect(calls).toHaveLength(6);
@@ -104,7 +104,7 @@ describe("flywheel round per organization", () => {
     const { pool, inserts } = fakePool();
     const { runFlywheelOnce } = await import("../../lib/agent-engine/flywheel/live");
 
-    const result = await runFlywheelOnce(pool, {} as never, { limitPerOrg: 10, log: LOG });
+    const result = await runFlywheelOnce(pool, {} as never, { limit: 10, log: LOG });
 
     // org-a fails on its first call and stops; it does not keep paying for calls
     // that will fail the same way.

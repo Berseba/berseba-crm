@@ -176,11 +176,12 @@ export interface FlywheelRunResult {
 export async function runFlywheelOnce(
   pool: pg.Pool,
   llmCfg: LlmEdgeConfig,
-  opts: { limitPerOrg: number; log: Logger },
+  /** `limit` is PER ORGANIZATION (see collectPendingTurns). */
+  opts: { limit: number; log: Logger },
 ): Promise<FlywheelRunResult> {
   const runId = crypto.randomUUID();
-  const { limitPerOrg, log } = opts;
-  const turns = await collectPendingTurns(pool, limitPerOrg);
+  const { limit, log } = opts;
+  const turns = await collectPendingTurns(pool, limit);
   log.info('flywheel: turnos reais coletados', { run_id: runId, turns: turns.length });
   let judged = 0;
   let proposals = 0;
@@ -319,7 +320,7 @@ async function judgeTurn(
 export async function runFlywheelLoop(
   pool: pg.Pool,
   llmCfg: LlmEdgeConfig,
-  opts: { intervalMs: number; limitPerOrg: number; log: Logger },
+  opts: { intervalMs: number; limit: number; log: Logger },
   signal: AbortSignal,
 ): Promise<void> {
   while (!signal.aborted) {
@@ -334,7 +335,7 @@ export async function runFlywheelLoop(
     });
     if (signal.aborted) return;
     try {
-      const result = await runFlywheelOnce(pool, llmCfg, { limitPerOrg: opts.limitPerOrg, log: opts.log });
+      const result = await runFlywheelOnce(pool, llmCfg, { limit: opts.limit, log: opts.log });
       opts.log.info('flywheel: rodada agendada concluída', result as unknown as Record<string, unknown>);
     } catch (err) {
       opts.log.error('flywheel: rodada agendada falhou', {
