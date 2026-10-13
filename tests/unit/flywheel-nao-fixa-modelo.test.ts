@@ -79,7 +79,7 @@ describe("flywheel vivo", () => {
     const { pool } = poolFalso();
     const { runFlywheelOnce } = await import("../../lib/agent-engine/flywheel/live");
 
-    await runFlywheelOnce(pool, {} as never, { limit: 1, log: LOG });
+    await runFlywheelOnce(pool, {} as never, { limitPerOrg: 1, log: LOG });
 
     // Controle positivo: se os dois pontos não foram exercitados, a asserção de
     // ausência abaixo seria satisfeita por um array vazio — que é o modo clássico
@@ -95,7 +95,7 @@ describe("flywheel vivo", () => {
     const { pool, inserts } = poolFalso();
     const { runFlywheelOnce } = await import("../../lib/agent-engine/flywheel/live");
 
-    await runFlywheelOnce(pool, {} as never, { limit: 1, log: LOG });
+    await runFlywheelOnce(pool, {} as never, { limitPerOrg: 1, log: LOG });
 
     const veredito = inserts.find((i) => i.sql.includes("flywheel_judge_verdicts"));
     expect(veredito, "nenhum veredito foi gravado").toBeDefined();

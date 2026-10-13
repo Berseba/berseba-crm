@@ -37,15 +37,51 @@ interface TraceMaterial {
   rollingSummary: string;
 }
 
-async function collectRecentTurns(pool: pg.Pool, limit: number): Promise<TurnRow[]> {
+// The judge reads the contact's CURRENT conversation (buildMaterial), not the
+// state at turn time, so a stale turn says nothing about that turn. The window
+// also keeps the first run after an upgrade from backfilling the whole history.
+export const LOOKBACK_DAYS = 7;
+
+/**
+ * Turns still waiting for a verdict, at most `limitPerOrg` per organization.
+ *
+ * - Per org: a global "10 most recent" let one busy org take every slot, and the
+ *   other orgs were never judged.
+ * - Latest turn per contact: the material is per contact, so two turns of the
+ *   same contact in one run were the same judge call twice. Once the latest turn
+ *   has a verdict, the contact is skipped until it has a newer turn.
+ * - Skips judged turns BEFORE the LLM call. The `on conflict do nothing` on the
+ *   insert only deduplicated the row, after the judge call was already paid, so
+ *   a quiet installation re-judged the same turns on every run.
+ */
+export async function collectPendingTurns(pool: pg.Pool, limitPerOrg: number): Promise<TurnRow[]> {
   const { rows } = await pool.query<TurnRow>(
-    `select j.id as job_id, j.organization_id, j.contact_id
-     from job_queue j
-     where j.kind = 'inbound_turn' and j.status = 'done' and j.contact_id is not null
-       and exists (select 1 from llm_calls c where c.job_id = j.id and c.purpose = 'agent_turn')
-     order by j.created_at desc
-     limit $1`,
-    [limit],
+    `with latest_per_contact as (
+       select distinct on (j.organization_id, j.contact_id)
+              j.id, j.organization_id, j.contact_id, j.created_at
+       from job_queue j
+       where j.kind = 'inbound_turn' and j.status = 'done' and j.contact_id is not null
+         and j.created_at > now() - make_interval(days => $4)
+         and exists (
+           select 1 from llm_calls c
+           where c.organization_id = j.organization_id and c.job_id = j.id and c.purpose = 'agent_turn'
+         )
+       order by j.organization_id, j.contact_id, j.created_at desc
+     ), pending as (
+       select l.id, l.organization_id, l.contact_id,
+              row_number() over (partition by l.organization_id order by l.created_at desc) as rank_in_org
+       from latest_per_contact l
+       where not exists (
+         select 1 from flywheel_judge_verdicts v
+         where v.organization_id = l.organization_id
+           and v.dataset = $1 and v.trace_id = l.id::text and v.dimension = $2
+       )
+     )
+     select id as job_id, organization_id, contact_id
+     from pending
+     where rank_in_org <= $3
+     order by organization_id, rank_in_org`,
+    [DATASET, DIMENSION, limitPerOrg, LOOKBACK_DAYS],
   );
   return rows;
 }
@@ -127,6 +163,9 @@ export interface FlywheelRunResult {
   runId: string;
   judged: number;
   proposals: number;
+  /** Orgs whose round stopped on an error (budget, model, provider, bad output).
+   *  The other orgs still run; the failed org's turns stay pending for next run. */
+  failedOrgs: number;
   /** Task 8.2 — outcomes de follow-up (converted/replied/exhausted/opted_out/
    *  handoff/in_flight) por pointer+version, por org tocada nesta rodada
    *  (via os turnos coletados). Fecha o loop: o flywheel passa a enxergar
@@ -137,89 +176,43 @@ export interface FlywheelRunResult {
 export async function runFlywheelOnce(
   pool: pg.Pool,
   llmCfg: LlmEdgeConfig,
-  opts: { limit: number; log: Logger },
+  opts: { limitPerOrg: number; log: Logger },
 ): Promise<FlywheelRunResult> {
   const runId = crypto.randomUUID();
-  const { limit, log } = opts;
-  const turns = await collectRecentTurns(pool, limit);
+  const { limitPerOrg, log } = opts;
+  const turns = await collectPendingTurns(pool, limitPerOrg);
   log.info('flywheel: turnos reais coletados', { run_id: runId, turns: turns.length });
   let judged = 0;
   let proposals = 0;
+  let failedOrgs = 0;
 
+  const turnsByOrg = new Map<string, TurnRow[]>();
   for (const turn of turns) {
-    const material = await buildMaterial(pool, turn);
-    const optionOrder = parseInt(turn.job_id.slice(0, 8), 16) % 2 === 0 ? 'yes_first' : 'no_first';
+    const orgTurns = turnsByOrg.get(turn.organization_id) ?? [];
+    orgTurns.push(turn);
+    turnsByOrg.set(turn.organization_id, orgTurns);
+  }
 
-    const judgedCall = await runModelCall(
-      pool,
-      llmCfg,
-      {
-        tenantId: turn.organization_id,
-        leadId: turn.contact_id,
-        jobId: turn.job_id,
-        purpose: 'flywheel_judge',
-        messages: [{ role: 'user', content: judgePrompt(material, optionOrder) }],
-      },
-      { log },
-    );
-    const verdict = parseJson<{ verdict: string; missing_facts?: string[] }>(judgedCall.result.text);
-    const verdictValue = ['yes', 'no', 'unknown'].includes(verdict.verdict) ? verdict.verdict : 'unknown';
-
-    const { rowCount } = await pool.query(
-      `insert into flywheel_judge_verdicts
-         (organization_id, dataset, trace_id, dimension, verdict, option_order, judge_family, model, provenance, run_id)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       on conflict (dataset, trace_id, dimension) do nothing`,
-      [
-        turn.organization_id,
-        DATASET,
-        turn.job_id,
-        DIMENSION,
-        verdictValue,
-        optionOrder,
-        judgedCall.provider,
-        judgedCall.model,
-        JSON.stringify({ source: 'live_turn', job_id: turn.job_id, contact_id: turn.contact_id }),
-        runId,
-      ],
-    );
-    const inserted = (rowCount ?? 0) > 0;
-    if (inserted) judged += 1;
-    log.info('flywheel: veredito gravado', { job_id: turn.job_id, verdict: verdictValue, inserted });
-
-    if (verdictValue === 'no' && inserted) {
-      const distilled = await runModelCall(
-        pool,
-        llmCfg,
-        {
-          tenantId: turn.organization_id,
-          leadId: turn.contact_id,
-          jobId: turn.job_id,
-          purpose: 'flywheel_distiller',
-          messages: [{ role: 'user', content: distillerPrompt(verdict.missing_facts ?? []) }],
-        },
-        { log },
-      );
-      const proposal = parseJson<{ content: string; scope?: string }>(distilled.result.text);
-      const isOrg = proposal.scope?.toLowerCase().trim() === 'org';
-      await pool.query(
-        `insert into flywheel_distiller_proposals
-           (organization_id, run_id, dataset, type, target, content, evidence)
-         values ($1,$2,$3,$4,$5,$6,$7)`,
-        [
-          turn.organization_id,
-          runId,
-          DATASET,
-          isOrg ? 'org_memory_entry' : 'playbook_bullet',
-          isOrg ? 'org' : 'tenant',
-          proposal.content,
-          JSON.stringify({ trace_ids: [turn.job_id], dimension: DIMENSION, verdict_run_id: runId }),
-        ],
-      );
-      proposals += 1;
-      log.info('flywheel: proposta do distiller gravada (gate humano pendente)', { job_id: turn.job_id });
+  // One failure boundary per org: an org out of budget, without a model or with
+  // a provider error used to abort the whole run, so every org after it in the
+  // batch was never judged either.
+  for (const [orgId, orgTurns] of turnsByOrg) {
+    try {
+      for (const turn of orgTurns) {
+        const outcome = await judgeTurn(pool, llmCfg, turn, runId, log);
+        if (outcome.judged) judged += 1;
+        if (outcome.proposal) proposals += 1;
+      }
+    } catch (err) {
+      failedOrgs += 1;
+      log.error('flywheel: org round failed; other orgs continue', {
+        run_id: runId,
+        organization_id: orgId,
+        error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+      });
     }
   }
+
   // Task 8.2 — o sinal (followup_enrollments.outcome) já existe (Ondas 4/5);
   // aqui só agregamos por org tocada nesta rodada (via os turnos coletados
   // acima) e logamos, pra a rodada do flywheel surfacear "flow X converte a
@@ -227,23 +220,106 @@ export async function runFlywheelOnce(
   // óbvio existe pra artefatos de rodada do flywheel (ver flywheel_judge_verdicts/
   // flywheel_distiller_proposals no baseline) — log + retorno no resultado é
   // suficiente por instrução do brief.
-  const orgIds = [...new Set(turns.map((t) => t.organization_id))];
   const followupOutcomes: FlywheelRunResult['followupOutcomes'] = [];
-  for (const orgId of orgIds) {
+  for (const orgId of turnsByOrg.keys()) {
     const stats = await aggregateFollowupOutcomes(pool, orgId);
     if (stats.length === 0) continue;
     followupOutcomes.push({ organization_id: orgId, stats });
     log.info('flywheel: outcomes de follow-up por fluxo', { run_id: runId, organization_id: orgId, stats });
   }
 
-  return { runId, judged, proposals, followupOutcomes };
+  return { runId, judged, proposals, failedOrgs, followupOutcomes };
+}
+
+/** Judge one turn and, on "no", distill one proposal. Every write and every LLM
+ *  call carries the turn's own organization_id: cost, BYOK key and budget are
+ *  resolved for that org inside runModelCall. */
+async function judgeTurn(
+  pool: pg.Pool,
+  llmCfg: LlmEdgeConfig,
+  turn: TurnRow,
+  runId: string,
+  log: Logger,
+): Promise<{ judged: boolean; proposal: boolean }> {
+  const material = await buildMaterial(pool, turn);
+  const optionOrder = parseInt(turn.job_id.slice(0, 8), 16) % 2 === 0 ? 'yes_first' : 'no_first';
+
+  const judgedCall = await runModelCall(
+    pool,
+    llmCfg,
+    {
+      tenantId: turn.organization_id,
+      leadId: turn.contact_id,
+      jobId: turn.job_id,
+      purpose: 'flywheel_judge',
+      messages: [{ role: 'user', content: judgePrompt(material, optionOrder) }],
+    },
+    { log },
+  );
+  const verdict = parseJson<{ verdict: string; missing_facts?: string[] }>(judgedCall.result.text);
+  const verdictValue = ['yes', 'no', 'unknown'].includes(verdict.verdict) ? verdict.verdict : 'unknown';
+
+  const { rowCount } = await pool.query(
+    `insert into flywheel_judge_verdicts
+       (organization_id, dataset, trace_id, dimension, verdict, option_order, judge_family, model, provenance, run_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     on conflict (dataset, trace_id, dimension) do nothing`,
+    [
+      turn.organization_id,
+      DATASET,
+      turn.job_id,
+      DIMENSION,
+      verdictValue,
+      optionOrder,
+      judgedCall.provider,
+      judgedCall.model,
+      JSON.stringify({ source: 'live_turn', job_id: turn.job_id, contact_id: turn.contact_id }),
+      runId,
+    ],
+  );
+  const inserted = (rowCount ?? 0) > 0;
+  log.info('flywheel: veredito gravado', { job_id: turn.job_id, verdict: verdictValue, inserted });
+
+  if (verdictValue === 'no' && inserted) {
+    const distilled = await runModelCall(
+      pool,
+      llmCfg,
+      {
+        tenantId: turn.organization_id,
+        leadId: turn.contact_id,
+        jobId: turn.job_id,
+        purpose: 'flywheel_distiller',
+        messages: [{ role: 'user', content: distillerPrompt(verdict.missing_facts ?? []) }],
+      },
+      { log },
+    );
+    const proposal = parseJson<{ content: string; scope?: string }>(distilled.result.text);
+    const isOrg = proposal.scope?.toLowerCase().trim() === 'org';
+    await pool.query(
+      `insert into flywheel_distiller_proposals
+         (organization_id, run_id, dataset, type, target, content, evidence)
+       values ($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        turn.organization_id,
+        runId,
+        DATASET,
+        isOrg ? 'org_memory_entry' : 'playbook_bullet',
+        isOrg ? 'org' : 'tenant',
+        proposal.content,
+        JSON.stringify({ trace_ids: [turn.job_id], dimension: DIMENSION, verdict_run_id: runId }),
+      ],
+    );
+    log.info('flywheel: proposta do distiller gravada (gate humano pendente)', { job_id: turn.job_id });
+    return { judged: inserted, proposal: true };
+  }
+  return { judged: inserted, proposal: false };
 }
 
 /** Loop agendado do flywheel (4B) — intervalo por knob; erro nunca derruba o worker. */
 export async function runFlywheelLoop(
   pool: pg.Pool,
   llmCfg: LlmEdgeConfig,
-  opts: { intervalMs: number; limit: number; log: Logger },
+  opts: { intervalMs: number; limitPerOrg: number; log: Logger },
   signal: AbortSignal,
 ): Promise<void> {
   while (!signal.aborted) {
@@ -258,7 +334,7 @@ export async function runFlywheelLoop(
     });
     if (signal.aborted) return;
     try {
-      const result = await runFlywheelOnce(pool, llmCfg, { limit: opts.limit, log: opts.log });
+      const result = await runFlywheelOnce(pool, llmCfg, { limitPerOrg: opts.limitPerOrg, log: opts.log });
       opts.log.info('flywheel: rodada agendada concluída', result as unknown as Record<string, unknown>);
     } catch (err) {
       opts.log.error('flywheel: rodada agendada falhou', {

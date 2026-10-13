@@ -16,7 +16,7 @@ async function main(): Promise<void> {
   const env = loadEnv();
   const log = createLogger();
   const pool = createPool(env.SUPABASE_DB_URL);
-  const result = await runFlywheelOnce(pool, llmEdgeConfigFromEnv(env), { limit, log });
+  const result = await runFlywheelOnce(pool, llmEdgeConfigFromEnv(env), { limitPerOrg: limit, log });
   log.info('flywheel: rodada concluída', result as unknown as Record<string, unknown>);
   await pool.end();
 }
