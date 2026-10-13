@@ -21,6 +21,7 @@ export const replyDraftSchema = z
     generation_token: z.uuid(),
     original_body: z.string().nullable(),
     agent_version_id: z.uuid(),
+    product_code: z.string().nullable().optional(),
     service_boundary: z.unknown(),
   })
   .passthrough();
@@ -102,9 +103,13 @@ export async function generateReplyDraft(
         result,
       });
       const body = result.candidates.map((c) => c.body).join("\n\n");
+      // The candidates become ONE approved message, so one product rides with it:
+      // the first the agent attached. Already checked against the active catalog
+      // by the preview policy; the send checks it again.
+      const productCode = result.candidates.find((c) => c.productCode)?.productCode ?? null;
       const { rows: finished } = await pool.query(
         `update ai_reply_drafts set status=case when not fn_reply_context_current($1,id) then 'stale' when $4='' then 'failed' else 'pending' end,
- original_body=$4,edited_body=$4,proposals=$5,trace=$6,error_code=$7,updated_at=now()
+ original_body=$4,edited_body=$4,proposals=$5,trace=$6,error_code=$7,product_code=$8,updated_at=now()
  where organization_id=$1 and id=$2 and generation_token=$3 and status='generating' returning *`,
         [
           input.organizationId,
@@ -114,6 +119,7 @@ export async function generateReplyDraft(
           JSON.stringify(result.proposals),
           JSON.stringify(result.candidates.flatMap((c) => c.trace)),
           result.impediments[0]?.code ?? null,
+          productCode,
         ],
       );
       return replyDraftSchema.parse(finished[0] ?? draft);

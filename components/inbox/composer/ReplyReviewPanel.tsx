@@ -16,7 +16,12 @@ type Draft = {
   edited_body: string | null;
   error_code: string | null;
   proposals: Array<{ tool: string; arguments: unknown }>;
+  /** Catalog product the agent attached (Berseba, migration 9001). */
+  product_code?: string | null;
 };
+type DraftProduct = { code: string; name: string | null; thumbnail_url: string | null } | null;
+/** WhatsApp's caption cap — the same `LIMITE_DA_LEGENDA` the send enforces. */
+const CAPTION_LIMIT = 1024;
 export function ReplyReviewPanel({
   conversationId,
   disabled,
@@ -48,6 +53,18 @@ export function ReplyReviewPanel({
   // uma sugestão rejeitada ficava na tela para sempre, sem botão de fechar.
   const draft = sugestaoParaMostrar(query.data?.data.drafts);
   const body = draft ? (edits[draft.id] ?? draft.edited_body ?? draft.original_body ?? "") : "";
+  // The signed thumbnail lives an hour; fetched once per draft, not on every poll.
+  const productCode = draft?.product_code ?? null;
+  const product = useQuery({
+    queryKey: ["reply-draft-product", draft?.id],
+    queryFn: () =>
+      apiClient.get<{ data: { product: DraftProduct } }>(`/api/v1/ai/replies/${draft!.id}/product`),
+    enabled: productCode !== null,
+    staleTime: 30 * 60 * 1000,
+    retry: false,
+  });
+  const productInfo = productCode ? (product.data?.data.product ?? null) : null;
+  const captionTooLong = productCode !== null && body.trim().length > CAPTION_LIMIT;
   async function generate() {
     setNotice(null);
     setBusy(true);
@@ -126,10 +143,40 @@ export function ReplyReviewPanel({
       {draft && (
         <>
           <p className="text-xs text-muted-foreground">
-            {t(
-              "Aprovar envia somente este texto. Não altera dados, agenda ou a autonomia do agente.",
-            )}
+            {productCode
+              ? t(
+                  "Aprovar envia a foto do produto com este texto como legenda. Não altera dados, agenda ou a autonomia do agente.",
+                )
+              : t(
+                  "Aprovar envia somente este texto. Não altera dados, agenda ou a autonomia do agente.",
+                )}
           </p>
+          {productCode && (
+            <div
+              className="flex items-center gap-3 rounded-md border bg-background p-2"
+              data-testid="reply-draft-product"
+            >
+              {productInfo?.thumbnail_url ? (
+                // Short-lived signed URL from another host: `next/image` would need an allowlist at build time.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={productInfo.thumbnail_url}
+                  alt={t("Foto do produto")}
+                  className="h-14 w-14 shrink-0 rounded-md object-cover"
+                />
+              ) : (
+                <div className="h-14 w-14 shrink-0 rounded-md bg-muted" aria-hidden="true" />
+              )}
+              <div className="min-w-0 text-xs">
+                <p className="truncate font-medium">{productInfo?.name ?? productCode}</p>
+                <p className="text-muted-foreground">
+                  {product.isSuccess && productInfo?.name === null
+                    ? t("Este produto não está mais ativo no catálogo. A resposta não será enviada.")
+                    : t("Foto do catálogo, enviada junto com a resposta.")}
+                </p>
+              </div>
+            </div>
+          )}
           {body && (
             <Textarea
               aria-label={t("Resposta sugerida")}
@@ -150,6 +197,11 @@ export function ReplyReviewPanel({
               </ul>
             </details>
           )}
+          {draft.status === "pending" && captionTooLong && (
+            <p role="alert" className="text-xs text-destructive">
+              {t("A legenda da foto aceita até 1.024 caracteres. Encurte o texto para enviar.")}
+            </p>
+          )}
           {draft.status === "pending" && (
             <>
               <Input
@@ -163,7 +215,7 @@ export function ReplyReviewPanel({
                 <Button
                   type="button"
                   size="sm"
-                  disabled={disabled || busy || !body.trim()}
+                  disabled={disabled || busy || !body.trim() || captionTooLong}
                   onClick={() => decide("approve")}
                 >
                   {t("Aprovar e enviar")}

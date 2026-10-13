@@ -144,3 +144,68 @@ it('uses only supplied in-memory sample contact in sandbox', () => {
   expect(context.context.contact.name).toBe('Maria Cenário');
   expect(context.context.contact.phone).toBe('+5511999999999');
 });
+
+describe('produto_codigo in preview (Berseba, migration 9001)', () => {
+  const assisted = () => ({ ...preview(), kind: 'assisted' as const, contactId: 'contact' });
+
+  it('keeps an existing product code on the candidate, so the Assisted draft can carry the photo', async () => {
+    const p = assisted(),
+      exists = vi.fn(async (code: string) => code === 'mechas-morena');
+    const tools = applyPreviewPolicy(
+      { send_message: definition(vi.fn()) },
+      p,
+      gate(),
+      () => [],
+      undefined,
+      undefined,
+      exists,
+    );
+    const out = await execute(tools, 'send_message', {
+      body: 'Olá, posso ajudar?',
+      produto_codigo: ' mechas-morena ',
+    });
+    expect(exists).toHaveBeenCalledWith('mechas-morena');
+    expect(out).toMatchObject({ ok: true, status: 'awaiting_approval' });
+    expect(p.result.candidates).toEqual([
+      expect.objectContaining({ body: 'Olá, posso ajudar?', productCode: 'mechas-morena' }),
+    ]);
+  });
+
+  it('an unknown code goes back to the model as produto_nao_encontrado and records no candidate', async () => {
+    const p = assisted();
+    const tools = applyPreviewPolicy(
+      { send_message: definition(vi.fn()) },
+      p,
+      gate(),
+      () => [],
+      undefined,
+      undefined,
+      async () => false,
+    );
+    const out = await execute(tools, 'send_message', {
+      body: 'Olá, posso ajudar?',
+      produto_codigo: 'nao-existe',
+    });
+    expect(out).toMatchObject({ ok: false, error: { code: 'produto_nao_encontrado' } });
+    expect(p.result.candidates).toEqual([]);
+    // Not an impediment: the model corrects the code, as in the live turn.
+    expect(p.result.impediments).toEqual([]);
+  });
+
+  it('a blank code is no code: the candidate carries none and nothing is looked up', async () => {
+    const p = assisted(),
+      exists = vi.fn(async () => true);
+    const tools = applyPreviewPolicy(
+      { send_message: definition(vi.fn()) },
+      p,
+      gate(),
+      () => [],
+      undefined,
+      undefined,
+      exists,
+    );
+    await execute(tools, 'send_message', { body: 'Olá, posso ajudar?', produto_codigo: '  ' });
+    expect(exists).not.toHaveBeenCalled();
+    expect(p.result.candidates[0]).not.toHaveProperty('productCode');
+  });
+});

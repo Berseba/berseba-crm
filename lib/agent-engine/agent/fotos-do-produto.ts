@@ -55,7 +55,33 @@ export function copiarFotoNoStorage(log: Log): CopiarFoto {
 
 export type FotosPreparadas =
   | { ok: true; fotos: FotoParaEnvio[]; tinha: number }
-  | { ok: false; code: 'produto_nao_encontrado'; message: string };
+  | ProductNotFound;
+
+export type ProductNotFound = { ok: false; code: 'produto_nao_encontrado'; message: string };
+
+/** The teaching error for a code with no active product. Shared by the live turn and the preview. */
+export function productNotFound(codigo: string): ProductNotFound {
+  return {
+    ok: false,
+    code: 'produto_nao_encontrado',
+    message:
+      `não há produto ativo com o código ${JSON.stringify(codigo)} no catálogo. Use o ` +
+      '`codigo` que crm_search_products devolveu, ou envie sem produto_codigo.',
+  };
+}
+
+/** The active product with this code in the organization, or null. */
+export async function findActiveProduct(
+  db: Queryable,
+  tenantId: string,
+  codigo: string,
+): Promise<{ id: string; fotos: string[] | null } | null> {
+  const { rows } = await db.query<{ id: string; fotos: string[] | null }>(
+    'select id, fotos from catalog_products where organization_id = $1 and codigo = $2 and ativo',
+    [tenantId, codigo.trim()],
+  );
+  return rows[0] ?? null;
+}
 
 /**
  * Acha o produto pelo código e deixa as fotos dele prontas na pasta da conversa.
@@ -64,31 +90,22 @@ export type FotosPreparadas =
  * qualquer coisa: o modelo corrige o código e tenta de novo. Foto que não copia
  * NÃO derruba o envio — ela fica de fora e o texto sai (degradar para só texto);
  * `tinha` deixa quem chama dizer ao modelo que faltou foto.
+ *
+ * `limit` caps how many photos are copied, in screen order (the cover first).
+ * An approved Assisted-mode reply sends only the cover; without `limit`, all.
  */
 export async function prepararFotosDoProduto(
   db: Queryable,
   copiar: CopiarFoto,
-  input: { tenantId: string; conversationId: string; codigo: string },
+  input: { tenantId: string; conversationId: string; codigo: string; limit?: number },
 ): Promise<FotosPreparadas> {
-  const { rows } = await db.query<{ id: string; fotos: string[] | null }>(
-    'select id, fotos from catalog_products where organization_id = $1 and codigo = $2 and ativo',
-    [input.tenantId, input.codigo.trim()],
-  );
-  const produto = rows[0];
-  if (!produto) {
-    return {
-      ok: false,
-      code: 'produto_nao_encontrado',
-      message:
-        `não há produto ativo com o código ${JSON.stringify(input.codigo)} no catálogo. Use o ` +
-        '`codigo` que crm_search_products devolveu, ou envie sem produto_codigo.',
-    };
-  }
+  const produto = await findActiveProduct(db, input.tenantId, input.codigo);
+  if (!produto) return productNotFound(input.codigo);
   // Só caminho que é DESTE produto: a linha é gravável pelo PostgREST e a cópia
   // é por service role — sem o filtro, sairia foto de outra organização.
-  const deste = (produto.fotos ?? []).filter((c) =>
-    fotoPertenceAoProduto(c, input.tenantId, produto.id),
-  );
+  const deste = (produto.fotos ?? [])
+    .filter((c) => fotoPertenceAoProduto(c, input.tenantId, produto.id))
+    .slice(0, input.limit ?? undefined);
   const fotos: FotoParaEnvio[] = [];
   for (const origem of deste) {
     const destino = `${input.tenantId}/${input.conversationId}/catalogo-${origem.split('/').pop()}`;

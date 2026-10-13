@@ -34,7 +34,7 @@ export async function GET(_req: NextRequest, ctx: Ctx) {
     c = await context(ctx, requestId);
   if ("response" in c) return c.response;
   const { rows } = await getRequestPool().query(
-    `select id,revision::text,original_body,edited_body,approved_body,proposals,feedback,error_code,created_at,
+    `select id,revision::text,original_body,edited_body,approved_body,proposals,feedback,error_code,created_at,product_code,
  case when status in ('generating','pending','approved') and not fn_reply_context_current(organization_id,id) then 'stale' else status end as status
  from ai_reply_drafts where organization_id=$1 and conversation_id=$2 order by created_at desc limit 5`,
     [c.auth.org.orgId, c.conversation.id],

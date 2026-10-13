@@ -24,6 +24,7 @@ import { camadaLigada, lerCamadasDaOrg } from '../guardrails/camadas-da-org';
 import { loadDisclosureTemplate, countPriorAcceptedSends } from '../guardrails/disclosure/template';
 import { DEFAULT_CHANNEL_PROVIDER } from '@/lib/channels/capabilities';
 import { getToolByName } from '@/lib/mcp/tools';
+import { productNotFound } from './fotos-do-produto';
 import type { Logger } from '../obs/logger';
 import type { Citation } from '@/lib/ai/citations/types';
 
@@ -44,7 +45,13 @@ export interface TurnPreview {
 }
 export interface PreviewResult {
   checkpoint?: unknown;
-  candidates: Array<{ body: string; citations: Citation[]; trace: GateTraceEntry[] }>;
+  candidates: Array<{
+    body: string;
+    citations: Citation[];
+    trace: GateTraceEntry[];
+    /** `produto_codigo` of the call, checked against the active catalog (Assisted drafts carry it). */
+    productCode?: string;
+  }>;
   proposals: Array<{ tool: string; arguments: unknown }>;
   impediments: Array<{ code: string; message: string }>;
   /**
@@ -198,6 +205,13 @@ export function applyPreviewPolicy(
   citations: () => Citation[],
   semanticClassifier?: (body: string) => Promise<NonNullable<GateContext['semanticPromise']>>,
   liveContext?: () => Partial<GateContext>,
+  /**
+   * Does the organization have an active product with this code? The same check
+   * the live turn makes before sending (`findActiveProduct`): an unknown code goes
+   * back to the model as `produto_nao_encontrado` and no candidate is recorded.
+   * Absent, the code rides on the candidate unchecked, and the send re-checks it.
+   */
+  productExists?: (code: string) => Promise<boolean>,
 ): ToolSet {
   return Object.fromEntries(
     Object.entries(tools).map(([name, definition]) => {
@@ -223,6 +237,18 @@ export function applyPreviewPolicy(
                 args && typeof args === 'object' && 'body' in args && typeof args.body === 'string'
                   ? args.body
                   : '';
+              const rawCode =
+                args &&
+                typeof args === 'object' &&
+                'produto_codigo' in args &&
+                typeof args.produto_codigo === 'string'
+                  ? args.produto_codigo.trim()
+                  : '';
+              const productCode = rawCode === '' ? undefined : rawCode;
+              if (productCode !== undefined && productExists && !(await productExists(productCode))) {
+                const { code, message } = productNotFound(productCode);
+                return { ok: false, error: { code, message } };
+              }
               const avisos: Array<{ code: string; message: string }> = [];
               const result = evaluateBeforeSend(
                 {
@@ -248,6 +274,7 @@ export function applyPreviewPolicy(
                 body: result.body,
                 citations: citations(),
                 trace: result.trace,
+                ...(productCode !== undefined ? { productCode } : {}),
               });
               return {
                 ok: true,

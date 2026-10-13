@@ -74,6 +74,7 @@ import { buildNativeMediaParts } from './media-parts';
 import {
   copiarFotoNoStorage,
   enviarComFotos,
+  findActiveProduct,
   prepararFotosDoProduto,
   type FotoParaEnvio,
 } from './fotos-do-produto';
@@ -4292,6 +4293,7 @@ async function executarTurnoDoAgente(
                 toolCalledThisTurn: agendaToolCalledThisTurn,
               },
             }),
+            async (code) => (await findActiveProduct(pool, tenantId, code)) !== null,
           )
         : rawTools;
     const tools = wrapToolsWithBreaker(previewTools, {
