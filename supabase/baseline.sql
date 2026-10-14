@@ -5426,6 +5426,48 @@ create policy "conversations_select" on public.conversations
     public.fn_can_view_conversation(organization_id, assigned_to_user_id)
   );
 
+-- ---- conversations_select: visibility scope once per query (migration 9001) ----
+-- Berseba fork block, placed right after the policy it rewrites (not at the end
+-- of the file, where upstream appends on every release and a sync would
+-- conflict). Why and the branch-by-branch parity: the header of
+-- supabase/migrations/20261014190000_9001_conversation_visibility_once_per_query.sql.
+
+create or replace function public.fn_conversation_visibility_scope()
+returns table (org_id uuid, visibility text)
+language sql stable security definer
+set search_path = public
+as $$
+  select o.id,
+         case
+           when (select public.fn_is_platform_admin()) then 'all'
+           when public.fn_user_role_in_org(o.id) in ('viewer', 'manager', 'admin') then 'all'
+           else coalesce(o.settings->>'visibility_mode', 'own_and_unassigned')
+         end
+  from public.organizations o
+  where (select public.fn_is_platform_admin())
+     or (o.id in (select public.fn_user_org_ids())
+         and public.fn_user_role_in_org(o.id) is not null);
+$$;
+
+revoke all on function public.fn_conversation_visibility_scope() from public;
+revoke execute on function public.fn_conversation_visibility_scope() from anon;
+grant execute on function public.fn_conversation_visibility_scope()
+  to authenticated, service_role;
+
+alter policy "conversations_select" on public.conversations
+  using (
+    organization_id in (
+      select s.org_id from public.fn_conversation_visibility_scope() s
+      where s.visibility = 'all')
+    or (assigned_to_user_id = (select auth.uid())
+        and organization_id in (
+          select s.org_id from public.fn_conversation_visibility_scope() s))
+    or (assigned_to_user_id is null
+        and organization_id in (
+          select s.org_id from public.fn_conversation_visibility_scope() s
+          where s.visibility = 'own_and_unassigned'))
+  );
+
 drop policy if exists "conversations_agent_write" on public.conversations;
 drop policy if exists "conversations_agent_insert" on public.conversations;
 drop policy if exists "conversations_agent_update" on public.conversations;
