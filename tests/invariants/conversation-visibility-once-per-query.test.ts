@@ -143,7 +143,11 @@ function visibleThroughPolicy(userId: string, org: string): string {
  */
 function bothSides(userId: string): Array<[string, string, string]> {
   const oldRule = ORGS.map((org, i) =>
-    idsQuery(`old${i}`, org, "and public.fn_can_view_conversation(organization_id, assigned_to_user_id)"),
+    idsQuery(
+      `old${i}`,
+      org,
+      "and public.fn_can_view_conversation(organization_id, assigned_to_user_id)",
+    ),
   ).join("\n");
   const policy = ORGS.map((org, i) => idsQuery(`policy${i}`, org)).join("\n");
   const out = sql(`
@@ -189,11 +193,12 @@ describe("conversations_select — scope once per query (migration 9001)", () =>
     const divergent: string[] = [];
     for (const [user, tag] of USERS) {
       for (const [org, policy, oldRule] of bothSides(user)) {
-        if (policy !== oldRule) divergent.push(`${tag} @ …${org.slice(-1)}: policy=[${policy}] old=[${oldRule}]`);
+        if (policy !== oldRule)
+          divergent.push(`${tag} @ …${org.slice(-1)}: policy=[${policy}] old=[${oldRule}]`);
       }
     }
     expect(divergent).toEqual([]);
-   }, 120_000);
+  }, 120_000);
 
   it("the plan never calls fn_can_view_conversation per row and reads the scope as a hashed subplan", () => {
     const plan = sql(`
