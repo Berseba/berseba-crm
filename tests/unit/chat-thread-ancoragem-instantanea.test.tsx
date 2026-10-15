@@ -16,6 +16,11 @@ import type { Message } from "@/lib/types/messaging";
  *
  * Nenhum outro teste renderiza o ChatThread de verdade, então sem este nada
  * impediria a linha de voltar a `smooth` fixo.
+ *
+ * The anchoring scrolls the thread's OWN box (`scrollTo`), never
+ * `scrollIntoView` (#54): that one also scrolls `<main>`, and on a phone in
+ * landscape it pushed the conversation header, with the contact-panel trigger,
+ * under the sticky top bar.
  */
 
 const estado = vi.hoisted(() => ({ mensagens: [] as unknown[] }));
@@ -66,29 +71,47 @@ const wrapper = ({ children }: { children: ReactNode }) => (
 );
 
 const rolar = vi.fn();
-const original = Element.prototype.scrollIntoView;
+const rolarAncestrais = vi.fn();
+const originalScrollTo = HTMLElement.prototype.scrollTo;
+const originalScrollIntoView = Element.prototype.scrollIntoView;
 
 /** O `behavior` de cada chamada, em ordem. */
 function comportamentos(): unknown[] {
-  return rolar.mock.calls.map((c) => (c[0] as ScrollIntoViewOptions).behavior);
+  return rolar.mock.calls.map((c) => (c[0] as ScrollToOptions).behavior);
 }
 
 describe("ChatThread: ancoragem ao fim", () => {
   beforeEach(() => {
     qc = new QueryClient();
     rolar.mockClear();
+    rolarAncestrais.mockClear();
     estado.mensagens = [];
-    Element.prototype.scrollIntoView = rolar;
+    HTMLElement.prototype.scrollTo = rolar as unknown as typeof HTMLElement.prototype.scrollTo;
+    Element.prototype.scrollIntoView = rolarAncestrais;
   });
   afterEach(() => {
-    Element.prototype.scrollIntoView = original;
+    HTMLElement.prototype.scrollTo = originalScrollTo;
+    Element.prototype.scrollIntoView = originalScrollIntoView;
   });
 
   it("abre a conversa com histórico indo ao fim SEM animação", () => {
     estado.mensagens = [mensagem(1), mensagem(2)];
     render(<ChatThread conversationId="c-1" />, { wrapper });
-    expect(rolar).toHaveBeenCalledWith({ behavior: "auto", block: "end" });
+    expect(rolar).toHaveBeenCalledWith({ behavior: "auto", top: expect.any(Number) });
     expect(comportamentos()).not.toContain("smooth");
+  });
+
+  it("scrolls ONLY the thread's own box, never its ancestors (#54)", () => {
+    estado.mensagens = [mensagem(1), mensagem(2)];
+    const { rerender } = render(<ChatThread conversationId="c-1" />, { wrapper });
+    estado.mensagens = [mensagem(1), mensagem(2), mensagem(3)];
+    rerender(<ChatThread conversationId="c-1" />);
+    expect(rolar).toHaveBeenCalled();
+    // `this` of every call is the thread's own scroller, the `overflow-y-auto` box.
+    for (const alvo of rolar.mock.contexts as HTMLElement[]) {
+      expect(alvo.className).toContain("overflow-y-auto");
+    }
+    expect(rolarAncestrais).not.toHaveBeenCalled();
   });
 
   it("mensagem nova, depois da abertura, rola suave", () => {

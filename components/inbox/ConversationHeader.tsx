@@ -1,5 +1,5 @@
 "use client";
-import { useState, type RefObject } from "react";
+import { useState, type ReactNode, type RefObject } from "react";
 import { useT } from "@/hooks/i18n/useT";
 import Link from "next/link";
 import {
@@ -54,6 +54,13 @@ interface Props {
   botaoBuscaRef?: RefObject<HTMLButtonElement | null>;
   /** Seleciona outra conversa no Inbox — a aba Número do Transferir abre a do outro número. */
   onAbrirConversa?: (id: string) => void;
+  /**
+   * The door to the contact panel below `xl` (#54). The Inbox owns the panel
+   * (its Sheet and open state); the header only decides WHERE the door sits:
+   * next to the contact's name, at every width where the inline panel does
+   * not exist.
+   */
+  ficha?: ReactNode;
 }
 
 /**
@@ -88,6 +95,7 @@ export function ConversationHeader({
   onBuscar,
   buscaAberta,
   botaoBuscaRef,
+  ficha,
 }: Props) {
   const t = useT();
   const { user, activeOrg } = useAuth();
@@ -186,8 +194,13 @@ export function ConversationHeader({
   const podePausar =
     automaticoAtivo && !encerrada && conversation.assigned_to_user_id !== null;
 
-  if (user.support?.access_mode === "support_readonly") return <header className="flex items-center justify-between border-b p-4">
+  // `xl:hidden` is the SAME breakpoint as the inline panel in InboxLayout
+  // (`hidden xl:block`): one of the two exists at every width, never both.
+  const portaDaFicha = ficha ? <div className="ml-auto shrink-0 xl:hidden">{ficha}</div> : null;
+
+  if (user.support?.access_mode === "support_readonly") return <header className="flex items-center justify-between gap-2 border-b p-4">
     <strong>{displayName}</strong><span className="text-sm text-muted-foreground">{STATUS_LABEL[status] ?? status} · Somente leitura</span>
+    {portaDaFicha}
   </header>;
   return (
     // `flex-wrap` porque este header travava a LARGURA DA TELA INTEIRA. Ele
@@ -202,7 +215,12 @@ export function ConversationHeader({
     // Nenhuma ação some — um menu "mais" esconderia o "Lembrar" que a spec
     // `canais-baseline` clica, e, pior, esconderia ação de quem atende.
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-background px-4 py-3">
-      <div className="min-w-0">
+      {/* `flex-[1_1_auto]`: the basis stays `auto`, so the line breaking of
+          this header is exactly what it was; the identity only GROWS into the
+          free space of its own line. That is what lets the contact-panel door
+          (`portaDaFicha`) sit at the right edge of the name row, the top right
+          of the header on a phone, instead of trailing the status badge. */}
+      <div className="min-w-0 flex-[1_1_auto]">
         <div className="flex min-w-0 items-center gap-1.5">
           <ChannelLogo channel={conversation.channel_sessions} size={20} />
           <h2 className="min-w-0 truncate text-sm font-semibold" title={displayName}>{displayName}</h2>
@@ -216,6 +234,7 @@ export function ConversationHeader({
             provider={conversation.channel_sessions?.provider ?? null}
             lastInboundAt={conversation.last_inbound_at}
           />
+          {portaDaFicha}
         </div>
 
         {/* QUEM ESTÁ NO COMANDO, com nome e por GEOMETRIA — disco cheio para

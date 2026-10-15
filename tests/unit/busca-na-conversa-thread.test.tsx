@@ -42,7 +42,7 @@ vi.mock("@/hooks/i18n/useLocaleDeData", () => ({ useLocaleDeData: () => undefine
 vi.mock("@/components/inbox/NoteCard", () => ({ NoteCard: () => null }));
 vi.mock("@/components/inbox/PassagemCard", () => ({ PassagemCard: () => null }));
 
-import { ChatThread } from "@/components/inbox/ChatThread";
+import { ChatThread, topoParaVer } from "@/components/inbox/ChatThread";
 
 function msg(id: string, body: string, over: Partial<Message> = {}): Message {
   return {
@@ -82,7 +82,10 @@ const wrapper = ({ children }: { children: ReactNode }) => (
   <QueryClientProvider client={qc}>{children}</QueryClientProvider>
 );
 const rolar = vi.fn();
-const original = Element.prototype.scrollIntoView;
+const rolarAncestrais = vi.fn();
+const originalScrollTo = HTMLElement.prototype.scrollTo;
+const originalScrollIntoView = Element.prototype.scrollIntoView;
+const originalRect = HTMLElement.prototype.getBoundingClientRect;
 
 /** Os corpos das bolhas marcadas pela busca, em ordem. */
 function marcadas(container: HTMLElement): string[] {
@@ -95,8 +98,10 @@ describe("ChatThread: busca nas mensagens carregadas", () => {
   beforeEach(() => {
     qc = new QueryClient();
     rolar.mockClear();
+    rolarAncestrais.mockClear();
     get.mockClear();
-    Element.prototype.scrollIntoView = rolar;
+    HTMLElement.prototype.scrollTo = rolar as unknown as typeof HTMLElement.prototype.scrollTo;
+    Element.prototype.scrollIntoView = rolarAncestrais;
     estado.mensagens = [
       msg("m-1", "Qual o valor do BOLETO?"),
       msg("m-2", "Bom dia"),
@@ -106,7 +111,9 @@ describe("ChatThread: busca nas mensagens carregadas", () => {
     ];
   });
   afterEach(() => {
-    Element.prototype.scrollIntoView = original;
+    HTMLElement.prototype.scrollTo = originalScrollTo;
+    Element.prototype.scrollIntoView = originalScrollIntoView;
+    HTMLElement.prototype.getBoundingClientRect = originalRect;
   });
 
   it("marca só as bolhas visíveis que contêm o termo, sem diferenciar maiúsculas", () => {
@@ -125,10 +132,21 @@ describe("ChatThread: busca nas mensagens carregadas", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("leva a primeira ocorrência ao campo de visão", () => {
+  it("leva a primeira ocorrência ao campo de visão, rolando só a caixa do fio (#54)", () => {
+    // jsdom has no layout: the thread box is 0–100 and the first match sits
+    // below it, at 300–340, so the thread must move 240px to show it whole.
+    HTMLElement.prototype.getBoundingClientRect = function (this: HTMLElement) {
+      const r = this.getAttribute("data-search-match") === "true"
+        ? { top: 300, bottom: 340 }
+        : { top: 0, bottom: 100 };
+      return { ...r, left: 0, right: 0, width: 0, height: r.bottom - r.top, x: 0, y: r.top } as DOMRect;
+    };
     render(<ChatThread conversationId="c-1" searchTerm="boleto" />, { wrapper });
-    const alvos = rolar.mock.contexts as Element[];
-    expect(alvos.some((el) => el.getAttribute("data-search-match") === "true")).toBe(true);
+    const chamada = rolar.mock.calls.findIndex((c) => (c[0] as ScrollToOptions).top === 240);
+    expect(chamada, "the thread scrolled to the first match").toBeGreaterThanOrEqual(0);
+    expect((rolar.mock.contexts[chamada] as HTMLElement).className).toContain("overflow-y-auto");
+    // `scrollIntoView` would also scroll `<main>`, see the comment in ChatThread.
+    expect(rolarAncestrais).not.toHaveBeenCalled();
   });
 
   it("termo sem ocorrência diz zero; sem termo, nada é marcado e não há contador", () => {
@@ -143,5 +161,18 @@ describe("ChatThread: busca nas mensagens carregadas", () => {
     expect(marcadas(container)).toEqual([]);
     expect(screen.queryByRole("status")).toBeNull();
     expect(container.querySelectorAll('[data-testid="message-bubble"]').length).toBeGreaterThan(0);
+  });
+});
+
+describe("topoParaVer: the `block: \"nearest\"` rule, inside the thread only", () => {
+  const caixa = { top: 100, bottom: 400 };
+  it("already fully visible: does not move", () => {
+    expect(topoParaVer(50, caixa, { top: 150, bottom: 200 })).toBe(50);
+  });
+  it("above the box: aligns its top", () => {
+    expect(topoParaVer(50, caixa, { top: 60, bottom: 90 })).toBe(10);
+  });
+  it("below the box: aligns its bottom", () => {
+    expect(topoParaVer(50, caixa, { top: 420, bottom: 470 })).toBe(120);
   });
 });

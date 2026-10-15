@@ -55,6 +55,39 @@ export type ThreadItem =
   | { kind: "note"; ts: string; data: Note }
   | { kind: "passagem"; ts: string; data: CartaoDaPassagem };
 
+/**
+ * THE THREAD SCROLLS ITS OWN BOX, AND NOTHING ELSE (#54).
+ *
+ * `scrollIntoView` does not stop at the thread: it scrolls EVERY scrollable
+ * ancestor until the element is in view, and here that includes the app's
+ * `<main>`. Measured on a phone in landscape (844x390): the conversation column
+ * is taller than the grid row, so anchoring the thread at the end also rolled
+ * `<main>` 96px down, and the conversation header, with its "Ficha" door, went
+ * under the sticky top bar the moment a conversation opened.
+ *
+ * `scrollTo` and `scrollTop` touch only the thread. jsdom implements neither
+ * `scrollTo` nor `scrollIntoView`, hence the fallback.
+ */
+function rolarOFio(scroller: HTMLElement, top: number, behavior: ScrollBehavior): void {
+  if (typeof scroller.scrollTo === "function") scroller.scrollTo({ top, behavior });
+  else scroller.scrollTop = top;
+}
+
+/**
+ * Where the thread has to be for `alvo` to be fully visible, the same rule as
+ * `block: "nearest"`: already visible, no move; above, align the top; below,
+ * align the bottom. Pure, so it is tested with plain rectangles.
+ */
+export function topoParaVer(
+  scrollTop: number,
+  caixa: { top: number; bottom: number },
+  alvo: { top: number; bottom: number },
+): number {
+  if (alvo.top < caixa.top) return scrollTop + (alvo.top - caixa.top);
+  if (alvo.bottom > caixa.bottom) return scrollTop + (alvo.bottom - caixa.bottom);
+  return scrollTop;
+}
+
 /** Intercala mensagens, notas e passagens por timestamp asc (puro, sem I/O — testado em thread-merge.test.ts). */
 export function mergeThreadItems(
   messages: Message[],
@@ -95,7 +128,6 @@ export function ChatThread({
   const notes = useConversationNotes(conversationId);
   const passagens = usePassagensDaConversa(conversationId);
   const claim = useClaimConversation();
-  const bottomRef = useRef<HTMLDivElement | null>(null);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const paginasVistas = useRef(0);
   /**
@@ -145,10 +177,11 @@ export function ChatThread({
   // Só o TERMO leva à ocorrência. Depender do conjunto de resultados faria cada
   // mensagem nova do tempo real arrancar quem lê de volta à primeira ocorrência.
   useEffect(() => {
-    if (termo)
-      scrollerRef.current
-        ?.querySelector('[data-search-match="true"]')
-        ?.scrollIntoView({ block: "nearest" });
+    const sc = scrollerRef.current;
+    const alvo = termo ? sc?.querySelector('[data-search-match="true"]') : null;
+    if (!sc || !alvo) return;
+    const topo = topoParaVer(sc.scrollTop, sc.getBoundingClientRect(), alvo.getBoundingClientRect());
+    if (topo !== sc.scrollTop) rolarOFio(sc, topo, "auto");
   }, [termo]);
   /**
    * As mensagens por id, para resolver a CITADA sem ir ao servidor.
@@ -227,18 +260,15 @@ export function ChatThread({
      * inferir isso da paginação de UMA das três fontes do fio.
      */
     const primeiraAncoragem = !jaAncorou.current;
-    if (jaAncorou.current) {
-      const sc = scrollerRef.current;
-      if (sc && sc.scrollHeight - sc.scrollTop - sc.clientHeight > 120) return;
-    }
+    const sc = scrollerRef.current;
+    if (!sc) return;
+    if (jaAncorou.current && sc.scrollHeight - sc.scrollTop - sc.clientHeight > 120) return;
     // Fio ainda vazio não ancora nada: marcar aqui faria a guarda valer a partir
     // da pintura em branco, que é exatamente o defeito acima.
     if (items.length > 0) jaAncorou.current = true;
 
-    bottomRef.current?.scrollIntoView({
-      behavior: primeiraAncoragem ? "auto" : "smooth",
-      block: "end",
-    });
+    // The end of the thread, inside the thread only (see `rolarOFio`).
+    rolarOFio(sc, sc.scrollHeight, primeiraAncoragem ? "auto" : "smooth");
   }, [items.length, conversationId, paginas]);
 
   /**
@@ -414,8 +444,6 @@ export function ChatThread({
             )}
           </div>
         ))}
-
-        <div ref={bottomRef} />
       </div>
     </div>
   );
