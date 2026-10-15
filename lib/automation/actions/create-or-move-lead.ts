@@ -51,8 +51,17 @@ async function execute(ctx: ActionCtx, config: Record<string, unknown>): Promise
     ? (await originFromAutomationEvent(ctx, contactId)) ?? { kind: "unavailable", reason: "origin_capture_failed" }
     : { kind: "unavailable", reason: "origin_capture_failed" };
 
+  // Berseba (#57): on `message.sent` the context lead is the CONVERSATION's
+  // (the contact's most recent open lead), not the event's entity. When it
+  // lives in another pipeline, failing with `cross_pipeline_move_not_allowed`
+  // would leave the rule stuck; the CONTACT branch below already knows what to
+  // do (the open lead in the target pipeline, the transfer, or a new one).
+  const conversationLeadInOtherPipeline = Boolean(
+    lead && contact && lead.pipeline_id !== pipelineId && ctx.event?.event_type === "message.sent",
+  );
+
   try {
-    if (lead) {
+    if (lead && !conversationLeadInOtherPipeline) {
       if (lead.pipeline_id !== pipelineId) {
         // ── O GATILHO lead.tag_added COM O NEGÓCIO EM OUTRO FUNIL: A REGRA TRANSFERE (#2155) ──
         //

@@ -5777,6 +5777,10 @@ export const DICIONARIO: Traducoes = {
     es: "Con este disparador la automatización no puede asignar responsable ni mover el lead: el propio cambio volvería a disparar la automatización, sin fin.",
   },
   "Quando chegar mensagem no WhatsApp": { es: "Cuando llegue un mensaje por WhatsApp" },
+  "Mensagem enviada pela equipe": { es: "Mensaje enviado por el equipo" },
+  "Origem do envio (user = CRM, external_device = celular)": {
+    es: "Origen del envío (user = CRM, external_device = celular)",
+  },
   "Quando uma mensagem não for entregue": { es: "Cuando un mensaje no se entregue" },
   "Código do erro": { es: "Código del error" },
   "Janela de 24 horas fechada: texto livre é recusado pela plataforma (131047). Envie um modelo aprovado ou aguarde o cliente escrever.": {

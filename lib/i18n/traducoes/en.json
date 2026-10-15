@@ -3457,6 +3457,8 @@
   "Neste gatilho esta ação não roda: atribuir responsável ou mover o lead dispararia a automação de novo, sem fim. Abra a automação e tire a ação.": "With this trigger this action doesn't run: assigning an owner or moving the lead would fire the automation again, endlessly. Open the automation and remove the action.",
   "Neste gatilho a automação não pode atribuir responsável nem mover o lead: a própria mudança dispararia a automação de novo, sem fim.": "With this trigger the automation can't assign an owner or move the lead: the change itself would fire the automation again, endlessly.",
   "Quando chegar mensagem no WhatsApp": "When a WhatsApp message arrives",
+  "Mensagem enviada pela equipe": "Message sent by the team",
+  "Origem do envio (user = CRM, external_device = celular)": "Sent from (user = CRM, external_device = phone)",
   "Quando uma mensagem não for entregue": "When a message isn't delivered",
   "Código do erro": "Error code",
   "Janela de 24 horas fechada: texto livre é recusado pela plataforma (131047). Envie um modelo aprovado ou aguarde o cliente escrever.": "24-hour window closed: free text is rejected by the platform (131047). Send an approved template or wait for the client to write.",

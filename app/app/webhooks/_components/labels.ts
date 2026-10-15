@@ -28,6 +28,10 @@ export const TRIGGER_LABELS: Record<TriggerEvent, string> = {
   "lead.reopened": "Quando um lead encerrado for reaberto",
   "lead.assigned": "Quando o responsável do lead mudar",
   "message.received": "Quando chegar mensagem no WhatsApp",
+  // Berseba (#57): the label says WHO wrote it, because that is what the
+  // trigger filters: the AI and automations also send, and do not trigger it
+  // (unless the rule has an explicit "Origem do envio" condition).
+  "message.sent": "Mensagem enviada pela equipe",
   // A frase é do ponto de vista de quem RECEBE o aviso: a falha é do envio, e
   // é ela que manda o integrador verificar. "não for entregue" cobre os dois
   // caminhos que emitem (recusa da plataforma e pré-voo), sem prometer que a

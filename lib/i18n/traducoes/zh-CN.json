@@ -2191,6 +2191,8 @@
   "Neste gatilho esta ação não roda: atribuir responsável ou mover o lead dispararia a automação de novo, sem fim. Abra a automação e tire a ação.": "此触发器下该操作不会执行：分配负责人或移动销售线索会再次触发自动化，无限循环。请打开自动化并移除该操作。",
   "Neste gatilho a automação não pode atribuir responsável nem mover o lead: a própria mudança dispararia a automação de novo, sem fim.": "此触发器下，自动化不能分配负责人或移动销售线索：这一变更本身会再次触发自动化，无限循环。",
   "Quando chegar mensagem no WhatsApp": "当 WhatsApp 收到消息时",
+  "Mensagem enviada pela equipe": "团队发送的消息",
+  "Origem do envio (user = CRM, external_device = celular)": "发送来源（user = CRM，external_device = 手机）",
   "Quando um lead ganhar uma tag": "当销售线索获得标签时",
   "Quando um contato ganhar uma tag": "当联系人获得标签时",
   "alterado pelo assistente": "由助手更改",
