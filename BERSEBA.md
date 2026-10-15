@@ -23,6 +23,7 @@ renders them). Text upstream already wrote in Portuguese stays as is.
 | **Update kit: one update at a time, private backups** — `update.sh` takes the same `.update.lock` as `agent.sh`; backups are written `0600` in a `0700` folder | Production, 2026-09-29: the agent cron restarted the old containers in the middle of a manual update; the backups (database dump with customer data) were world-readable | `hostgator-setup-kit/{_common,update,backup,agent}.sh`, `tests/shell/{update-lock-and-cron-secret,backup-permissions}.test.sh`, `package.json` (`test:shell`) |
 | **Vendored v1.63.0 `update.sh`** for the kit isolation check | `scripts/conferir-isolamento-do-kit.sh` replays the #1893 incident with upstream tag v1.63.0's `update.sh`, and this fork has no upstream tags (rule 6) | `tests/fixtures/kit/update-v1.63.0.sh.txt` (byte-identical copy, never edit), 3 lines in `scripts/conferir-isolamento-do-kit.sh` (`update_sh_da`) |
 | **Worker with 1 GB** and Node heap at 768 MB | At 512 MB the worker restarted every ~10 min on the VPS | `docker-compose.prod.yml`, `worker` service |
+| **Conversation visibility resolved once per query** — `conversations_select` reads `fn_conversation_visibility_scope()` through uncorrelated `in (select …)` subqueries instead of calling `fn_can_view_conversation` per row; same rules (parity pinned per user × organization) | Production, 2026-10-14: on PG17 the per-row SECURITY DEFINER call is re-planned every time (~14 ms per row); with ~700 conversations the inbox tab counts hit the 8 s `statement_timeout` ~1,300 times a day. Same count as an attendant: 3,994 ms → 18.7 ms. To be offered upstream; drop ours when theirs lands | `supabase/migrations/20261014190000_9001_conversation_visibility_once_per_query.sql`, its block in `supabase/baseline.sql` (right after the 0035 policy, not at the end of the file), `tests/invariants/conversation-visibility-once-per-query.test.ts` |
 
 Any file in this table is a conflict candidate when upstream is synced. When resolving, the rule
 is always the same: **upstream wins, our snippet goes alongside**, never rewriting theirs.
@@ -57,6 +58,10 @@ is always the same: **upstream wins, our snippet goes alongside**, never rewriti
    in this repository are ours only.
 7. **Our entries go where upstream does not touch.** A list upstream extends at the bottom (e.g.
    `AUDIT_ACTIONS`) gets our entry at the top. It was the only conflict in the v1.61.0 merge rehearsal.
+8. **Our migrations use the 9NNN range.** Upstream numbers sequentially (06xx in October 2026);
+   any number in its range collides on a later sync, because the number must be unique across the
+   chain. The `baseline.sql` block goes right after the definition it changes, never at the end
+   of the file, where upstream appends on every release.
 
 ## Upstream sync
 
