@@ -512,8 +512,13 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
         {/*
           A barra do celular vive FORA do ramo da conversa carregada: o caminho
           de volta tem de existir inclusive quando não há o que mostrar — é aí
-          que ele é a única saída. A porta da ficha, essa sim, depende da
-          conversa, e só aparece quando há uma.
+          que ele é a única saída.
+
+          The contact-panel door does NOT live here any more (#54). This bar is
+          `md:hidden`, and the inline panel only exists from `xl` up, so from
+          768px to 1279px (tablets, small laptops and every phone held in
+          landscape, 844–932px wide) there was no way at all to open the panel.
+          It now sits in the conversation header: the `ficha` prop below.
         */}
         {selectedId && (
           <div className="flex items-center gap-1 border-b border-border px-1 py-1 md:hidden">
@@ -526,21 +531,6 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
               <CaretLeft size={16} />
               {t("Conversas")}
             </Button>
-            <div className="flex-1" />
-            {selectedConversation && (
-              <Sheet open={fichaAberta} onOpenChange={setFichaAberta}>
-                <SheetTrigger asChild>
-                  <Button variant="ghost" size="sm" className="h-9 gap-1 px-2 xl:hidden">
-                    <IdentificationCard size={16} />
-                    {t("Ficha")}
-                  </Button>
-                </SheetTrigger>
-                <SheetContent side="right" className="w-[min(22rem,90vw)] overflow-y-auto p-0">
-                  <SheetTitle className="sr-only">{t("Ficha do contato")}</SheetTitle>
-                  <CRMSidePanel conversation={selectedConversation} />
-                </SheetContent>
-              </Sheet>
-            )}
           </div>
         )}
         {selectedConversation ? (
@@ -558,6 +548,31 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
               }
               buscaAberta={buscaAberta}
               botaoBuscaRef={botaoBuscaRef}
+              ficha={
+                // The panel and its open state are the Inbox's; the header
+                // only places the door, and hides it from `xl` up, where the
+                // inline panel takes over. It depends on `selectedConversation`
+                // and not on the list: a conversation opened from a link or a
+                // notification comes from the single fetch, and gets the door
+                // the same way.
+                <Sheet open={fichaAberta} onOpenChange={setFichaAberta}>
+                  <SheetTrigger asChild>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-7 gap-1 px-2"
+                      title={t("Ficha do contato")}
+                    >
+                      <IdentificationCard size={16} aria-hidden />
+                      {t("Ficha")}
+                    </Button>
+                  </SheetTrigger>
+                  <SheetContent side="right" className="w-[min(22rem,90vw)] overflow-y-auto p-0">
+                    <SheetTitle className="sr-only">{t("Ficha do contato")}</SheetTitle>
+                    <CRMSidePanel conversation={selectedConversation} />
+                  </SheetContent>
+                </Sheet>
+              }
             />
             {buscaAberta && (
               <div className="flex items-center gap-2 border-b border-border px-4 py-1.5">
