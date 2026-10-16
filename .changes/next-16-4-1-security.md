@@ -1,7 +1,7 @@
 ---
 impacto: nada_mudou
 secao: corrigido
-titulo: Correção de segurança do Next.js
+titulo: O CRM recebe a correção de segurança do Next.js de 14/10
 ---
 
-O CRM passa a rodar no Next.js 16.4.1. A versão anterior tinha duas falhas críticas que permitiam a alguém de fora, sem fazer login, executar código no servidor, e uma terceira que permitia derrubar o sistema com uma sequência de requisições. Nada muda no uso nem na operação: basta atualizar para esta versão.
+O CRM passa a rodar no Next.js 16.4.1, que corrige três falhas de segurança divulgadas em 14/10. Neste CRM só uma delas se aplicava: alguém de fora, sem fazer login, conseguia deixar o sistema lento ou fora do ar com requisições preparadas para isso. As outras duas dependem de recursos que o CRM não usa. Nada muda no uso nem na operação: basta atualizar.
