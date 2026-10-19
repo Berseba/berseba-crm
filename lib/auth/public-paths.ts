@@ -41,6 +41,10 @@ export const PUBLIC_PATHS: RegExp[] = [
   // redirect pro WhatsApp. Âncorado num segmento só (`[^/]+$`): um sub-path
   // futuro sob `/google/` não nasce público de carona.
   /^\/api\/v1\/anuncios\/google\/[^/]+$/,
+  // Berseba: the Meta sibling (UTM capture, migration 0381) was missing, so
+  // every anonymous click got 401 before the route ran. Same one-segment
+  // anchor as the Google line above.
+  /^\/api\/v1\/anuncios\/meta\/[^/]+$/,
   // Heartbeat do agente do host (bearer INTERNAL_SECRET/INTERNAL_CRON_SECRET,
   // checado dentro da própria rota) — sem cookie de sessão, igual /cron/.
   /^\/api\/v1\/system\/agent$/,
