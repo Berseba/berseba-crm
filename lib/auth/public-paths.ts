@@ -41,6 +41,12 @@ export const PUBLIC_PATHS: RegExp[] = [
   // redirect pro WhatsApp. Âncorado num segmento só (`[^/]+$`): um sub-path
   // futuro sob `/google/` não nasce público de carona.
   /^\/api\/v1\/anuncios\/google\/[^/]+$/,
+  // Berseba: the Meta sibling (UTM capture, migration 0381) was missing, so
+  // every anonymous click got 401 before the route ran. The segment is the
+  // route's own slug check, not `[^/]+`, so encoded or odd segments stay out.
+  // A literal sibling (`/meta/status`) would still match: the scan in
+  // `public-paths.berseba.test.ts` fails when one appears.
+  /^\/api\/v1\/anuncios\/meta\/[A-Za-z0-9_-]{1,100}$/,
   // Heartbeat do agente do host (bearer INTERNAL_SECRET/INTERNAL_CRON_SECRET,
   // checado dentro da própria rota) — sem cookie de sessão, igual /cron/.
   /^\/api\/v1\/system\/agent$/,

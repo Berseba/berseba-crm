@@ -39,6 +39,7 @@
  * aceitável; perder o lead não.
  */
 import { NextResponse, type NextRequest } from "next/server";
+import { z } from "zod";
 
 import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
 import { normalizarUtm } from "@/lib/leads/origem-do-site";
@@ -63,7 +64,19 @@ const TETO_POR_IP = 30;
 const JANELA_SEGUNDOS = 60;
 
 export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response> {
-  const { org } = await ctx.params;
+  // Berseba: same slug check as the Google route, before the slug reaches the
+  // rate-limit key or the lookup.
+  const params = z
+    .object({
+      org: z
+        .string()
+        .min(1)
+        .max(100)
+        .regex(/^[a-zA-Z0-9_-]+$/),
+    })
+    .safeParse(await ctx.params);
+  if (!params.success) return paginaDeSaida(null);
+  const { org } = params.data;
 
   const ip = clientIp(req);
   if (ip !== null) {
@@ -109,10 +122,13 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response
     return paginaDeSaida(whatsAppUrl(config.whatsappE164, textoSemRef(config.messageTemplate)));
   }
 
-  const queryRaw = Object.fromEntries(parametros.entries());
+  // Berseba: `query_raw` keeps only the normalized keys, like the tracked-link
+  // path (`rastreio/links.ts`). The whole query string of an anonymous visitor
+  // was stored uncapped and kept forever, with whatever name, phone or e-mail
+  // the page forwarded. `normalizarUtm` already keeps `fbclid` and `gclid`.
   const criado = await criarClickRef(admin, "meta_ads_click_refs", organizationId, {
     utm,
-    query_raw: queryRaw,
+    query_raw: utm,
   });
   if (!criado) {
     // Falha ao gravar: mesma régua — a pessoa não paga o preço de um erro

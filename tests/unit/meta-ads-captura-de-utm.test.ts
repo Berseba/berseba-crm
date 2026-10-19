@@ -99,9 +99,9 @@ describe("GET /api/v1/anuncios/meta/[org]", () => {
     await chamar("?utm_campaign=black-friday&nome=Fulano&telefone=5511999999999");
 
     expect(estado.inserts[0]?.utm).toEqual({ utm_campaign: "black-friday" });
-    // A query crua fica guardada inteira de propósito (é a prova de onde o
-    // clique veio), mas o que vira ATRIBUIÇÃO é só a UTM normalizada.
-    expect(estado.inserts[0]?.query_raw).toMatchObject({ nome: "Fulano" });
+    // Berseba: `query_raw` keeps only the normalized keys too, so a name or
+    // phone forwarded by the page never reaches the table.
+    expect(estado.inserts[0]?.query_raw).toEqual({ utm_campaign: "black-friday" });
   });
 
   it("hit sem UTM nenhuma: vai para o WhatsApp sem ref, e não grava linha", async () => {
@@ -153,6 +153,20 @@ describe("GET /api/v1/anuncios/meta/[org]", () => {
 
     expect(resposta.status).toBe(429);
     expect(resposta.headers.get("Retry-After")).toBe("60");
+    expect(estado.inserts).toHaveLength(0);
+  });
+
+  // Berseba: the slug is checked like the Google route's before it reaches the
+  // rate-limit key or the lookup.
+  it.each(["a b", "a.b", "x".repeat(101)])("bad slug %j: neutral page", async (org) => {
+    const resposta = await GET(
+      new NextRequest(`https://crm.example/api/v1/anuncios/meta/x${UTM_COMPLETA}`, {
+        headers: { "x-forwarded-for": "203.0.113.7" },
+      }),
+      { params: Promise.resolve({ org }) },
+    );
+
+    expect(resposta.status).toBe(404);
     expect(estado.inserts).toHaveLength(0);
   });
 });
