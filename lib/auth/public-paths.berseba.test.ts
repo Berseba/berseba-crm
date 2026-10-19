@@ -1,29 +1,102 @@
+// @vitest-environment node
 /**
- * Berseba: the Meta UTM capture route must get past the proxy without a
- * session, like its Google sibling. The route test
- * (`tests/unit/meta-ads-captura-de-utm.test.ts`) calls the handler directly,
- * so it never saw the proxy answer 401 to every anonymous click.
+ * Berseba: every ad capture route (`app/api/v1/anuncios/<platform>/[org]`) is
+ * opened by an anonymous browser, so it must get past the proxy without a
+ * session. The Meta one was missing from PUBLIC_PATHS and answered 401 to every
+ * click; its route test calls the handler directly, so CI never saw it.
+ *
+ * Discovery by `git ls-files`, like `tests/unit/callback-oauth-alcancavel.test.ts`:
+ * the next platform is covered without anyone remembering this file.
  */
-import { describe, it, expect } from "vitest";
+import { execFileSync } from "node:child_process";
+
+import { describe, expect, it, vi } from "vitest";
 
 import { isPublicPath } from "@/lib/auth/public-paths";
 
-describe("isPublicPath: ad capture routes", () => {
-  it("lets the Meta capture route through without a session", () => {
-    expect(isPublicPath("/api/v1/anuncios/meta/fiore-pilates-e-fisioterapia")).toBe(true);
+vi.mock("@/lib/env", () => ({
+  env: {
+    NEXT_PUBLIC_SUPABASE_URL: "https://supabase.example",
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: "anon-test",
+    NEXT_PUBLIC_APP_URL: "https://crm.example",
+  },
+}));
+
+/**
+ * Route files under `app/api/v1/anuncios/` that are NOT a capture route and
+ * still answer anonymous traffic. Each entry needs a written reason.
+ */
+const PUBLIC_ON_PURPOSE: Record<string, string> = {};
+
+function routeFiles(): string[] {
+  return execFileSync("git", ["ls-files", "app/api/v1/anuncios/**/route.ts"], { encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean);
+}
+
+/** `app/api/v1/x/route.ts` → `/api/v1/x` */
+function routePath(file: string): string {
+  return "/" + file.replace(/^app\//, "").replace(/\/route\.ts$/, "");
+}
+
+const CAPTURE = /^app\/api\/v1\/anuncios\/[^/]+\/\[org\]\/route\.ts$/;
+
+describe("ad capture routes are reachable without a session", () => {
+  const files = routeFiles();
+  const captures = files.filter((file) => CAPTURE.test(file));
+
+  it("the scan sees the Google and Meta routes (otherwise it measures nothing)", () => {
+    expect(captures).toEqual(
+      expect.arrayContaining([
+        "app/api/v1/anuncios/google/[org]/route.ts",
+        "app/api/v1/anuncios/meta/[org]/route.ts",
+      ]),
+    );
   });
 
-  it("keeps the Google sibling public", () => {
-    expect(isPublicPath("/api/v1/anuncios/google/fiore-pilates-e-fisioterapia")).toBe(true);
+  it.each(captures)("%s is in PUBLIC_PATHS", (file) => {
+    expect(isPublicPath(routePath(file).replace("[org]", "acme"))).toBe(true);
   });
 
-  it("does not open a sub-path under the Meta route", () => {
-    expect(isPublicPath("/api/v1/anuncios/meta/fiore-pilates-e-fisioterapia/extra")).toBe(false);
+  it("no other route under /api/v1/anuncios/ is public by accident", () => {
+    const exposed = files
+      .filter((file) => !CAPTURE.test(file) && !(file in PUBLIC_ON_PURPOSE))
+      .map(routePath)
+      .filter((path) => !path.includes("[") && isPublicPath(path));
+    expect(exposed).toEqual([]);
+  });
+});
+
+describe("the Meta entry is no wider than the route's slug check", () => {
+  it.each([
+    "/api/v1/anuncios/meta/acme/extra",
+    "/api/v1/anuncios/meta/",
+    "/api/v1/anuncios/meta",
+    "/api/v1/anuncios",
+    "/api/v1/anuncios/meta/%2e%2e",
+    "/api/v1/anuncios/meta/a%2Fb",
+    "/api/v1/anuncios/meta/a.b",
+    `/api/v1/anuncios/meta/${"x".repeat(101)}`,
+  ])("%s stays private", (path) => {
+    expect(isPublicPath(path)).toBe(false);
+  });
+});
+
+describe("through the proxy", () => {
+  async function anonymous(path: string) {
+    const { proxy } = await import("@/proxy");
+    const { NextRequest } = await import("next/server");
+    return proxy(new NextRequest(`https://crm.example${path}?utm_source=meta&utm_campaign=x`));
+  }
+
+  it("an anonymous click on the Meta address reaches the route", async () => {
+    const response = await anonymous("/api/v1/anuncios/meta/acme");
+    expect(response.status).not.toBe(401);
+    expect(response.headers.get("x-middleware-next")).toBe("1");
   });
 
-  it("does not open the bare prefixes", () => {
-    expect(isPublicPath("/api/v1/anuncios/meta")).toBe(false);
-    expect(isPublicPath("/api/v1/anuncios/meta/")).toBe(false);
-    expect(isPublicPath("/api/v1/anuncios")).toBe(false);
+  it("a sub-path under it still gets 401", async () => {
+    const response = await anonymous("/api/v1/anuncios/meta/acme/extra");
+    expect(response.status).toBe(401);
   });
 });
