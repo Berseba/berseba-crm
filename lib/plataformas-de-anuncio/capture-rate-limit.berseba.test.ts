@@ -6,12 +6,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const buckets = vi.hoisted(() => new Map<string, number>());
 const warn = vi.hoisted(() => vi.fn());
+/** A path that cannot tell the count: the result carries only `allowed`. */
+const withoutCount = vi.hoisted(() => ({ on: false }));
 
 vi.mock("@/lib/ai/dispatcher/rate-limit", () => ({
   checkRateLimit: async (key: string, limit: number) => {
     const count = (buckets.get(key) ?? 0) + 1;
     buckets.set(key, count);
-    return { allowed: count <= limit };
+    return withoutCount.on ? { allowed: count <= limit } : { allowed: count <= limit, count };
   },
 }));
 
@@ -24,6 +26,7 @@ const IP = "203.0.113.7";
 beforeEach(() => {
   buckets.clear();
   warn.mockClear();
+  withoutCount.on = false;
 });
 
 describe("ipBucket", () => {
@@ -166,6 +169,66 @@ describe("checkCaptureRateLimit", () => {
       outcome: "no_ref",
     });
     expect(JSON.stringify(warn.mock.calls)).not.toContain(IP);
+  });
+
+  it("logs the IP-wide limit once per window, not once per blocked request", async () => {
+    const results = [];
+    for (let i = 0; i < 135; i++)
+      results.push(await checkCaptureRateLimit("meta", `slug-${i}`, IP));
+
+    expect(results.filter((r) => r === "blocked")).toHaveLength(15);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("[anuncios.capture.rate-limit] limit reached", {
+      platform: "meta",
+      org: "slug-120",
+      outcome: "blocked",
+    });
+  });
+
+  it("logs the per-(org, IP) limit once per window, not once per request without a ref", async () => {
+    const results = [];
+    for (let i = 0; i < 45; i++) results.push(await checkCaptureRateLimit("google", "acme", IP));
+
+    expect(results.filter((r) => r === "no_ref")).toHaveLength(15);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("[anuncios.capture.rate-limit] limit reached", {
+      platform: "google",
+      org: "acme",
+      outcome: "no_ref",
+    });
+  });
+
+  it("logs again in the next window", async () => {
+    for (let i = 0; i < 40; i++) await checkCaptureRateLimit("meta", "acme", IP);
+    expect(warn).toHaveBeenCalledTimes(1);
+
+    buckets.clear(); // the window rolled over: new keys, new counts
+    for (let i = 0; i < 40; i++) await checkCaptureRateLimit("meta", "acme", IP);
+    expect(warn).toHaveBeenCalledTimes(2);
+  });
+
+  it("each bucket logs for itself: two organizations over the limit give two lines", async () => {
+    for (let i = 0; i < 40; i++) await checkCaptureRateLimit("meta", "acme", IP);
+    for (let i = 0; i < 40; i++) await checkCaptureRateLimit("meta", "other", IP);
+
+    expect(warn.mock.calls.map((call) => (call[1] as { org: string }).org)).toEqual([
+      "acme",
+      "other",
+    ]);
+  });
+
+  it("when the count is not available, every hit is logged", async () => {
+    withoutCount.on = true;
+    buckets.set("meta-lp:acme:" + IP, 30);
+    for (let i = 0; i < 3; i++)
+      expect(await checkCaptureRateLimit("meta", "acme", IP)).toBe("no_ref");
+    expect(warn).toHaveBeenCalledTimes(3);
+
+    warn.mockClear();
+    buckets.set(`capture-ip:${IP}`, 120);
+    for (let i = 0; i < 3; i++)
+      expect(await checkCaptureRateLimit("meta", "acme", IP)).toBe("blocked");
+    expect(warn).toHaveBeenCalledTimes(3);
   });
 
   it("does not log when the request is allowed", async () => {
