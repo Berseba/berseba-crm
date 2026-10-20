@@ -56,6 +56,8 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 import { GET } from "@/app/api/v1/anuncios/meta/[org]/route";
+import { extrairOrigemDaPagina, montarCodigoDeOrigemDoSite } from "@/lib/leads/origem-do-site";
+import { PADRAO_DO_REF } from "@/lib/plataformas-de-anuncio/captura-de-clique";
 import { casarClickRef } from "@/lib/plataformas-de-anuncio/meta/captura-de-clique";
 import { textoSemRef } from "@/lib/plataformas-de-anuncio/pagina-de-captura";
 
@@ -197,6 +199,165 @@ describe("GET /api/v1/anuncios/meta/[org]", () => {
 
     expect(resposta.status).toBe(404);
     expect(estado.inserts).toHaveLength(0);
+  });
+});
+
+// Berseba: `&texto=` carries the message of the button the visitor tapped.
+describe("GET /api/v1/anuncios/meta/[org] with the button's message", () => {
+  const TEXTO = "Olá! Quero agendar uma avaliação para gestantes 🤰";
+  const comTexto = (texto: string) => `${UTM_COMPLETA}&texto=${encodeURIComponent(texto)}`;
+  const mensagemDe = (resposta: Response) =>
+    new URL(resposta.headers.get("location") ?? "").searchParams.get("text");
+  const destinoDe = (resposta: Response) => {
+    const url = new URL(resposta.headers.get("location") ?? "");
+    return `${url.origin}${url.pathname}`;
+  };
+
+  it("with texto and UTM: the message is the texto followed by the ref", async () => {
+    const resposta = await chamar(comTexto(TEXTO));
+
+    expect(resposta.status).toBe(302);
+    expect(destinoDe(resposta)).toBe("https://wa.me/5511999999999");
+    const mensagem = mensagemDe(resposta) ?? "";
+    expect(mensagem.startsWith(`${TEXTO} `)).toBe(true);
+    expect(mensagem.slice(TEXTO.length + 1)).toMatch(/^\[ref:[2-9A-HJ-NP-Z]{6}\]$/);
+    expect(estado.inserts).toHaveLength(1);
+  });
+
+  it("the ref in the message is the one that was stored", async () => {
+    const resposta = await chamar(comTexto(TEXTO));
+    const token = /\[ref:([2-9A-HJ-NP-Z]{6})\]/.exec(mensagemDe(resposta) ?? "")?.[1];
+
+    expect(token).toBeDefined();
+    expect(estado.inserts[0]?.token).toBe(token);
+  });
+
+  it("with texto and no UTM: the texto without a ref, and no insert", async () => {
+    const resposta = await chamar(`?texto=${encodeURIComponent(TEXTO)}`);
+
+    expect(resposta.status).toBe(302);
+    expect(destinoDe(resposta)).toBe("https://wa.me/5511999999999");
+    expect(mensagemDe(resposta)).toBe(TEXTO);
+    expect(estado.inserts).toHaveLength(0);
+  });
+
+  it("with texto and a failed insert: the texto without a ref", async () => {
+    estado.erroDoInsert = { code: "23503", message: "fk violation" };
+
+    const resposta = await chamar(comTexto(TEXTO));
+
+    expect(mensagemDe(resposta)).toBe(TEXTO);
+  });
+
+  it("with texto and the per-(org, IP) bucket over: the texto without a ref, no insert", async () => {
+    estado.permitido = false;
+
+    const resposta = await chamar(comTexto(TEXTO));
+
+    expect(resposta.status).toBe(302);
+    expect(destinoDe(resposta)).toBe("https://wa.me/5511999999999");
+    expect(mensagemDe(resposta)).toBe(TEXTO);
+    expect(estado.inserts).toHaveLength(0);
+  });
+
+  it("without texto: the configured template, as before", async () => {
+    const comRef = await chamar(UTM_COMPLETA);
+    expect(mensagemDe(comRef)).toMatch(/^Olá! Vim pelo site\. \[ref:[2-9A-HJ-NP-Z]{6}\]$/);
+
+    const semUtm = await chamar("");
+    expect(mensagemDe(semUtm)).toBe("Olá! Vim pelo site.");
+  });
+
+  it.each(["", "   ", "[ref:K7M2P9]"])(
+    "a texto with nothing in it (%j) falls back to the template",
+    async (vazio) => {
+      const comRef = await chamar(comTexto(vazio));
+      expect(mensagemDe(comRef)).toMatch(/^Olá! Vim pelo site\. \[ref:[2-9A-HJ-NP-Z]{6}\]$/);
+
+      const semUtm = await chamar(`?texto=${encodeURIComponent(vazio)}`);
+      expect(mensagemDe(semUtm)).toBe("Olá! Vim pelo site.");
+    },
+  );
+
+  it("a forged marker in the texto is removed: the only ref is the one we create", async () => {
+    const resposta = await chamar(
+      comTexto("Oi [ref:AAAAAA] tudo bem? [dk1:eyJ1dG1fc291cmNlIjoieCJ9]"),
+    );
+
+    const mensagem = mensagemDe(resposta) ?? "";
+    expect(mensagem).not.toContain("AAAAAA");
+    expect(mensagem).not.toContain("dk1");
+    expect(mensagem.match(/\[ref:/g)).toHaveLength(1);
+    expect(mensagem).toMatch(/^Oi tudo bem\? \[ref:[2-9A-HJ-NP-Z]{6}\]$/);
+  });
+
+  // Berseba: the strip is repeated until the text stops changing, so markers
+  // built by nesting (`[re[ref:]f:ABCDEF]`) do not come back after one pass.
+  const payloadDk1 = montarCodigoDeOrigemDoSite({ utm_source: "evil" })!;
+  it.each([
+    ["nested ref", "Oi [re[ref:]f:ABCDEF] tudo bem?"],
+    ["triple nesting", "Oi [re[r[ref:]ef:]f:ABCDEF] tudo bem?"],
+    ["nested dk1", `Oi [dk[dk1:]${payloadDk1.slice("[dk".length)} tudo bem?`],
+  ])(
+    "forged marker by %s: the final message has exactly one [ref: and it is ours",
+    async (_, texto) => {
+      const resposta = await chamar(comTexto(texto));
+
+      const mensagem = mensagemDe(resposta) ?? "";
+      expect(mensagem).toMatch(/^Oi tudo bem\? \[ref:[2-9A-HJ-NP-Z]{6}\]$/);
+      expect(mensagem.match(/\[ref:/g)).toHaveLength(1);
+      expect(PADRAO_DO_REF.exec(mensagem)?.[1]).toBe(estado.inserts[0]?.token);
+      // The inbound side finds no origin of the page in it.
+      expect(extrairOrigemDaPagina(mensagem)).toBeNull();
+    },
+  );
+
+  it("an unterminated marker left in the texto is not read: the first ref read is ours", async () => {
+    const resposta = await chamar(comTexto("Oi [ref:ABCDEF"));
+
+    const mensagem = mensagemDe(resposta) ?? "";
+    expect(PADRAO_DO_REF.exec(mensagem)?.[1]).toBe(estado.inserts[0]?.token);
+  });
+
+  it("nesting too deep to be a message: the template is used, never a half-stripped text", async () => {
+    let nested = "[ref:ABCDEF]";
+    for (let i = 0; i < 50; i += 1) nested = `[re${nested}f:]`;
+
+    const resposta = await chamar(comTexto(`Oi ${nested}`));
+
+    expect(mensagemDe(resposta)).toMatch(/^Olá! Vim pelo site\. \[ref:[2-9A-HJ-NP-Z]{6}\]$/);
+  });
+
+  it("a very long texto is capped at 300 characters before the ref", async () => {
+    const resposta = await chamar(comTexto("a".repeat(5000)));
+
+    const mensagem = mensagemDe(resposta) ?? "";
+    expect(mensagem).toMatch(/^a{300} \[ref:[2-9A-HJ-NP-Z]{6}\]$/);
+  });
+
+  it("the number is always the configured one, whatever the query says", async () => {
+    const resposta = await chamar(
+      `${comTexto("Chame o 5599888887777")}&whatsapp=5599888887777&phone=5599888887777`,
+    );
+
+    expect(destinoDe(resposta)).toBe("https://wa.me/5511999999999");
+  });
+
+  it("the texto never reaches the stored row: not in utm, not in query_raw", async () => {
+    await chamar(comTexto(TEXTO));
+
+    expect(estado.inserts).toHaveLength(1);
+    const linha = estado.inserts[0]!;
+    expect(linha.utm).toEqual({
+      utm_source: "meta",
+      utm_campaign: "black-friday",
+      utm_adset: "mulheres-25-34",
+      utm_ad: "video-depoimento-v3",
+    });
+    expect(linha.query_raw).toEqual(linha.utm);
+    expect(JSON.stringify(linha)).not.toContain("gestantes");
+    expect(Object.keys(linha.utm as object)).not.toContain("texto");
+    expect(Object.keys(linha.query_raw as object)).not.toContain("texto");
   });
 });
 
