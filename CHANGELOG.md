@@ -8,6 +8,14 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.3.1] — 2026-10-20
+
+### Corrigido
+
+- **O freio de urgência médica não falha mais em silêncio** Quando um paciente relatava uma emergência médica e o banco de dados falhava por um instante, o freio do nicho Saúde se desligava sem avisar ninguém: a IA respondia como numa conversa comum, sem a orientação de emergência e sem chamar uma pessoa. No modo assistido, se o alerta crítico não conseguisse ser aberto, o sistema registrava como se tivesse aberto. Agora as duas falhas fazem o atendimento ser tentado de novo em seguida e, se continuarem, viram um aviso para a equipe na Central.
+
+- **O endereço de captura da Meta passa a abrir o WhatsApp para quem clica** O endereço de captura de UTM da Meta (Configurações › Conversões) pedia login a quem clicava no botão da página: o visitante recebia um erro de acesso em vez de ir para o WhatsApp. Agora o endereço abre o WhatsApp para quem clica, como o endereço de captura do Google Ads já fazia. A origem do contato só é registrada quando a página repassa os parâmetros da campanha (UTM) para este endereço, ou quando o anúncio aponta direto para ele. Do endereço da página, o sistema guarda só os parâmetros de campanha; o resto (nome, telefone ou e-mail que a página tenha repassado) não é mais gravado. Você não precisa fazer nada.
+
 ## [2.3.0] — 2026-10-08
 
 ### Alterado
@@ -9341,7 +9349,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.3.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.3.1...HEAD
+[2.3.1]: https://github.com/berseba/berseba-crm/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/berseba/berseba-crm/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/berseba/berseba-crm/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/berseba/berseba-crm/compare/v2.0.0...v2.1.0
