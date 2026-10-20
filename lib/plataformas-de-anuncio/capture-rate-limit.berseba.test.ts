@@ -6,14 +6,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const buckets = vi.hoisted(() => new Map<string, number>());
 const warn = vi.hoisted(() => vi.fn());
-/** A path that cannot tell the count: the result carries only `allowed`. */
-const withoutCount = vi.hoisted(() => ({ on: false }));
 
 vi.mock("@/lib/ai/dispatcher/rate-limit", () => ({
   checkRateLimit: async (key: string, limit: number) => {
     const count = (buckets.get(key) ?? 0) + 1;
     buckets.set(key, count);
-    return withoutCount.on ? { allowed: count <= limit } : { allowed: count <= limit, count };
+    return { allowed: count <= limit, count };
   },
 }));
 
@@ -26,7 +24,6 @@ const IP = "203.0.113.7";
 beforeEach(() => {
   buckets.clear();
   warn.mockClear();
-  withoutCount.on = false;
 });
 
 describe("ipBucket", () => {
@@ -143,6 +140,41 @@ describe("checkCaptureRateLimit", () => {
     expect(await checkCaptureRateLimit("meta", "acme", "2001:db8:1:3::1")).toBe("allowed");
   });
 
+  it("case variants of one slug share the per-(org, IP) bucket", async () => {
+    // `organizations.slug` is citext and the route regex accepts uppercase.
+    const variants = ["Acme", "acme", "ACME", "aCmE"];
+    const results = [];
+    for (let i = 0; i < 31; i++) {
+      results.push(await checkCaptureRateLimit("meta", variants[i % variants.length]!, IP));
+    }
+
+    expect(results.slice(0, 30).every((r) => r === "allowed")).toBe(true);
+    expect(results[30]).toBe("no_ref");
+    expect([...buckets.keys()].sort()).toEqual([`capture-ip:${IP}`, `meta-lp:acme:${IP}`].sort());
+    // One organization, one name in the log.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith("[anuncios.capture.rate-limit] limit reached", {
+      platform: "meta",
+      org: "acme",
+      outcome: "no_ref",
+    });
+  });
+
+  it("the case folding does not merge different organizations or platforms", async () => {
+    await checkCaptureRateLimit("meta", "Acme", IP);
+    await checkCaptureRateLimit("meta", "acme-2", IP);
+    await checkCaptureRateLimit("google", "ACME", IP);
+
+    expect([...buckets.keys()].sort()).toEqual(
+      [
+        `capture-ip:${IP}`,
+        `meta-lp:acme:${IP}`,
+        `meta-lp:acme-2:${IP}`,
+        `google-lp:acme:${IP}`,
+      ].sort(),
+    );
+  });
+
   it("an IPv4-mapped address shares the buckets of the plain IPv4", async () => {
     await checkCaptureRateLimit("meta", "acme", `::ffff:${IP}`);
     await checkCaptureRateLimit("meta", "acme", IP);
@@ -215,20 +247,6 @@ describe("checkCaptureRateLimit", () => {
       "acme",
       "other",
     ]);
-  });
-
-  it("when the count is not available, every hit is logged", async () => {
-    withoutCount.on = true;
-    buckets.set("meta-lp:acme:" + IP, 30);
-    for (let i = 0; i < 3; i++)
-      expect(await checkCaptureRateLimit("meta", "acme", IP)).toBe("no_ref");
-    expect(warn).toHaveBeenCalledTimes(3);
-
-    warn.mockClear();
-    buckets.set(`capture-ip:${IP}`, 120);
-    for (let i = 0; i < 3; i++)
-      expect(await checkCaptureRateLimit("meta", "acme", IP)).toBe("blocked");
-    expect(warn).toHaveBeenCalledTimes(3);
   });
 
   it("does not log when the request is allowed", async () => {

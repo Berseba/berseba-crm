@@ -59,11 +59,10 @@ export type CaptureLimit = "allowed" | "no_ref" | "blocked";
 /**
  * Log a limit hit once per window per bucket, not once per request: under a
  * flood from one address the denials are thousands of identical lines. The
- * first denial of a window is the one whose `count` is exactly `limit + 1`. A
- * path that cannot tell the count keeps logging, so no hit goes unseen.
+ * first denial of a window is the one whose `count` is exactly `limit + 1`.
  */
-function firstDenialOfTheWindow(result: { count?: number }, limit: number): boolean {
-  return result.count === undefined || result.count === limit + 1;
+function isFirstDenialOfTheWindow(count: number, limit: number): boolean {
+  return count === limit + 1;
 }
 
 /** Hextets of an IPv6 address (already validated by `isIP`), fully expanded. */
@@ -121,30 +120,35 @@ export async function checkCaptureRateLimit(
   const bucket = ipBucket(ip);
   if (bucket === null) return "allowed";
 
+  // `organizations.slug` is citext and the route accepts uppercase, so
+  // `/meta/Acme` and `/meta/acme` are one organization: one bucket, one log name.
+  const slug = org.toLowerCase();
+
   const perIp = await checkRateLimit(`capture-ip:${bucket}`, PER_IP, CAPTURE_WINDOW_SECONDS);
   if (!perIp.allowed) {
-    if (firstDenialOfTheWindow(perIp, PER_IP)) {
+    if (isFirstDenialOfTheWindow(perIp.count, PER_IP)) {
       // Never the IP: it is personal data and the log does not need it.
       logger.warn("[anuncios.capture.rate-limit] limit reached", {
         platform,
-        org,
+        org: slug,
         outcome: "blocked",
       });
     }
     return "blocked";
   }
 
-  // The key prefixes are the routes' original ones, so live buckets carry over.
+  // The key prefixes are the routes' original ones, so live buckets carry over
+  // (for a slug that was already lowercase, the whole key is unchanged).
   const perOrg = await checkRateLimit(
-    `${platform}-lp:${org}:${bucket}`,
+    `${platform}-lp:${slug}:${bucket}`,
     PER_ORG_AND_IP,
     CAPTURE_WINDOW_SECONDS,
   );
   if (!perOrg.allowed) {
-    if (firstDenialOfTheWindow(perOrg, PER_ORG_AND_IP)) {
+    if (isFirstDenialOfTheWindow(perOrg.count, PER_ORG_AND_IP)) {
       logger.warn("[anuncios.capture.rate-limit] limit reached", {
         platform,
-        org,
+        org: slug,
         outcome: "no_ref",
       });
     }
