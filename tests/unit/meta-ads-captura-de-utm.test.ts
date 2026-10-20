@@ -56,6 +56,8 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 import { GET } from "@/app/api/v1/anuncios/meta/[org]/route";
+import { extrairOrigemDaPagina, montarCodigoDeOrigemDoSite } from "@/lib/leads/origem-do-site";
+import { PADRAO_DO_REF } from "@/lib/plataformas-de-anuncio/captura-de-clique";
 import { casarClickRef } from "@/lib/plataformas-de-anuncio/meta/captura-de-clique";
 import { textoSemRef } from "@/lib/plataformas-de-anuncio/pagina-de-captura";
 
@@ -287,6 +289,43 @@ describe("GET /api/v1/anuncios/meta/[org] with the button's message", () => {
     expect(mensagem).not.toContain("dk1");
     expect(mensagem.match(/\[ref:/g)).toHaveLength(1);
     expect(mensagem).toMatch(/^Oi tudo bem\? \[ref:[2-9A-HJ-NP-Z]{6}\]$/);
+  });
+
+  // Berseba: the strip is repeated until the text stops changing, so markers
+  // built by nesting (`[re[ref:]f:ABCDEF]`) do not come back after one pass.
+  const payloadDk1 = montarCodigoDeOrigemDoSite({ utm_source: "evil" })!;
+  it.each([
+    ["nested ref", "Oi [re[ref:]f:ABCDEF] tudo bem?"],
+    ["triple nesting", "Oi [re[r[ref:]ef:]f:ABCDEF] tudo bem?"],
+    ["nested dk1", `Oi [dk[dk1:]${payloadDk1.slice("[dk".length)} tudo bem?`],
+  ])(
+    "forged marker by %s: the final message has exactly one [ref: and it is ours",
+    async (_, texto) => {
+      const resposta = await chamar(comTexto(texto));
+
+      const mensagem = mensagemDe(resposta) ?? "";
+      expect(mensagem).toMatch(/^Oi tudo bem\? \[ref:[2-9A-HJ-NP-Z]{6}\]$/);
+      expect(mensagem.match(/\[ref:/g)).toHaveLength(1);
+      expect(PADRAO_DO_REF.exec(mensagem)?.[1]).toBe(estado.inserts[0]?.token);
+      // The inbound side finds no origin of the page in it.
+      expect(extrairOrigemDaPagina(mensagem)).toBeNull();
+    },
+  );
+
+  it("an unterminated marker left in the texto is not read: the first ref read is ours", async () => {
+    const resposta = await chamar(comTexto("Oi [ref:ABCDEF"));
+
+    const mensagem = mensagemDe(resposta) ?? "";
+    expect(PADRAO_DO_REF.exec(mensagem)?.[1]).toBe(estado.inserts[0]?.token);
+  });
+
+  it("nesting too deep to be a message: the template is used, never a half-stripped text", async () => {
+    let nested = "[ref:ABCDEF]";
+    for (let i = 0; i < 50; i += 1) nested = `[re${nested}f:]`;
+
+    const resposta = await chamar(comTexto(`Oi ${nested}`));
+
+    expect(mensagemDe(resposta)).toMatch(/^Olá! Vim pelo site\. \[ref:[2-9A-HJ-NP-Z]{6}\]$/);
   });
 
   it("a very long texto is capped at 300 characters before the ref", async () => {

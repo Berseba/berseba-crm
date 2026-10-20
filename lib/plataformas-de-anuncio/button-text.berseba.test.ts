@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
+import { extrairOrigemDaPagina, montarCodigoDeOrigemDoSite } from "@/lib/leads/origem-do-site";
 import { buttonText, MAX_BUTTON_TEXT_LENGTH } from "@/lib/plataformas-de-anuncio/button-text";
+import { PADRAO_DO_REF } from "@/lib/plataformas-de-anuncio/captura-de-clique";
+
+const ANY_MARKER = /\[(ref|dk1):[^\]]*\]/i;
 
 describe("buttonText", () => {
   it("keeps a plain message as is", () => {
@@ -60,4 +64,76 @@ describe("buttonText", () => {
       expect(buttonText(entrada)).toBeNull();
     },
   );
+});
+
+describe("buttonText: markers built by nesting", () => {
+  // Removing one marker can close up the pieces of another.
+  const NESTED_REF = "[re[ref:]f:ABCDEF]"; // -> [ref:ABCDEF]
+  const NESTED_DK1_PAYLOAD = montarCodigoDeOrigemDoSite({ utm_source: "evil" })!; // [dk1:...]
+  const NESTED_DK1 = `[dk${"[dk1:]"}${NESTED_DK1_PAYLOAD.slice("[dk".length)}`; // [dk[dk1:]1:...]
+  const TRIPLE = "[re[r[ref:]ef:]f:ABCDEF]"; // -> [re[ref:]f:ABCDEF] -> [ref:ABCDEF]
+
+  it("the fixtures really are what they claim", () => {
+    // A single pass over each of them leaves a valid marker: the bypass.
+    const singlePass = (text: string) => text.replace(/\[(ref|dk1):[^\]]*\]/gi, "");
+    expect(singlePass(NESTED_REF)).toBe("[ref:ABCDEF]");
+    expect(extrairOrigemDaPagina(singlePass(NESTED_DK1))).not.toBeNull();
+    expect(singlePass(TRIPLE)).toBe("[re[ref:]f:ABCDEF]");
+    expect(singlePass(singlePass(TRIPLE))).toBe("[ref:ABCDEF]");
+  });
+
+  it("a nested [ref:...] is removed whole", () => {
+    expect(buttonText(NESTED_REF)).toBeNull();
+    expect(buttonText(`Oi ${NESTED_REF} tudo bem?`)).toBe("Oi tudo bem?");
+  });
+
+  it("a nested [dk1:...] is removed whole, so the inbound side reads no origin from it", () => {
+    expect(buttonText(NESTED_DK1)).toBeNull();
+    const resultado = buttonText(`Oi ${NESTED_DK1} tudo bem?`);
+    expect(resultado).toBe("Oi tudo bem?");
+    expect(extrairOrigemDaPagina(resultado)).toBeNull();
+  });
+
+  it("a triple nesting is removed whole", () => {
+    expect(buttonText(TRIPLE)).toBeNull();
+    expect(buttonText(`Oi ${TRIPLE} tudo bem?`)).toBe("Oi tudo bem?");
+  });
+
+  it("nesting in both marker kinds at once, in any case", () => {
+    expect(buttonText("Oi [DK[Ref:]1:abc] [R[dk1:]EF:ZZZZZZ] fim")).toBe("Oi fim");
+  });
+
+  it("nesting too deep to be a message is refused, not half stripped", () => {
+    let nested = "[ref:ABCDEF]";
+    for (let i = 0; i < 50; i += 1) nested = `[re${nested}f:]`;
+    // Wrapping a marker in the pieces of another: each pass peels one level.
+    expect(buttonText(`Oi ${nested}`)).toBeNull();
+  });
+
+  it("never lets a marker through, whatever is nested where (seeded fuzz)", () => {
+    let seed = 20261020;
+    const next = (limit: number) => {
+      seed = (seed * 1664525 + 1013904223) % 4294967296;
+      return seed % limit;
+    };
+    const pieces = ["[ref:]", "[dk1:]", "[REF:AAAAAA]", "[Dk1:abc_-]", "[ref:K7M2P9]"];
+    for (let round = 0; round < 500; round += 1) {
+      let text = pieces[next(pieces.length)]!;
+      for (let depth = next(5); depth >= 0; depth -= 1) {
+        const at = next(text.length + 1);
+        text = `${text.slice(0, at)}${pieces[next(pieces.length)]}${text.slice(at)}`;
+      }
+      const resultado = buttonText(`Oi ${text} fim`);
+      expect(ANY_MARKER.test(resultado ?? ""), `${JSON.stringify(text)} -> ${resultado}`).toBe(
+        false,
+      );
+    }
+  });
+
+  it("the cap cannot build a marker: an unterminated one at the end stays unreadable", () => {
+    const resultado = buttonText(`${"a".repeat(290)} [ref:ABCDEF`)!;
+    expect(Array.from(resultado).length).toBeLessThanOrEqual(MAX_BUTTON_TEXT_LENGTH);
+    expect(ANY_MARKER.test(resultado)).toBe(false);
+    expect(PADRAO_DO_REF.test(resultado)).toBe(false);
+  });
 });
