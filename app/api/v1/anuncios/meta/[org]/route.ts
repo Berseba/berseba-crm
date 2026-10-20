@@ -42,6 +42,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 
 import { normalizarUtm } from "@/lib/leads/origem-do-site";
+import { buttonText } from "@/lib/plataformas-de-anuncio/button-text";
 import { criarClickRef } from "@/lib/plataformas-de-anuncio/captura-de-clique";
 import {
   CAPTURE_WINDOW_SECONDS,
@@ -89,6 +90,9 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response
   }
 
   const parametros = new URL(req.url).searchParams;
+  // Berseba: the message of the button that was tapped, when the page sends it.
+  // Never part of `utm`: `normalizarUtm` keeps a closed list of keys.
+  const texto = buttonText(parametros.get("texto"));
   // A MESMA normalização do `[dk1:]`: lista fechada de chaves e teto por valor.
   // O que não for chave de campanha não atravessa — nome, telefone e e-mail
   // ficam de fora por construção, não por filtro de última hora.
@@ -114,10 +118,14 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response
   const config = await lerConfigDaLanding(admin, "meta_ads_landing_pages", organizationId);
   if (!config) return paginaDeSaida(null);
 
+  // Berseba: every path without a ref sends the button's message when there is
+  // one, else the template without its marker. The number is always the config's.
+  const mensagemSemRef = texto ?? textoSemRef(config.messageTemplate);
+
   // Berseba (#67): over the per-(org, IP) bucket the visitor still reaches
   // WhatsApp, only without the ref and without a write.
   if (limite === "no_ref") {
-    return paginaDeSaida(whatsAppUrl(config.whatsappE164, textoSemRef(config.messageTemplate)));
+    return paginaDeSaida(whatsAppUrl(config.whatsappE164, mensagemSemRef));
   }
 
   // Sem UTM nenhuma não há o que guardar, e um ref que não aponta para origem
@@ -125,7 +133,7 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response
   // jeito, sem ref.
   if (Object.keys(utm).length === 0) {
     logger.warn("[anuncios.meta.landing] hit sem UTM", { org });
-    return paginaDeSaida(whatsAppUrl(config.whatsappE164, textoSemRef(config.messageTemplate)));
+    return paginaDeSaida(whatsAppUrl(config.whatsappE164, mensagemSemRef));
   }
 
   // Berseba: `query_raw` keeps only the normalized keys, like the tracked-link
@@ -139,9 +147,13 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response
   if (!criado) {
     // Falha ao gravar: mesma régua — a pessoa não paga o preço de um erro
     // nosso, só a atribuição é que se perde.
-    return paginaDeSaida(whatsAppUrl(config.whatsappE164, textoSemRef(config.messageTemplate)));
+    return paginaDeSaida(whatsAppUrl(config.whatsappE164, mensagemSemRef));
   }
 
-  const mensagem = config.messageTemplate.replaceAll("{token}", criado.token);
+  // Berseba: with the button's message, the ref goes after it; without, the
+  // configured template as before.
+  const mensagem = texto
+    ? `${texto} [ref:${criado.token}]`
+    : config.messageTemplate.replaceAll("{token}", criado.token);
   return paginaDeSaida(whatsAppUrl(config.whatsappE164, mensagem));
 }
