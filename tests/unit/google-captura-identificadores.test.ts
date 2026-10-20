@@ -68,6 +68,37 @@ describe("captura de identificadores Google", () => {
       expect(mock.criar).not.toHaveBeenCalled();
     },
   );
+  // Berseba (#67): with an IP, the two buckets of `capture-rate-limit.ts`.
+  describe("rate limit by IP", () => {
+    const abrirComIp = (query: string) =>
+      GET(
+        new NextRequest(`https://example.test/api/v1/anuncios/google/loja?${query}`, {
+          headers: { "x-forwarded-for": "203.0.113.7" },
+        }),
+        { params: Promise.resolve({ org: "loja" }) },
+      );
+    const recusar = (prefixo: string) =>
+      mock.rate.mockImplementation(async (chave: string) => ({
+        allowed: !chave.startsWith(prefixo),
+      }));
+
+    it("per-(org, IP) bucket over: WhatsApp without ref, no write", async () => {
+      recusar("google-lp:");
+      const response = await abrirComIp("gclid=click-1");
+      expect(response.status).toBe(302);
+      const destino = decodeURIComponent(response.headers.get("location") ?? "");
+      expect(destino).toContain("wa.me");
+      expect(destino).not.toContain("2ABCDE");
+      expect(mock.criar).not.toHaveBeenCalled();
+    });
+
+    it("IP-wide bucket over: 429, no write", async () => {
+      recusar("lp-ip:");
+      const response = await abrirComIp("gclid=click-1");
+      expect(response.status).toBe(429);
+      expect(mock.criar).not.toHaveBeenCalled();
+    });
+  });
   it("rejeita objeto sem identidade e escolhe identificador legado com precedência explícita", () => {
     expect(lerIdentificadoresGoogle({ token: "nao-e-clique" })).toBeNull();
     expect(identificadorParaUpload({ gclid: "g", gbraid: "b" })).toEqual({ gclid: "g" });

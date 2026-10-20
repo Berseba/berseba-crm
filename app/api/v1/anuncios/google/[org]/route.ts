@@ -9,8 +9,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { lerIdentificadoresGoogle } from "@/lib/plataformas-de-anuncio/google/identificadores";
 
-import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
 import { criarClickRef } from "@/lib/plataformas-de-anuncio/google/captura-de-clique";
+import {
+  CAPTURE_WINDOW_SECONDS,
+  checkCaptureRateLimit,
+} from "@/lib/plataformas-de-anuncio/capture-rate-limit";
 import { lerConfigDaLanding } from "@/lib/plataformas-de-anuncio/landing-config";
 import {
   clientIp,
@@ -27,9 +30,6 @@ interface RouteContext {
   params: Promise<{ org: string }>;
 }
 
-const TETO_POR_IP = 30;
-const JANELA_SEGUNDOS = 60;
-
 export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response> {
   const params = z
     .object({
@@ -43,17 +43,14 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response
   if (!params.success) return paginaDeSaida(null);
   const { org } = params.data;
 
-  const ip = clientIp(req);
-  if (ip !== null) {
-    const limite = await checkRateLimit(`google-lp:${org}:${ip}`, TETO_POR_IP, JANELA_SEGUNDOS);
-    if (!limite.allowed) {
-      // 429 sem corpo de marketing: quem estoura este teto num clique de
-      // anúncio real não existe — é abuso, não humano legítimo.
-      return new NextResponse(null, {
-        status: 429,
-        headers: { "Retry-After": String(JANELA_SEGUNDOS) },
-      });
-    }
+  // Berseba (#67): IP-wide bucket first, then per (org, IP). See
+  // `lib/plataformas-de-anuncio/capture-rate-limit.ts`.
+  const limite = await checkCaptureRateLimit("google", org, clientIp(req));
+  if (limite === "blocked") {
+    return new NextResponse(null, {
+      status: 429,
+      headers: { "Retry-After": String(CAPTURE_WINDOW_SECONDS) },
+    });
   }
 
   const search = new URL(req.url).searchParams;
@@ -84,6 +81,12 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response
 
   const config = await lerConfigDaLanding(admin, "google_ads_landing_pages", organizationId);
   if (!config) return paginaDeSaida(null);
+
+  // Berseba (#67): over the per-(org, IP) bucket the visitor still reaches
+  // WhatsApp, only without the ref and without a write.
+  if (limite === "no_ref") {
+    return paginaDeSaida(whatsAppUrl(config.whatsappE164, textoSemRef(config.messageTemplate)));
+  }
 
   // Sem identificador válido, mantém o acesso ao WhatsApp sem atribuição.
   if (!ids) {

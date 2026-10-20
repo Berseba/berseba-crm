@@ -19,10 +19,14 @@ const estado = vi.hoisted(() => ({
   erroDoInsert: null as { code: string; message: string } | null,
   inserts: [] as Record<string, unknown>[],
   permitido: true,
+  permitidoPorIp: true,
 }));
 
 vi.mock("@/lib/ai/dispatcher/rate-limit", () => ({
-  checkRateLimit: async () => ({ allowed: estado.permitido }),
+  // Berseba (#67): `lp-ip:` is the IP-wide bucket, the rest is per (org, IP).
+  checkRateLimit: async (chave: string) => ({
+    allowed: chave.startsWith("lp-ip:") ? estado.permitidoPorIp : estado.permitido,
+  }),
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
@@ -73,6 +77,7 @@ beforeEach(() => {
   estado.erroDoInsert = null;
   estado.inserts = [];
   estado.permitido = true;
+  estado.permitidoPorIp = true;
 });
 
 describe("GET /api/v1/anuncios/meta/[org]", () => {
@@ -146,8 +151,22 @@ describe("GET /api/v1/anuncios/meta/[org]", () => {
     expect(estado.inserts).toHaveLength(0);
   });
 
-  it("rate limit estourado devolve 429 sem tocar no banco", async () => {
+  // Berseba (#67): over the per-(org, IP) bucket the visitor still reaches
+  // WhatsApp, only without the ref; the bare 429 is for the IP-wide bucket.
+  it("per-(org, IP) bucket over: WhatsApp without ref, no insert", async () => {
     estado.permitido = false;
+
+    const resposta = await chamar(UTM_COMPLETA);
+
+    expect(resposta.status).toBe(302);
+    const destino = decodeURIComponent(resposta.headers.get("location") ?? "");
+    expect(destino).toContain("https://wa.me/5511999999999");
+    expect(destino).not.toContain("[ref:");
+    expect(estado.inserts).toHaveLength(0);
+  });
+
+  it("IP-wide bucket over: 429 without touching the database", async () => {
+    estado.permitidoPorIp = false;
 
     const resposta = await chamar(UTM_COMPLETA);
 
