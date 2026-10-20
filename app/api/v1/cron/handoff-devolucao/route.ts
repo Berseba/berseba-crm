@@ -43,6 +43,7 @@ import {
   type ConversaEmHandoff,
 } from "@/lib/escalacao/devolucao-automatica";
 import { devolverAtendimentoAoAgente } from "@/lib/escalacao/retomada";
+import { reenfileirarPendenteDaDevolucao } from "@/lib/escalacao/devolucao-reenfileira.berseba";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { autorizaCron } from "@/lib/auth/cron-auth";
@@ -168,6 +169,8 @@ export async function devolverHandoffsVencidos(
     );
     if (r.ok) {
       devolvidas++;
+      // Berseba (#58): answer the client message that arrived during the handoff.
+      await reenfileirarPendenteDaDevolucao(admin, conversa, requestId, agora);
       continue;
     }
     // `assignment_conflict` sai de QUATRO pontos de `devolverAtendimentoAoAgente`
