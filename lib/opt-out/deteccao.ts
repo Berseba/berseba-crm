@@ -60,7 +60,12 @@ export const PALAVRAS_DE_OPT_OUT: ReadonlySet<string> = new Set([
   "parar",
   "pare",
   "sair",
-  "cancelar",
+  // Berseba: no bare "cancelar". In a service business it cancels an
+  // appointment, not the channel: in one week a salon had 6 contacts blocked
+  // by it (5 tapped the "Cancelar" button of the booking-confirmation
+  // reminder, 1 answered "Cancelar" then "Design" to drop the henna option).
+  // The block also refused every human reply. "cancelar inscrição" and the
+  // other phrases below still block.
   "descadastrar",
   "remover",
   "unsubscribe",

@@ -505,7 +505,12 @@ export async function sendMessageHandler(
   };
   const c = conv as unknown as Joined;
 
-  if (c.contacts?.is_blocked) {
+  // Berseba: the opt-out stops the AI, automations, campaigns and integrations,
+  // never a person replying from the CRM. The block is set by a keyword match on
+  // ingestion, and a false positive used to leave the attendant unable to answer
+  // a client who was still talking (the composer said "envio desabilitado" and
+  // only an admin could unblock, from the contact page).
+  if (c.contacts?.is_blocked && ctx.actor.type !== "user") {
     throw new ApiError(
       403,
       "forbidden",

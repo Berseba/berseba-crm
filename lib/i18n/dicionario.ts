@@ -7435,8 +7435,8 @@ export const DICIONARIO: Traducoes = {
   "Só um modelo aprovado sai daqui — texto livre é recusado pela plataforma.": {
     es: "Desde aquí solo puedes enviar una plantilla aprobada. La plataforma rechaza el texto libre.",
   },
-  "Contato bloqueado — envio de mensagens desabilitado.": {
-    es: "Contacto bloqueado — envío de mensajes deshabilitado.",
+  "Este contato pediu para não receber mensagens automáticas. A IA, as automações e as campanhas não enviam para ele; você pode responder normalmente.": {
+    es: "Este contacto pidió no recibir mensajes automáticos. La IA, las automatizaciones y las campañas no le envían; puedes responder normalmente.",
   },
   "Contato anonimizado — não é possível enviar mensagens.": {
     es: "Contacto anonimizado — no es posible enviar mensajes.",

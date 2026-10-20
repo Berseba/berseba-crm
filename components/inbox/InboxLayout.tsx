@@ -386,10 +386,15 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
         : `${t("A janela de 24h fechou há")} ${formatarDecorrido(janela.fechadaHaMs)}. ${t("Só um modelo aprovado sai daqui — texto livre é recusado pela plataforma.")}`
       : null;
 
-  const blockedReason = selectedConversation?.contacts?.is_blocked
-    ? t("Contato bloqueado — envio de mensagens desabilitado.")
-    : selectedConversation?.contacts?.is_anonymized
-      ? t("Contato anonimizado — não é possível enviar mensagens.")
+  // Berseba: an opted-out contact no longer locks the composer. The server
+  // refuses the AI, automations and campaigns, never a person (see
+  // `app/api/v1/messages/_handler.ts`), so the attendant gets a notice instead.
+  const blockedReason = selectedConversation?.contacts?.is_anonymized
+    ? t("Contato anonimizado — não é possível enviar mensagens.")
+    : null;
+  const optOutNotice =
+    selectedConversation?.contacts?.is_blocked && !blockedReason
+      ? t("Este contato pediu para não receber mensagens automáticas. A IA, as automações e as campanhas não enviam para ele; você pode responder normalmente.")
       : null;
 
   // Altura da grade: a conta desconta TUDO que fica acima e abaixo dela.
@@ -627,6 +632,11 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
                 provider={selectedConversation.channel_sessions?.provider ?? null}
                 motivo={motivoDaJanela}
               />
+            )}
+            {optOutNotice && (
+              <p role="status" data-testid="aviso-opt-out" className="border-t px-4 py-2 text-xs text-muted-foreground">
+                {optOutNotice}
+              </p>
             )}
             <Composer
               // Trocar a chave quando o rascunho sai REMONTA o composer: o texto
