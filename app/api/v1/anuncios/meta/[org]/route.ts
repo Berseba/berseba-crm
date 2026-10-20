@@ -41,9 +41,12 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 
-import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
 import { normalizarUtm } from "@/lib/leads/origem-do-site";
 import { criarClickRef } from "@/lib/plataformas-de-anuncio/captura-de-clique";
+import {
+  CAPTURE_WINDOW_SECONDS,
+  checkCaptureRateLimit,
+} from "@/lib/plataformas-de-anuncio/capture-rate-limit";
 import { lerConfigDaLanding } from "@/lib/plataformas-de-anuncio/landing-config";
 import {
   clientIp,
@@ -60,9 +63,6 @@ interface RouteContext {
   params: Promise<{ org: string }>;
 }
 
-const TETO_POR_IP = 30;
-const JANELA_SEGUNDOS = 60;
-
 export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response> {
   // Berseba: same slug check as the Google route, before the slug reaches the
   // rate-limit key or the lookup.
@@ -78,14 +78,14 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response
   if (!params.success) return paginaDeSaida(null);
   const { org } = params.data;
 
-  const ip = clientIp(req);
-  if (ip !== null) {
-    const limite = await checkRateLimit(`meta-lp:${org}:${ip}`, TETO_POR_IP, JANELA_SEGUNDOS);
-    if (!limite.allowed) {
-      // 429 sem corpo de marketing: quem estoura este teto num clique real não
-      // existe — é abuso, não humano legítimo.
-      return new NextResponse(null, { status: 429, headers: { "Retry-After": String(JANELA_SEGUNDOS) } });
-    }
+  // Berseba (#67): IP-wide bucket first, then per (org, IP). See
+  // `lib/plataformas-de-anuncio/capture-rate-limit.ts`.
+  const limite = await checkCaptureRateLimit("meta", org, clientIp(req));
+  if (limite === "blocked") {
+    return new NextResponse(null, {
+      status: 429,
+      headers: { "Retry-After": String(CAPTURE_WINDOW_SECONDS) },
+    });
   }
 
   const parametros = new URL(req.url).searchParams;
@@ -113,6 +113,12 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response
 
   const config = await lerConfigDaLanding(admin, "meta_ads_landing_pages", organizationId);
   if (!config) return paginaDeSaida(null);
+
+  // Berseba (#67): over the per-(org, IP) bucket the visitor still reaches
+  // WhatsApp, only without the ref and without a write.
+  if (limite === "no_ref") {
+    return paginaDeSaida(whatsAppUrl(config.whatsappE164, textoSemRef(config.messageTemplate)));
+  }
 
   // Sem UTM nenhuma não há o que guardar, e um ref que não aponta para origem
   // alguma só suja a mensagem do lead. A pessoa vai para o WhatsApp do mesmo

@@ -19,15 +19,22 @@ const estado = vi.hoisted(() => ({
   erroDoInsert: null as { code: string; message: string } | null,
   inserts: [] as Record<string, unknown>[],
   permitido: true,
+  permitidoPorIp: true,
+  // Berseba (#67): every `from(table)` call, in order.
+  consultas: [] as string[],
 }));
 
 vi.mock("@/lib/ai/dispatcher/rate-limit", () => ({
-  checkRateLimit: async () => ({ allowed: estado.permitido }),
+  // Berseba (#67): `capture-ip:` is the IP-wide bucket, the rest is per (org, IP).
+  checkRateLimit: async (chave: string) => ({
+    allowed: chave.startsWith("capture-ip:") ? estado.permitidoPorIp : estado.permitido,
+  }),
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: (tabela: string) => {
+      estado.consultas.push(tabela);
       if (tabela === "meta_ads_click_refs") {
         return {
           insert: async (valores: Record<string, unknown>) => {
@@ -73,6 +80,8 @@ beforeEach(() => {
   estado.erroDoInsert = null;
   estado.inserts = [];
   estado.permitido = true;
+  estado.permitidoPorIp = true;
+  estado.consultas = [];
 });
 
 describe("GET /api/v1/anuncios/meta/[org]", () => {
@@ -146,14 +155,34 @@ describe("GET /api/v1/anuncios/meta/[org]", () => {
     expect(estado.inserts).toHaveLength(0);
   });
 
-  it("rate limit estourado devolve 429 sem tocar no banco", async () => {
+  // Berseba (#67): over the per-(org, IP) bucket the visitor still reaches
+  // WhatsApp, only without the ref; the bare 429 is for the IP-wide bucket.
+  it("per-(org, IP) bucket over: WhatsApp without ref, config read, no insert", async () => {
     estado.permitido = false;
+
+    const resposta = await chamar(UTM_COMPLETA);
+
+    expect(resposta.status).toBe(302);
+    const destino = decodeURIComponent(resposta.headers.get("location") ?? "");
+    expect(destino).toContain("https://wa.me/5511999999999");
+    expect(destino).not.toContain("[ref:");
+    expect(estado.inserts).toHaveLength(0);
+    // The organization and its config are read (the visitor needs the
+    // number), and the click table is never touched.
+    expect(estado.consultas).toEqual(["organizations", "meta_ads_landing_pages"]);
+  });
+
+  it("IP-wide bucket over: bare 429 before any database call", async () => {
+    estado.permitidoPorIp = false;
 
     const resposta = await chamar(UTM_COMPLETA);
 
     expect(resposta.status).toBe(429);
     expect(resposta.headers.get("Retry-After")).toBe("60");
+    expect(await resposta.text()).toBe("");
     expect(estado.inserts).toHaveLength(0);
+    // No organizations read, no config read, no insert: not a single `from()`.
+    expect(estado.consultas).toEqual([]);
   });
 
   // Berseba: the slug is checked like the Google route's before it reaches the
