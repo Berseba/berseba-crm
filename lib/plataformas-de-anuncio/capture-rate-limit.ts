@@ -56,6 +56,16 @@ const PER_IP = 120;
 
 export type CaptureLimit = "allowed" | "no_ref" | "blocked";
 
+/**
+ * Log a limit hit once per window per bucket, not once per request: under a
+ * flood from one address the denials are thousands of identical lines. The
+ * first denial of a window is the one whose `count` is exactly `limit + 1`. A
+ * path that cannot tell the count keeps logging, so no hit goes unseen.
+ */
+function firstDenialOfTheWindow(result: { count?: number }, limit: number): boolean {
+  return result.count === undefined || result.count === limit + 1;
+}
+
 /** Hextets of an IPv6 address (already validated by `isIP`), fully expanded. */
 function expandIpv6(address: string): number[] {
   // A zone id (`fe80::1%eth0`) is not part of the address.
@@ -113,12 +123,14 @@ export async function checkCaptureRateLimit(
 
   const perIp = await checkRateLimit(`capture-ip:${bucket}`, PER_IP, CAPTURE_WINDOW_SECONDS);
   if (!perIp.allowed) {
-    // Never the IP: it is personal data and the log does not need it.
-    logger.warn("[anuncios.capture.rate-limit] limit reached", {
-      platform,
-      org,
-      outcome: "blocked",
-    });
+    if (firstDenialOfTheWindow(perIp, PER_IP)) {
+      // Never the IP: it is personal data and the log does not need it.
+      logger.warn("[anuncios.capture.rate-limit] limit reached", {
+        platform,
+        org,
+        outcome: "blocked",
+      });
+    }
     return "blocked";
   }
 
@@ -129,11 +141,13 @@ export async function checkCaptureRateLimit(
     CAPTURE_WINDOW_SECONDS,
   );
   if (!perOrg.allowed) {
-    logger.warn("[anuncios.capture.rate-limit] limit reached", {
-      platform,
-      org,
-      outcome: "no_ref",
-    });
+    if (firstDenialOfTheWindow(perOrg, PER_ORG_AND_IP)) {
+      logger.warn("[anuncios.capture.rate-limit] limit reached", {
+        platform,
+        org,
+        outcome: "no_ref",
+      });
+    }
     return "no_ref";
   }
   return "allowed";
