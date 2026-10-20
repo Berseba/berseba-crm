@@ -56,6 +56,8 @@ interface Row {
   id: string;
   created_at: string;
   matched_at: string | null;
+  /** Absent means null: only the tracked-link path sets it. */
+  tracking_link_id?: string | null;
 }
 interface Call {
   table: string;
@@ -98,7 +100,7 @@ function fakeAdmin(initial: Record<string, Row[]>, hooks: Hooks = {}) {
         calls.push(call);
         const rows = tables[table] ?? [];
         const read = (row: Row, column: string) =>
-          (row as unknown as Record<string, unknown>)[column];
+          (row as unknown as Record<string, unknown>)[column] ?? null;
         const matching = () =>
           rows.filter(
             (row) =>
@@ -201,8 +203,12 @@ describe("deleteUnmatchedClicks", () => {
 
     expect(new Set(calls.map((call) => call.table))).toEqual(new Set([GOOGLE, META]));
     for (const call of calls) {
-      // Every select and every delete carries the unmatched filter.
-      expect(call.is, `${call.op} on ${call.table}`).toEqual([["matched_at", null]]);
+      // Every select and every delete carries both filters: never a matched
+      // click, never a click of a tracked link.
+      expect(call.is, `${call.op} on ${call.table}`).toEqual([
+        ["matched_at", null],
+        ["tracking_link_id", null],
+      ]);
     }
     for (const call of calls.filter((c) => c.op === "select")) {
       expect(call.lt).toEqual([["created_at", CUTOFF]]);
@@ -221,6 +227,13 @@ describe("deleteUnmatchedClicks", () => {
     const rows = (table: string): Row[] => [
       { id: `${table}-old-unmatched`, created_at: daysAgo(91), matched_at: null },
       { id: `${table}-old-matched`, created_at: daysAgo(400), matched_at: daysAgo(399) },
+      // A click of a tracked link, unmatched and old: its metrics keep it.
+      {
+        id: `${table}-old-tracked`,
+        created_at: daysAgo(300),
+        matched_at: null,
+        tracking_link_id: "link-1",
+      },
       { id: `${table}-recent-unmatched`, created_at: daysAgo(10), matched_at: null },
       { id: `${table}-edge-89`, created_at: daysAgo(89), matched_at: null },
       // Exactly at the cutoff is not older than the cutoff.
@@ -240,6 +253,7 @@ describe("deleteUnmatchedClicks", () => {
       expect(tables[table]?.map((row) => row.id).sort()).toEqual(
         [
           `${table}-old-matched`,
+          `${table}-old-tracked`,
           `${table}-recent-unmatched`,
           `${table}-edge-89`,
           `${table}-at-cutoff`,
@@ -256,6 +270,65 @@ describe("deleteUnmatchedClicks", () => {
           // The WhatsApp message arrives right now: the click is stamped.
           const row = tables[table]?.find((r) => r.id === `${GOOGLE}-old-1`);
           if (row) row.matched_at = NOW.toISOString();
+        },
+      },
+    );
+
+    const result = await deleteUnmatchedClicks(client, NOW);
+
+    expect(result.deleted[GOOGLE]).toBe(2);
+    expect(tables[GOOGLE]?.map((row) => row.id)).toEqual([`${GOOGLE}-old-1`]);
+  });
+
+  it("keeps the clicks of tracked links, in both tables, whatever their age", async () => {
+    const rows = (table: string): Row[] => [
+      { ...oldUnmatched(table, 1, "plain")[0]! },
+      { ...oldUnmatched(table, 1, "tracked")[0]!, tracking_link_id: "link-1" },
+      {
+        ...oldUnmatched(table, 1, "tracked-matched")[0]!,
+        tracking_link_id: "link-1",
+        matched_at: daysAgo(100),
+      },
+    ];
+    const { client, tables } = fakeAdmin({ [GOOGLE]: rows(GOOGLE), [META]: rows(META) });
+
+    const result = await deleteUnmatchedClicks(client, NOW);
+
+    expect(result.deleted).toEqual({ [GOOGLE]: 1, [META]: 1 });
+    for (const table of [GOOGLE, META]) {
+      expect(tables[table]?.map((row) => row.id).sort()).toEqual(
+        [`${table}-tracked-0`, `${table}-tracked-matched-0`].sort(),
+      );
+    }
+  });
+
+  it("tracked-link clicks do not clog the batches: the filter is in the select", async () => {
+    // The tracked rows are the OLDEST, so a select without the filter would
+    // fill every batch with rows the delete refuses, and never reach the others.
+    const tracked = oldUnmatched(GOOGLE, 600, "tracked").map((row) => ({
+      ...row,
+      created_at: daysAgo(300, Number(row.id.split("-").pop()) * 1000),
+      tracking_link_id: "link-1",
+    }));
+    const { client, tables } = fakeAdmin({
+      [GOOGLE]: [...tracked, ...oldUnmatched(GOOGLE, 50, "plain")],
+      [META]: [],
+    });
+
+    const result = await deleteUnmatchedClicks(client, NOW);
+
+    expect(result.deleted[GOOGLE]).toBe(50);
+    expect(tables[GOOGLE]).toHaveLength(600);
+    expect(tables[GOOGLE]?.every((row) => row.tracking_link_id === "link-1")).toBe(true);
+  });
+
+  it("never deletes a click that is tied to a tracked link between the select and the delete", async () => {
+    const { client, tables } = fakeAdmin(
+      { [GOOGLE]: oldUnmatched(GOOGLE, 3), [META]: [] },
+      {
+        beforeDelete: (table) => {
+          const row = tables[table]?.find((r) => r.id === `${GOOGLE}-old-1`);
+          if (row) row.tracking_link_id = "link-1";
         },
       },
     );

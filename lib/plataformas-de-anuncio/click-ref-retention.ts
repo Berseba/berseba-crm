@@ -9,15 +9,15 @@
  * as declared debt, and `query_raw` holds the campaign parameters of someone
  * who never talked to the clinic.
  *
- * Only rows with `matched_at is null` and `created_at` older than the cutoff
- * are deleted. A matched click is the attribution of a real contact and is
- * never touched: the delete re-checks `matched_at is null`, so a click that
- * gets matched between the two steps survives.
- *
- * Side effect to know: `fn_metricas_links_rastreaveis` (tracked links, 0437)
- * counts `clicks` as rows of these tables, so the click count of a tracked
- * link stops growing past 90 days for the clicks that never became a contact.
- * Contacts and leads, which come from matched rows, are unaffected.
+ * Only rows with `matched_at is null`, `tracking_link_id is null` and
+ * `created_at` older than the cutoff are deleted. A matched click is the
+ * attribution of a real contact and is never touched. A click of a tracked
+ * link is never touched either: `fn_metricas_links_rastreaveis` (migration
+ * 0437) counts `clicks` as rows of these tables, and the 90 days promise is
+ * about the site's capture route, which never sets `tracking_link_id` (only
+ * `rastreio/links.ts` does). Both tables have that column, nullable. The
+ * delete re-checks both filters, so a click that is matched between the two
+ * steps survives.
  *
  * No migration: no index covers `(matched_at, created_at)`, so each select
  * scans the table. These tables hold one row per ad click, which is small for
@@ -72,6 +72,7 @@ async function deleteUnmatchedFrom(
       .from(table)
       .select("id")
       .is("matched_at", null)
+      .is("tracking_link_id", null)
       .lt("created_at", cutoff)
       .order("created_at", { ascending: true })
       .limit(CLICK_RETENTION_BATCH_SIZE);
@@ -90,6 +91,7 @@ async function deleteUnmatchedFrom(
         .delete()
         .in("id", ids.slice(start, start + IDS_POR_LOTE))
         .is("matched_at", null)
+        .is("tracking_link_id", null)
         .select("id");
       if (deleteError) throw new Error(`${table}: ${deleteError.message}`);
       deleted[table] += (removed ?? []).length;
