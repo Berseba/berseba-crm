@@ -229,6 +229,25 @@ async function write<T>(
   }
 }
 
+const WEEKDAYS = [
+  "domingo",
+  "segunda-feira",
+  "terça-feira",
+  "quarta-feira",
+  "quinta-feira",
+  "sexta-feira",
+  "sábado",
+];
+
+/**
+ * The weekday of a `YYYY-MM-DD` date, in Portuguese. Computed here so the agent never has to:
+ * models get weekdays wrong, and Maya's instructions forbid her to calculate dates.
+ */
+export function weekdayOf(date: string): string | null {
+  const day = new Date(`${date}T12:00:00Z`);
+  return Number.isNaN(day.getTime()) ? null : WEEKDAYS[day.getUTCDay()]!;
+}
+
 function appointmentView(a: AvecAppointment) {
   return {
     appointment_id: a.id,
@@ -236,6 +255,7 @@ function appointmentView(a: AvecAppointment) {
     service: a.service,
     professional_id: a.professional_id,
     professional: a.professional,
+    weekday: weekdayOf(a.date),
     date: a.date,
     start_time: a.start_time,
     end_time: a.end_time,
@@ -428,6 +448,7 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
         horarios: slots.slice(0, MAX_SLOTS).map((s) => ({
           slot_id: s.id,
           professional_id: s.professional_id,
+          weekday: weekdayOf(s.date),
           date: s.date,
           start_time: s.start_time,
           end_time: s.end_time,

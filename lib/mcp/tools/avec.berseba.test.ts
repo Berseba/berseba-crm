@@ -391,6 +391,17 @@ describe("idempotency", () => {
   });
 });
 
+describe("weekday", () => {
+  it("is computed in code, in Portuguese, so the agent never calculates it", async () => {
+    expect(tools.weekdayOf("2026-10-23")).toBe("sexta-feira");
+    expect(tools.weekdayOf("2026-10-25")).toBe("domingo");
+    expect(tools.weekdayOf("nope")).toBeNull();
+    answer(200, { data: [APPOINTMENT] });
+    const r = await run(tools.avecMyAppointments, {});
+    expect((r.agendamentos as Array<{ weekday: string }>)[0]!.weekday).toBe("sexta-feira");
+  });
+});
+
 describe("audit", () => {
   it("keeps the client's free text out of api_audit_log", () => {
     expect(
