@@ -23,21 +23,26 @@
  * e-mail: pessoa sem sessão nenhuma, que cairia no `requireAuth()` e voltaria
  * para o login sem nunca ler que um e-mail a espera.
  */
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { headers } from "next/headers";
 import { createClient } from "@/lib/supabase/server";
 import { modoDeCadastro } from "@/lib/auth/politica-de-cadastro";
 
-// O client admin que `criarContaDeConvite` usa quando o GoTrue está com o
-// cadastro público fechado (#1653). Hoisted porque o factory do `vi.mock` roda
-// antes das declarações deste arquivo.
+// The admin client. Nothing in signUp.ts should reach it directly; the
+// spoofing case asserts it stays untouched. Hoisted because the `vi.mock`
+// factory runs before this file's declarations.
 const admin = vi.hoisted(() => ({ createUser: vi.fn(), deleteUser: vi.fn() }));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: vi.fn(() => ({
     auth: { admin: { createUser: admin.createUser, deleteUser: admin.deleteUser } },
   })),
 }));
+
+// Berseba: invite signup goes through `completeInviteSignup`, which has its own
+// tests (`lib/auth/invite-signup.test.ts`); here only the wiring is measured.
+const inviteSignup = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/auth/invite-signup", () => ({ completeInviteSignup: inviteSignup }));
 
 vi.mock("next/headers", () => ({ headers: vi.fn() }));
 // Mockada aqui em vez de deixar bater no banco: a política é lida em TODO
@@ -52,6 +57,7 @@ vi.mock("@/lib/audit", async (orig) => ({
 }));
 
 const signUpDoProvedor = vi.fn();
+const signInDoProvedor = vi.fn();
 
 /** Um e-mail novo por caso: o teto de `signup` é por IP e por janela. */
 let n = 0;
@@ -130,9 +136,11 @@ describe("signUp — instalação que só aceita convidados", () => {
       get: (k: string) => (k === "x-forwarded-for" ? `203.0.113.${n % 250}` : null),
     } as never);
     vi.mocked(createClient).mockResolvedValue({
-      auth: { signUp: signUpDoProvedor },
+      auth: { signUp: signUpDoProvedor, signInWithPassword: signInDoProvedor },
     } as never);
     vi.mocked(modoDeCadastro).mockResolvedValue("so_convite");
+    inviteSignup.mockReset();
+    signInDoProvedor.mockReset();
   });
 
   it("sem convite: recusa, e NÃO cria conta no provedor", async () => {
@@ -159,10 +167,8 @@ describe("signUp — instalação que só aceita convidados", () => {
       role: "agent",
       exp: Math.floor(Date.now() / 1000) + INVITE_TTL_SECONDS,
     });
-    signUpDoProvedor.mockResolvedValue({
-      data: { user: { id: "u-3" }, session: null },
-      error: null,
-    });
+    inviteSignup.mockResolvedValue({ ok: true, userId: "u-3", created: true });
+    signInDoProvedor.mockResolvedValue({ data: { session: { access_token: "tok" } }, error: null });
 
     const { signUp } = await import("./signUp");
     const res = await signUp(
@@ -179,31 +185,24 @@ describe("signUp — instalação que só aceita convidados", () => {
       token,
     );
 
-    expect(res).toEqual({ ok: true, sessao_ativa: false });
-    expect(signUpDoProvedor).toHaveBeenCalled();
+    // Berseba: the invite confirms the account; no confirmation email.
+    expect(res).toEqual({ ok: true, sessao_ativa: true, destino: "/app" });
+    expect(inviteSignup).toHaveBeenCalled();
+    expect(signUpDoProvedor).not.toHaveBeenCalled();
   });
 });
 
 /**
- * O GoTrue com `disable_signup` LIGADO — a trava que fecha `POST /auth/v1/signup`
- * para quem tem a anon key do navegador, e que por isso fecha também o convite.
+ * Berseba: invite signup is confirmed by the invite itself.
  *
- * É o cenário da issue #1653: instalação em `so_convite` que sincronizou o
- * `GOTRUE_DISABLE_SIGNUP` do próprio Supabase. Sem os casos abaixo, o convite
- * morreria junto com o buraco — `supabase.auth.signUp()` é exatamente o
- * endpoint recusado, e o defeito viraria "ninguém entra".
+ * 2026-10-09: two invitees signed up, the confirmation email never arrived,
+ * and every login failed with `email_not_confirmed`. With a valid invite for
+ * this exact email the account is now created confirmed and joins the
+ * organization in the same request, whatever the GoTrue `disable_signup`
+ * setting (upstream #1653 used to branch on it).
  */
-describe("signUp — convite com o cadastro público do GoTrue fechado (#1653)", () => {
-  const resend = vi.fn();
-
-  function goTrueCom(disableSignup: boolean) {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({ ok: true, json: async () => ({ disable_signup: disableSignup }) }) as Response),
-    );
-  }
-
-  async function conviteValido() {
+describe("signUp — invite signup without a confirmation email (Berseba)", () => {
+  async function validInvite() {
     const { signInviteToken, INVITE_TTL_SECONDS } = await import("@/lib/auth/invite-token");
     const dados = entrada();
     const token = signInviteToken({
@@ -227,83 +226,97 @@ describe("signUp — convite com o cadastro público do GoTrue fechado (#1653)",
   beforeEach(() => {
     vi.resetModules();
     signUpDoProvedor.mockReset();
+    signInDoProvedor.mockReset();
+    inviteSignup.mockReset();
     admin.createUser.mockReset();
-    admin.deleteUser.mockReset();
-    resend.mockReset();
     vi.mocked(headers).mockResolvedValue({
       get: (k: string) => (k === "x-forwarded-for" ? `192.0.2.${(n % 250) + 1}` : null),
     } as never);
     vi.mocked(createClient).mockResolvedValue({
-      auth: { signUp: signUpDoProvedor, resend },
+      auth: { signUp: signUpDoProvedor, signInWithPassword: signInDoProvedor },
     } as never);
-    vi.mocked(modoDeCadastro).mockResolvedValue("so_convite");
+    vi.mocked(modoDeCadastro).mockResolvedValue("aberto");
   });
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it("com convite: cria a conta pela ADMIN API e manda o e-mail de confirmação", async () => {
-    goTrueCom(true);
-    admin.createUser.mockResolvedValue({ data: { user: { id: "u-9" } }, error: null });
-    resend.mockResolvedValue({ error: null });
-    const { token, entrada: corpo } = await conviteValido();
+  it("valid invite: account confirmed + invite applied, session opened, goes to /app", async () => {
+    inviteSignup.mockResolvedValue({ ok: true, userId: "u-9", created: true });
+    signInDoProvedor.mockResolvedValue({ data: { session: { access_token: "tok" } }, error: null });
+    const { token, entrada: corpo } = await validInvite();
 
     const { signUp } = await import("./signUp");
     const res = await signUp(corpo, token);
 
-    expect(res).toEqual({ ok: true, sessao_ativa: false });
-    expect(admin.createUser).toHaveBeenCalledWith(
+    expect(res).toEqual({ ok: true, sessao_ativa: true, destino: "/app" });
+    expect(inviteSignup).toHaveBeenCalledWith(
       expect.objectContaining({
         email: corpo.email,
-        email_confirm: false,
-        user_metadata: { invite_token: token, full_name: "Convidada da Silva" },
+        password: corpo.password,
+        fullName: "Convidada da Silva",
+        inviteToken: token,
       }),
     );
-    expect(resend).toHaveBeenCalledWith(
-      expect.objectContaining({ type: "signup", email: corpo.email }),
-    );
-    // O caminho que o GoTrue recusa quando `disable_signup` está ligado não é
-    // nem chamado — quem cria a conta é o client admin.
+    expect(signInDoProvedor).toHaveBeenCalledWith({ email: corpo.email, password: corpo.password });
+    // The public signup (and its confirmation email) is not used at all.
     expect(signUpDoProvedor).not.toHaveBeenCalled();
   });
 
-  it("CONTROLE — GoTrue aberto: o convite continua no signUp de sempre", async () => {
-    goTrueCom(false);
-    signUpDoProvedor.mockResolvedValue({ data: { user: { id: "u-10" }, session: null }, error: null });
-    const { token, entrada: corpo } = await conviteValido();
+  it("the session could not be opened: still done, the screen goes to /login", async () => {
+    inviteSignup.mockResolvedValue({ ok: true, userId: "u-10", created: true });
+    signInDoProvedor.mockResolvedValue({ data: { session: null }, error: { message: "x", status: 500 } });
+    const { token, entrada: corpo } = await validInvite();
 
     const { signUp } = await import("./signUp");
-    const res = await signUp(corpo, token);
 
-    expect(res).toEqual({ ok: true, sessao_ativa: false });
-    // Instalação em `aberto` (e `so_convite` ainda sem sincronizar) não muda de
-    // comportamento por causa deste conserto: é a restrição "aberto inalterado".
-    expect(signUpDoProvedor).toHaveBeenCalled();
+    expect(await signUp(corpo, token)).toEqual({ ok: true, sessao_ativa: false, destino: "/login" });
+  });
+
+  it("someone else's token: refused before any account is created", async () => {
+    const { token, entrada: corpo } = await validInvite();
+
+    const { signUp } = await import("./signUp");
+    const res = await signUp({ ...corpo, email: "atacante@fora.test" }, token);
+
+    expect(res).toEqual({
+      ok: false,
+      error: "validation_error",
+      details: { invite: ["email_divergente"] },
+    });
+    expect(inviteSignup).not.toHaveBeenCalled();
+    expect(signUpDoProvedor).not.toHaveBeenCalled();
     expect(admin.createUser).not.toHaveBeenCalled();
   });
 
-  it("CONTROLE — sem convite, com o GoTrue fechado: a recusa continua ANTES de tudo", async () => {
-    goTrueCom(true);
+  it("confirmed account already exists → `conta_ja_existe`, the same code as before", async () => {
+    inviteSignup.mockResolvedValue({ ok: false, reason: "account_exists" });
+    const { token, entrada: corpo } = await validInvite();
+
+    const { signUp } = await import("./signUp");
+
+    expect(await signUp(corpo, token)).toEqual({ ok: false, error: "conta_ja_existe" });
+    expect(signInDoProvedor).not.toHaveBeenCalled();
+  });
+
+  it("revoked invite → reported as an invalid invite, no session", async () => {
+    inviteSignup.mockResolvedValue({ ok: false, reason: "invite_revoked" });
+    const { token, entrada: corpo } = await validInvite();
+
+    const { signUp } = await import("./signUp");
+
+    expect(await signUp(corpo, token)).toEqual({
+      ok: false,
+      error: "validation_error",
+      details: { invite: ["convite_invalido"] },
+    });
+    expect(signInDoProvedor).not.toHaveBeenCalled();
+  });
+
+  it("CONTROL — without an invite, open signup still sends the confirmation email", async () => {
+    signUpDoProvedor.mockResolvedValue({ data: { user: { id: "u-11" }, session: null }, error: null });
 
     const { signUp } = await import("./signUp");
     const res = await signUp(entrada());
 
-    expect(res).toEqual({ ok: false, error: "somente_convite" });
-    expect(signUpDoProvedor).not.toHaveBeenCalled();
-    expect(admin.createUser).not.toHaveBeenCalled();
-  });
-
-  it("conta já existe → `conta_ja_existe`, o mesmo código de antes", async () => {
-    goTrueCom(true);
-    admin.createUser.mockResolvedValue({
-      data: null,
-      error: { message: "A user with this email address has already been registered", code: "email_exists", status: 422 },
-    });
-    const { token, entrada: corpo } = await conviteValido();
-
-    const { signUp } = await import("./signUp");
-    const res = await signUp(corpo, token);
-
-    expect(res).toEqual({ ok: false, error: "conta_ja_existe" });
+    expect(res).toEqual({ ok: true, sessao_ativa: false });
+    expect(signUpDoProvedor).toHaveBeenCalled();
+    expect(inviteSignup).not.toHaveBeenCalled();
   });
 });

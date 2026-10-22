@@ -82,3 +82,59 @@ describe("signInWithPassword — teto de tentativas", () => {
     expect(signIn).toHaveBeenCalledTimes(10);
   });
 });
+
+/**
+ * Berseba: an unconfirmed email is not "e-mail ou senha incorretos".
+ *
+ * 2026-10-09: two invitees typed the right password again and again and kept
+ * reading "Email ou senha incorretos", because GoTrue's `email_not_confirmed`
+ * was folded into `invalid_credentials`.
+ */
+describe("signInWithPassword — email_not_confirmed (Berseba)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    signIn.mockClear();
+    vi.mocked(headers).mockResolvedValue({
+      get: (k: string) => (k === "x-forwarded-for" ? "203.0.113.78" : null),
+    } as never);
+    signIn.mockResolvedValue({
+      data: { user: null, session: null },
+      // The exact shape @supabase/auth-js gives for GoTrue's 400.
+      error: { message: "Email not confirmed", status: 400, code: "email_not_confirmed" },
+    } as never);
+    vi.mocked(createClient).mockResolvedValue({
+      auth: { signInWithPassword: signIn, mfa: { listFactors: vi.fn() } },
+    } as never);
+  });
+
+  it("returns its own error, not invalid_credentials", async () => {
+    const { signInWithPassword } = await import("./signInWithPassword");
+
+    const res = await signInWithPassword({ email: "pendente@example.com", password: "senha-certa-123" });
+
+    expect(res).toEqual({ ok: false, error: "email_not_confirmed" });
+  });
+
+  it("does not spend the account's lockout budget (the password was right)", async () => {
+    const { signInWithPassword } = await import("./signInWithPassword");
+    const input = { email: "pendente2@example.com", password: "senha-certa-123" };
+
+    const results = [];
+    for (let i = 0; i < 8; i++) results.push(await signInWithPassword(input));
+
+    expect(results.map((r) => r.error)).toEqual(Array(8).fill("email_not_confirmed"));
+    expect(signIn).toHaveBeenCalledTimes(8);
+  });
+
+  it("CONTROL — a wrong password is still invalid_credentials", async () => {
+    signIn.mockResolvedValue({
+      data: { user: null, session: null },
+      error: { message: "Invalid login credentials", status: 400, code: "invalid_credentials" },
+    } as never);
+    const { signInWithPassword } = await import("./signInWithPassword");
+
+    const res = await signInWithPassword({ email: "outra@example.com", password: "senha-errada-123" });
+
+    expect(res.error).toBe("invalid_credentials");
+  });
+});
