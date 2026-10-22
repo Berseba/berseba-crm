@@ -8,6 +8,12 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.4.1] — 2026-10-22
+
+### Corrigido
+
+- **A caixa de entrada não trava mais para carregar e contar as conversas** A lista de conversas e os contadores das abas (Fila, Automático, Todas) ficavam lentos e às vezes não carregavam: o banco conferia, conversa por conversa, quem podia ver cada uma, e essa conferência custava caro. Por isso uma conversa assumida ou fechada demorava a sair da Fila. Agora a regra de quem vê o quê é calculada uma vez por consulta — a mesma regra, sem mudar o que cada pessoa enxerga — e a contagem que levava cerca de 4 segundos leva cerca de 20 milissegundos. As mensagens de uma conversa também abrem mais rápido pelo mesmo motivo.
+
 ## [2.4.0] — 2026-10-20
 
 ### Adicionado
@@ -9363,7 +9369,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.4.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.4.1...HEAD
+[2.4.1]: https://github.com/berseba/berseba-crm/compare/v2.4.0...v2.4.1
 [2.4.0]: https://github.com/berseba/berseba-crm/compare/v2.3.1...v2.4.0
 [2.3.1]: https://github.com/berseba/berseba-crm/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/berseba/berseba-crm/compare/v2.2.0...v2.3.0
