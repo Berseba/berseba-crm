@@ -21,7 +21,7 @@
  *     deletes it only after the channel answers. Read as a phone reply, it
  *     would let AI messages fire the rule, fire CRM sends twice, and bring a
  *     rule's own message back without the `rule:` request_id (past the
- *     anti-loop). The WAHA ingest flags it at birth (`metadata.own_send_echo`);
+ *     anti-loop). The QR-code channel ingest flags it at birth (`metadata.own_send_echo`);
  *     for the other channels, an outbound row of ours in the same conversation
  *     with the same text, created just before, marks it as an echo too.
  *   - A message that did not go out: only `sent`, `delivered` and `read` pass
@@ -167,7 +167,7 @@ export async function readSentMessage(admin: SupabaseClient, row: EventRow): Pro
 /**
  * Is this `external_device` row the channel's echo of something WE sent?
  *
- * The WAHA ingest decides at birth and flags the row. Without the flag (other
+ * The QR-code channel ingest decides at birth and flags the row. Without the flag (other
  * channels, rows from before the flag), the same evidence the ingest uses: an
  * outbound row of ours in the same conversation, created in the window just
  * before, with the same text (signature line stripped) — or, for media, of a
