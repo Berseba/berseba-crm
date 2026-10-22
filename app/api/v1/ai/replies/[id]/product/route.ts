@@ -37,13 +37,14 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     .maybeSingle();
   if (!draft) return fail("not_found", "Sugestão não encontrada.", 404, { requestId });
   if (!draft.product_code) return ok({ product: null }, { requestId });
-  const { data: product } = await db
+  // `catalog_products` is not in the generated types (the catalog screen casts too).
+  const { data: product } = (await db
     .from("catalog_products")
     .select("id,nome,fotos")
     .eq("organization_id", auth.org.orgId)
     .eq("codigo", draft.product_code)
     .eq("ativo", true)
-    .maybeSingle();
+    .maybeSingle()) as { data: { id: string; nome: string; fotos: string[] | null } | null };
   // Gone since the draft was made: the send will refuse it too (`product_not_found`).
   if (!product)
     return ok({ product: { code: draft.product_code, name: null, thumbnail_url: null } }, { requestId });
