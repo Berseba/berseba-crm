@@ -393,7 +393,7 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
     ? t("Contato anonimizado — não é possível enviar mensagens.")
     : null;
   const optOutNotice =
-    selectedConversation?.contacts?.is_blocked && !blockedReason
+    selectedConversation?.contacts?.is_blocked && !blockedReason && !supportReadonly
       ? t("Este contato pediu para não receber mensagens automáticas. A IA, as automações e as campanhas não enviam para ele; você pode responder normalmente.")
       : null;
 
