@@ -11,11 +11,18 @@ import { lastLine, sql } from "./gov-helpers";
  *    policy lets through are exactly the rows `fn_can_view_conversation` (the
  *    old per-row rule, which stays) says the same user can see. The expected
  *    counts are pinned too, so the parity cannot pass with both sides wrong.
- * 2. Shape. The plan of a count as an agent never calls
- *    `fn_can_view_conversation` per row, and reads the scope through a hashed
- *    subplan — the property that took the production count from 3,994 ms to
- *    18.7 ms. Without this case a future rewrite back to a per-row call would
- *    keep the parity green and bring the timeouts back.
+ * 2. Cost. Counted with `track_functions`, not read from the plan text: a
+ *    count as an agent runs the scope function ONCE and never
+ *    `fn_can_view_conversation`, whatever the number of rows — the property
+ *    that took the production count from 3,994 ms to 18.7 ms, and that keeps
+ *    the per-event Realtime check as cheap as the old per-row call. The same
+ *    holds for `messages_select`. Without these cases a rewrite back to a
+ *    per-row call would keep the parity green and bring the timeouts back.
+ *
+ * Support sessions are not a separate row of the matrix on purpose: one is
+ * only ever active for a platform admin (`fn_support_context` revokes it when
+ * the actor is not in `platform_admins`), and a platform admin sees every
+ * organization by the first rule — the PLATFORM user below.
  */
 
 // Namespace 9001xxxx — exclusive to this file.
@@ -83,6 +90,14 @@ beforeAll(() => {
         ('90010000-4444-4000-8000-0000000${i}0003', '${id}', '90010000-3333-4000-8000-0000000${i}0003',
          '90010000-2222-4000-8000-00000000000${i}', 'claimed', '${OTHER}', now())
       on conflict do nothing;
+    insert into public.messages
+      (id, organization_id, conversation_id, channel_session_id, contact_id, type, direction, body)
+      select ('90010000-7777-4000-8000-0000000${i}' || c || lpad(n::text, 3, '0'))::uuid, '${id}',
+             ('90010000-4444-4000-8000-0000000${i}000' || c)::uuid,
+             '90010000-2222-4000-8000-00000000000${i}',
+             ('90010000-3333-4000-8000-0000000${i}000' || c)::uuid,
+             'text', 'inbound', 'probe 9001'
+        from generate_series(1, 3) c, generate_series(1, 2) n;
     insert into public.user_organizations (user_id, organization_id, role, accepted_at)
       values ('${AGENT}', '${id}', 'agent', now()), ('${OTHER}', '${id}', 'agent', now())
       on conflict do nothing;`,
@@ -159,6 +174,33 @@ function bothSides(userId: string): Array<[string, string, string]> {
   return ORGS.map((org, i) => [org, idsAfter(`policy${i}`, out), idsAfter(`old${i}`, out)]);
 }
 
+/**
+ * Runs `query` as the user and returns how many times each watched function
+ * ran, read from `pg_stat_xact_user_functions` in the same transaction, plus
+ * the count the query returned (`rows`).
+ */
+function callsDuring(userId: string, query: string): Record<string, number> {
+  const out = sql(`
+    begin;
+    set local track_functions = 'all';
+    ${claimsFor(userId)}
+    set local role authenticated;
+    select 'rows:' || (${query.replace(/;\s*$/, "")});
+    reset role;
+    select 'calls:' || coalesce(string_agg(funcname || '=' || calls, ',' order by funcname), '')
+      from pg_stat_xact_user_functions
+     where schemaname = 'public'
+       and funcname in ('fn_conversation_visibility_scope', 'fn_can_view_conversation', 'fn_is_platform_admin');
+    commit;
+  `);
+  const calls: Record<string, number> = { rows: Number(idsAfter("rows", out)) };
+  for (const pair of idsAfter("calls", out).split(",").filter(Boolean)) {
+    const [name, n] = pair.split("=");
+    if (name !== undefined) calls[name] = Number(n);
+  }
+  return calls;
+}
+
 function count(ids: string): number {
   return ids === "" ? 0 : ids.split(",").length;
 }
@@ -200,16 +242,26 @@ describe("conversations_select — scope once per query (migration 9001)", () =>
     expect(divergent).toEqual([]);
   }, 120_000);
 
-  it("the plan never calls fn_can_view_conversation per row and reads the scope as a hashed subplan", () => {
-    const plan = sql(`
-      set role authenticated;
-      ${claimsFor(AGENT)}
-      explain (costs off) select count(*) from public.conversations
-        where organization_id in (${orgList});
-    `);
-    expect(plan).not.toContain("fn_can_view_conversation");
-    expect(plan).toContain("fn_conversation_visibility_scope");
-    expect(plan).toMatch(/hashed SubPlan/);
+  it("a conversation count runs the scope function once, and fn_can_view_conversation never", () => {
+    const calls = callsDuring(
+      AGENT,
+      `select count(*) from public.conversations where organization_id in (${orgList});`,
+    );
+    expect(calls.rows).toBe(7);
+    expect(calls.fn_conversation_visibility_scope).toBe(1);
+    expect(calls.fn_can_view_conversation ?? 0).toBe(0);
+  });
+
+  it("a message count does not call a definer function per message row", () => {
+    const calls = callsDuring(
+      AGENT,
+      `select count(*) from public.messages where organization_id in (${orgList});`,
+    );
+    // 7 visible conversations x 2 messages: the inheritance still holds.
+    expect(calls.rows).toBe(14);
+    expect(calls.fn_is_platform_admin).toBeLessThanOrEqual(2);
+    expect(calls.fn_conversation_visibility_scope).toBe(1);
+    expect(calls.fn_can_view_conversation ?? 0).toBe(0);
   });
 
   it("anon cannot execute the scope function (only authenticated and service_role)", () => {

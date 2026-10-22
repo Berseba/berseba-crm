@@ -5426,48 +5426,6 @@ create policy "conversations_select" on public.conversations
     public.fn_can_view_conversation(organization_id, assigned_to_user_id)
   );
 
--- ---- conversations_select: visibility scope once per query (migration 9001) ----
--- Berseba fork block, placed right after the policy it rewrites (not at the end
--- of the file, where upstream appends on every release and a sync would
--- conflict). Why and the branch-by-branch parity: the header of
--- supabase/migrations/20261014190000_9001_conversation_visibility_once_per_query.sql.
-
-create or replace function public.fn_conversation_visibility_scope()
-returns table (org_id uuid, visibility text)
-language sql stable security definer
-set search_path = public
-as $$
-  select o.id,
-         case
-           when (select public.fn_is_platform_admin()) then 'all'
-           when public.fn_user_role_in_org(o.id) in ('viewer', 'manager', 'admin') then 'all'
-           else coalesce(o.settings->>'visibility_mode', 'own_and_unassigned')
-         end
-  from public.organizations o
-  where (select public.fn_is_platform_admin())
-     or (o.id in (select public.fn_user_org_ids())
-         and public.fn_user_role_in_org(o.id) is not null);
-$$;
-
-revoke all on function public.fn_conversation_visibility_scope() from public;
-revoke execute on function public.fn_conversation_visibility_scope() from anon;
-grant execute on function public.fn_conversation_visibility_scope()
-  to authenticated, service_role;
-
-alter policy "conversations_select" on public.conversations
-  using (
-    organization_id in (
-      select s.org_id from public.fn_conversation_visibility_scope() s
-      where s.visibility = 'all')
-    or (assigned_to_user_id = (select auth.uid())
-        and organization_id in (
-          select s.org_id from public.fn_conversation_visibility_scope() s))
-    or (assigned_to_user_id is null
-        and organization_id in (
-          select s.org_id from public.fn_conversation_visibility_scope() s
-          where s.visibility = 'own_and_unassigned'))
-  );
-
 drop policy if exists "conversations_agent_write" on public.conversations;
 drop policy if exists "conversations_agent_insert" on public.conversations;
 drop policy if exists "conversations_agent_update" on public.conversations;
@@ -5505,6 +5463,74 @@ drop policy if exists "messages_delete" on public.messages;
 create policy "messages_select" on public.messages
   for select using (
     public.fn_is_platform_admin()
+    or exists (
+      select 1 from public.conversations c
+      where c.id = messages.conversation_id
+    )
+  );
+
+-- ---- conversations_select / messages_select: visibility scope once per statement (migration 9001) ----
+-- Berseba fork block, placed right after the two policies it rewrites (not at the end
+-- of the file, where upstream appends on every release and a sync would
+-- conflict). Why and the branch-by-branch parity: the header of
+-- supabase/migrations/20261014190000_9001_conversation_visibility_once_per_query.sql.
+
+create or replace function public.fn_conversation_visibility_scope()
+returns table (org_id uuid, slice text)
+language sql stable security definer
+set search_path = public
+as $$
+  with me as materialized (
+    select public.fn_is_platform_admin() as is_platform_admin
+  ),
+  members as materialized (
+    select u.org_id, public.fn_user_role_in_org(u.org_id) as role
+      from public.fn_user_org_ids() as u(org_id), me
+     where not me.is_platform_admin and u.org_id is not null
+  ),
+  visible as (
+    select o.id as org_id, 'all'::text as visibility
+      from public.organizations o, me
+     where me.is_platform_admin
+    union all
+    select m.org_id,
+           case
+             when m.role in ('viewer', 'manager', 'admin') then 'all'
+             else coalesce(
+               (select o.settings->>'visibility_mode'
+                  from public.organizations o where o.id = m.org_id),
+               'own_and_unassigned')
+           end
+      from members m
+     where m.role is not null
+  )
+  select v.org_id, s.slice
+    from visible v
+   cross join (values ('mine'), ('unassigned'), ('others')) as s(slice)
+   where s.slice = 'mine'
+      or v.visibility = 'all'
+      or (v.visibility = 'own_and_unassigned' and s.slice = 'unassigned');
+$$;
+
+revoke all on function public.fn_conversation_visibility_scope() from public;
+revoke execute on function public.fn_conversation_visibility_scope() from anon;
+grant execute on function public.fn_conversation_visibility_scope()
+  to authenticated, service_role;
+
+alter policy "conversations_select" on public.conversations
+  using (
+    (organization_id,
+     case
+       when assigned_to_user_id = (select auth.uid()) then 'mine'
+       when assigned_to_user_id is null then 'unassigned'
+       else 'others'
+     end)
+    in (select s.org_id, s.slice from public.fn_conversation_visibility_scope() s)
+  );
+
+alter policy "messages_select" on public.messages
+  using (
+    (select public.fn_is_platform_admin())
     or exists (
       select 1 from public.conversations c
       where c.id = messages.conversation_id
