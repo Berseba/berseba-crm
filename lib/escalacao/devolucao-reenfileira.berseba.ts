@@ -65,12 +65,15 @@ async function ultimaMensagem(
   // Same recency as the drain's anti-backlog check (`sent_at`, then
   // `created_at`): if this picked a different "latest inbound", the drain would
   // drop the event as superseded and the client would still wait.
-  const { data, error } = await admin
+  let consulta = admin
     .from("messages")
     .select("id, contact_id, created_at")
     .eq("organization_id", conversa.organization_id)
     .eq("conversation_id", conversa.id)
-    .eq("direction", direcao)
+    .eq("direction", direcao);
+  // A reply that failed never reached the client: it does not answer anything.
+  if (direcao === "outbound") consulta = consulta.neq("status", "failed");
+  const { data, error } = await consulta
     .order("sent_at", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1);

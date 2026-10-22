@@ -92,6 +92,7 @@ interface Linha {
 }
 
 const ordensDoInbound: string[] = [];
+const neqDoOutbound: string[] = [];
 
 function dubleDoBanco(mensagens: { inbound: Linha | null; outbound: Linha | null }, erroDoRpc: string | null = null) {
   const rpc = vi.fn(async () => ({ data: null, error: erroDoRpc ? { message: erroDoRpc } : null }));
@@ -103,6 +104,10 @@ function dubleDoBanco(mensagens: { inbound: Linha | null; outbound: Linha | null
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal PostgREST chain double
       const chain: any = {
         select: () => chain,
+        neq: (col: string, val: unknown) => {
+          if (direcao === "outbound") neqDoOutbound.push(`${col}!=${String(val)}`);
+          return chain;
+        },
         eq: (col: string, val: unknown) => {
           filtros[col] = val;
           if (col === "direction") direcao = val as "inbound" | "outbound";
@@ -129,6 +134,7 @@ function dubleDoBanco(mensagens: { inbound: Linha | null; outbound: Linha | null
 beforeEach(() => {
   avisos.mockReset();
   ordensDoInbound.length = 0;
+  neqDoOutbound.length = 0;
 });
 
 describe("reenfileirarPendenteDaDevolucao", () => {
@@ -160,6 +166,12 @@ describe("reenfileirarPendenteDaDevolucao", () => {
     const { admin } = dubleDoBanco({ inbound: { id: MSG, contact_id: CONTATO, created_at: iso(3) }, outbound: null });
     await reenfileirarPendenteDaDevolucao(admin, conversa(), "req-58", AGORA);
     expect(ordensDoInbound).toEqual(["sent_at", "created_at"]);
+  });
+
+  it("a failed reply does not count as an answer", async () => {
+    const { admin } = dubleDoBanco({ inbound: { id: MSG, contact_id: CONTATO, created_at: iso(3) }, outbound: null });
+    await reenfileirarPendenteDaDevolucao(admin, conversa(), "req-58", AGORA);
+    expect(neqDoOutbound).toEqual(["status!=failed"]);
   });
 
   it("nothing pending: no event", async () => {
