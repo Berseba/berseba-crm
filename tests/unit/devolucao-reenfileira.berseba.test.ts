@@ -91,6 +91,8 @@ interface Linha {
   created_at: string;
 }
 
+const ordensDoInbound: string[] = [];
+
 function dubleDoBanco(mensagens: { inbound: Linha | null; outbound: Linha | null }, erroDoRpc: string | null = null) {
   const rpc = vi.fn(async () => ({ data: null, error: erroDoRpc ? { message: erroDoRpc } : null }));
   const admin = {
@@ -106,7 +108,10 @@ function dubleDoBanco(mensagens: { inbound: Linha | null; outbound: Linha | null
           if (col === "direction") direcao = val as "inbound" | "outbound";
           return chain;
         },
-        order: () => chain,
+        order: (col: string) => {
+          if (direcao === "inbound") ordensDoInbound.push(col);
+          return chain;
+        },
         limit: async () => {
           expect(filtros.organization_id).toBe(ORG);
           expect(filtros.conversation_id).toBe(CONV);
@@ -121,7 +126,10 @@ function dubleDoBanco(mensagens: { inbound: Linha | null; outbound: Linha | null
   return { admin: admin as unknown as SupabaseClient, rpc };
 }
 
-beforeEach(() => avisos.mockReset());
+beforeEach(() => {
+  avisos.mockReset();
+  ordensDoInbound.length = 0;
+});
 
 describe("reenfileirarPendenteDaDevolucao", () => {
   it("emits the ingestion's dispatch event for the pending inbound", async () => {
@@ -146,6 +154,12 @@ describe("reenfileirarPendenteDaDevolucao", () => {
         },
       }),
     );
+  });
+
+  it("picks the latest inbound with the drain's recency (sent_at first), or the drain drops the event", async () => {
+    const { admin } = dubleDoBanco({ inbound: { id: MSG, contact_id: CONTATO, created_at: iso(3) }, outbound: null });
+    await reenfileirarPendenteDaDevolucao(admin, conversa(), "req-58", AGORA);
+    expect(ordensDoInbound).toEqual(["sent_at", "created_at"]);
   });
 
   it("nothing pending: no event", async () => {

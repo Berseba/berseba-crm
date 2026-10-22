@@ -62,12 +62,16 @@ async function ultimaMensagem(
   conversa: ConversaEmHandoff,
   direcao: "inbound" | "outbound",
 ): Promise<UltimaMensagem | null> {
+  // Same recency as the drain's anti-backlog check (`sent_at`, then
+  // `created_at`): if this picked a different "latest inbound", the drain would
+  // drop the event as superseded and the client would still wait.
   const { data, error } = await admin
     .from("messages")
     .select("id, contact_id, created_at")
     .eq("organization_id", conversa.organization_id)
     .eq("conversation_id", conversa.id)
     .eq("direction", direcao)
+    .order("sent_at", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(1);
   if (error) throw new Error(`messages: ${error.message}`);
