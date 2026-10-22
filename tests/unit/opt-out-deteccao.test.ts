@@ -458,6 +458,16 @@ describe("ehPedidoDeOptOut — pedido INEQUÍVOCO, o que autoriza bloquear", () 
     expect(ehOptOutProvavel("Cancelar")).toBe(false);
     expect(ehPedidoDeOptOut("quero cancelar o pedido")).toBe(false);
     expect(ehPedidoDeOptOut("quero cancelar a inscrição")).toBe(true);
+    expect(ehPedidoDeOptOut("Cancelar.")).toBe(false);
+    expect(ehPedidoDeOptOut("Cancelar 👍")).toBe(false);
+  });
+
+  it("cancelling the messages or one's own subscription blocks, in pt and es", () => {
+    expect(ehPedidoDeOptOut("quero cancelar as mensagens")).toBe(true);
+    expect(ehPedidoDeOptOut("cancelar minha inscrição")).toBe(true);
+    expect(ehPedidoDeOptOut("cancelar mi suscripción")).toBe(true);
+    // one message, not the channel
+    expect(ehPedidoDeOptOut("pode cancelar a mensagem que mandei?")).toBe(false);
   });
 });
 

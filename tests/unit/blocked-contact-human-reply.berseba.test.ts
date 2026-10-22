@@ -77,6 +77,17 @@ describe("opted-out contact", () => {
     expect(isBlockedRefusal(err)).toBe(true);
   });
 
+  it("a template from the attendant is still refused: it is outreach, not a reply", async () => {
+    const { supabase } = criarDubleDoHandler({ conversation: blockedConversation() });
+    const ctx: HandlerCtx = { organization_id: ORG, actor: { type: "user", id: USER }, requestId: "req-template" };
+    const input = { conversation_id: CONV, type: "template", template_name: "promo", template_language: "pt_BR" } as unknown as SendMessageInput;
+    const err = await sendMessageHandler(supabase, ctx, input).then(
+      () => null,
+      (e: unknown) => e,
+    );
+    expect(isBlockedRefusal(err)).toBe(true);
+  });
+
   it("the attendant replying from the CRM is not refused by the block", async () => {
     // Does not prove end-to-end delivery (that is the channel's job): proves
     // the block no longer stops a person. Any error left is not the block's.
@@ -87,16 +98,16 @@ describe("opted-out contact", () => {
 describe("the inbox does not lock the composer for an opted-out contact", () => {
   // Rendering InboxLayout needs the whole inbox; the wiring is a few lines, so
   // the source is checked, as the sibling inbox fences do.
-  const fonte = readFileSync("components/inbox/InboxLayout.tsx", "utf8");
-  const bloqueio = /const blockedReason = ([\s\S]*?);\n/.exec(fonte)?.[1] ?? "";
+  const source = readFileSync("components/inbox/InboxLayout.tsx", "utf8");
+  const lockExpr = /const blockedReason = ([\s\S]*?);\n/.exec(source)?.[1] ?? "";
 
   it("blockedReason (which locks the composer) no longer depends on is_blocked", () => {
-    expect(bloqueio, "blockedReason not found").toMatch(/is_anonymized/);
-    expect(bloqueio).not.toMatch(/is_blocked/);
+    expect(lockExpr, "blockedReason not found").toMatch(/is_anonymized/);
+    expect(lockExpr).not.toMatch(/is_blocked/);
   });
 
   it("the opt-out notice is shown, but not in read-only support mode", () => {
-    expect(fonte).toMatch(/const optOutNotice =\s*selectedConversation\?\.contacts\?\.is_blocked && !blockedReason && !supportReadonly/);
-    expect(fonte).toMatch(/\{optOutNotice && \(/);
+    expect(source).toMatch(/const optOutNotice =\s*selectedConversation\?\.contacts\?\.is_blocked && !blockedReason && !supportReadonly/);
+    expect(source).toMatch(/\{optOutNotice && \(/);
   });
 });

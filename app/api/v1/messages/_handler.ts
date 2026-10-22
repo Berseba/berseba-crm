@@ -509,8 +509,9 @@ export async function sendMessageHandler(
   // never a person replying from the CRM. The block is set by a keyword match on
   // ingestion, and a false positive used to leave the attendant unable to answer
   // a client who was still talking (the composer said "envio desabilitado" and
-  // only an admin could unblock, from the contact page).
-  if (c.contacts?.is_blocked && ctx.actor.type !== "user") {
+  // only an admin could unblock, from the contact page). A template is outreach,
+  // not a reply, so it stays refused for a person too.
+  if (c.contacts?.is_blocked && (ctx.actor.type !== "user" || input.type === "template")) {
     throw new ApiError(
       403,
       "forbidden",
@@ -1339,7 +1340,14 @@ export async function sendMessageHandler(
     resourceType: "message",
     resourceId: message.id,
     requestId: ctx.requestId,
-    metadata: { ...a.metadataActor, ...emNomeDe, status: message.status, type: message.type },
+    metadata: {
+      ...a.metadataActor,
+      ...emNomeDe,
+      status: message.status,
+      type: message.type,
+      // Berseba: a person wrote to a contact who opted out; keep it auditable.
+      ...(c.contacts?.is_blocked ? { contact_opted_out: true } : {}),
+    },
   });
 
   await supabase

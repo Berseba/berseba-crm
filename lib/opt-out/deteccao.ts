@@ -387,7 +387,10 @@ const FRASES_DE_OPT_OUT: readonly RegExp[] = [
   // As duas leem hoje a MESMA constante (`LISTAS_DE_ENVIO`), que é o que torna
   // impossível uma voltar a divergir da outra.
   new RegExp(`\\bsair\\s+d(?:a|essa|esta)\\s+lista\\b${FREIO_DE_LISTA_QUALIFICADA}`, "u"),
-  /\bcancelar?\s+(?:a\s+)?(?:inscricao|assinatura)\b/u,
+  /\bcancelar?\s+(?:a\s+|minha\s+)?(?:inscricao|assinatura)\b/u,
+  // Berseba: "quero cancelar as mensagens" names the messages; the plural keeps
+  // "cancelar a mensagem que mandei" (undo one message) out.
+  /\bcancelar?\s+(?:as\s+)?mensagens\b/u,
   /\b(?:me\s+)?descadastr\w*\b/u,
   /\bdescadastro\b/u,
   // ── espanhol ──────────────────────────────────────────────────────────────
@@ -456,7 +459,7 @@ const FRASES_DE_OPT_OUT: readonly RegExp[] = [
   // quer continuar sendo atendido.
   /\b(?:sacame|sacar|quitame|quitar|borrame|borrar|elimina|eliminame)\s+de\s+(?:la\s+)?lista\b(?!\s+de\s+(?:espera|precios|invitados))/u,
   /\bsalir\s+de\s+(?:la\s+)?lista\b(?!\s+de\s+(?:espera|precios|invitados))/u,
-  /\bcancelar\s+(?:la\s+)?(?:suscripcion|inscripcion)\b/u,
+  /\bcancelar\s+(?:la\s+|mi\s+)?(?:suscripcion|inscripcion)\b/u,
 ];
 
 /**

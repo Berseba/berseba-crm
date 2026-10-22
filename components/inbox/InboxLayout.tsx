@@ -369,7 +369,7 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
   // `131047` — descobrindo a regra pelo erro, uma mensagem por vez. Barrar aqui
   // é o pedido explícito do dono: se não dá para enviar, que não deixe tentar.
   //
-  // Reusa o `blockedReason` que já existe (contato bloqueado/anonimizado) em vez
+  // Reusa o `blockedReason` que já existe (contato anonimizado) em vez
   // de um segundo mecanismo de bloqueio: dois caminhos para desabilitar o mesmo
   // composer divergem, e o segundo esquece de cobrir o áudio ou o anexo.
   const janela = estadoDaJanela(
@@ -394,7 +394,7 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
     : null;
   const optOutNotice =
     selectedConversation?.contacts?.is_blocked && !blockedReason && !supportReadonly
-      ? t("Este contato pediu para não receber mensagens automáticas. A IA, as automações e as campanhas não enviam para ele; você pode responder normalmente.")
+      ? t("Este contato pediu para sair. A IA, as automações, as campanhas e os modelos não enviam para ele. Responda só ao que ele escrever.")
       : null;
 
   // Altura da grade: a conta desconta TUDO que fica acima e abaixo dela.
