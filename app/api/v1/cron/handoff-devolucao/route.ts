@@ -43,7 +43,7 @@ import {
   type ConversaEmHandoff,
 } from "@/lib/escalacao/devolucao-automatica";
 import { devolverAtendimentoAoAgente } from "@/lib/escalacao/retomada";
-import { reenfileirarPendenteDaDevolucao } from "@/lib/escalacao/devolucao-reenfileira.berseba";
+import { filtrarClienteAguardando } from "@/lib/escalacao/devolucao-por-pendencia.berseba";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { autorizaCron } from "@/lib/auth/cron-auth";
@@ -154,11 +154,12 @@ export async function devolverHandoffsVencidos(
   if (error) throw new Error(`conversations: ${error.message}`);
   const conversas = (data ?? []) as ConversaEmHandoff[];
 
-  const vencidas = selecionarVencidas(conversas, {
+  // Berseba: a conversation whose client is waiting for the team is never returned.
+  const vencidas = await filtrarClienteAguardando(admin, selecionarVencidas(conversas, {
     prazoPorOrg,
     sessoesComAgente: await sessoesComAgente(admin, orgIds),
     agoraMs: agora.getTime(),
-  });
+  }), agora.getTime());
 
   let devolvidas = 0;
   let falhas = 0;
@@ -169,8 +170,6 @@ export async function devolverHandoffsVencidos(
     );
     if (r.ok) {
       devolvidas++;
-      // Berseba (#58): answer the client message that arrived during the handoff.
-      await reenfileirarPendenteDaDevolucao(admin, conversa, requestId, agora);
       continue;
     }
     // `assignment_conflict` sai de QUATRO pontos de `devolverAtendimentoAoAgente`
