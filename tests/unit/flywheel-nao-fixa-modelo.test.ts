@@ -52,6 +52,7 @@ const TURNO = {
 function poolFalso() {
   const inserts: Array<{ sql: string; params: unknown[] }> = [];
   const query = vi.fn(async (sql: string, params: unknown[] = []) => {
+    if (sql.includes("pg_try_advisory_lock")) return { rows: [{ locked: true }], rowCount: 1 };
     if (sql.includes("from job_queue")) return { rows: [TURNO], rowCount: 1 };
     if (sql.includes("from messages")) {
       return { rows: [{ direction: "inbound", body: "meu CNPJ é 00.000.000/0001-00" }], rowCount: 1 };
@@ -68,7 +69,8 @@ function poolFalso() {
     }
     return { rows: [], rowCount: 0 };
   });
-  return { pool: { query } as never, inserts };
+  const connect = vi.fn(async () => ({ query, release: () => {} }));
+  return { pool: { query, connect } as never, inserts };
 }
 
 const LOG = { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} } as never;

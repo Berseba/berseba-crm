@@ -261,6 +261,8 @@ const envSchema = z.object({
   // intervalo. 0 = OFF (só o gatilho manual pnpm flywheel:judge). Gate humano
   // sempre: proposta nunca vira comportamento sem o dono publicar na tela.
   FLYWHEEL_INTERVAL_MS: z.coerce.number().int().min(0).default(21_600_000),
+  // Turns judged PER ORGANIZATION per run (latest turn of each contact, not
+  // judged yet, from the last 7 days). Each org pays for its own calls.
   FLYWHEEL_BATCH_LIMIT: z.coerce.number().int().positive().default(10),
   // Contenção de egress — hosts EXTRA além do Supabase/WAHA (CSV). Fail-closed.
   EGRESS_EXTRA_ALLOWED_HOSTS: z.string().optional(),
