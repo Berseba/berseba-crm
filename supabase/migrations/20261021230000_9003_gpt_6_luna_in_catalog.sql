@@ -8,9 +8,9 @@
 -- `catálogo` prefix the provenance invariant requires (price from the
 -- appendix, not from the 0068/0113 self-healing backfill).
 --
--- Not the OpenAI default: `gpt-5.6-terra` stays the default for a fresh
--- install. `context_window` and `released_at` stay NULL on purpose — no
--- measured value, and the screen handles null.
+-- Not the catalog's OpenAI default: `gpt-5.6-terra` stays the default a fresh
+-- install offers. `context_window` is 1,050,000, as OpenAI and upstream 0646
+-- declare; `released_at` stays NULL (no published date).
 --
 -- `supports_vision` is left at its default: for a direct provider the vision
 -- decision comes from the capability registry, never from this column
@@ -19,17 +19,19 @@
 --
 -- Price source: developers.openai.com/api/docs/pricing, read 2026-10-21
 -- (US$ 0.10 input, US$ 0.01 cached input, US$ 0.50 output per 1M tokens).
--- Confirmed by Matheus the same day, when GPT-6 Luna became the default.
+-- Confirmed by Matheus the same day, when he chose GPT-6 Luna as the model
+-- for the production agents (a choice made per agent, not a catalog default).
 -- ---------------------------------------------------------------------------
 insert into public.ai_models
-  (provider, model_id, display_name, description,
+  (provider, model_id, display_name, description, context_window,
    input_price_per_million_cents, output_price_per_million_cents, supports_tools)
 values
   ('openai', 'gpt-6-luna', 'GPT-6 Luna',
-   'O mais barato da linha 6, rápido para atendimento e tarefas simples.', 10, 50, true)
+   'O mais barato da linha 6, rápido para atendimento e tarefas simples.', 1050000, 10, 50, true)
 on conflict (provider, model_id) do update set
   display_name = excluded.display_name,
   description = excluded.description,
+  context_window = excluded.context_window,
   input_price_per_million_cents = excluded.input_price_per_million_cents,
   output_price_per_million_cents = excluded.output_price_per_million_cents,
   supports_tools = excluded.supports_tools,

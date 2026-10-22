@@ -77,7 +77,7 @@ describe("costCents — cada tarifa isolada, por modelo", () => {
     ["gpt-5.4-nano", 20, 125, 2, 20, 20],
     ["gpt-5.4-pro", 3000, 18000, 3000, 3000, 3000],
     // gpt-6-luna — OpenAI pricing page, read 2026-10-21 (migration 9003)
-    ["gpt-6-luna", 10, 50, 1, 10, 10],
+    ["gpt-6-luna", 10, 50, 1, 12.5, 12.5],
   ])("%s", (model, cIn, cOut, cLeitura, cGrav5m, cGrav1h) => {
     expect(entrada(model)).toBeCloseTo(cIn, 6);
     expect(saida(model)).toBeCloseTo(cOut, 6);

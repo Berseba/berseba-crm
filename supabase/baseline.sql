@@ -47454,14 +47454,15 @@ notify pgrst, 'reload schema';
 -- read 2026-10-21: US$ 0.10 / 0.50 per 1M = 10/50 cents, the same numbers as
 -- lib/agent-engine/edge/llm/pricing.ts.
 insert into public.ai_models
-  (provider, model_id, display_name, description,
+  (provider, model_id, display_name, description, context_window,
    input_price_per_million_cents, output_price_per_million_cents, supports_tools)
 values
   ('openai', 'gpt-6-luna', 'GPT-6 Luna',
-   'O mais barato da linha 6, rápido para atendimento e tarefas simples.', 10, 50, true)
+   'O mais barato da linha 6, rápido para atendimento e tarefas simples.', 1050000, 10, 50, true)
 on conflict (provider, model_id) do update set
   display_name = excluded.display_name,
   description = excluded.description,
+  context_window = excluded.context_window,
   input_price_per_million_cents = excluded.input_price_per_million_cents,
   output_price_per_million_cents = excluded.output_price_per_million_cents,
   supports_tools = excluded.supports_tools,

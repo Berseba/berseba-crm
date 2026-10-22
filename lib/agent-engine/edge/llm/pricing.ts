@@ -87,9 +87,9 @@ const USD_PER_MTOK: Record<string, Preco> = {
   'gpt-5.4-nano': { input: 0.2, output: 1.25, cacheRead: 0.02, cacheWrite5m: 0.2, cacheWrite1h: 0.2 },
   'gpt-5.4-pro': { input: 30, output: 180, cacheRead: 30, cacheWrite5m: 30, cacheWrite1h: 30 },
   // gpt-6-luna: OpenAI pricing page, read 2026-10-21 — US$ 0.10 in, 0.01 cached in,
-  // 0.50 out per 1M. OpenAI bills no separate cache write, so writes cost the input
-  // price. Migration 9003 keeps ai_models/ai_pricing in step.
-  'gpt-6-luna': { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite5m: 0.1, cacheWrite1h: 0.1 },
+  // 0.125 cache write, 0.50 out per 1M. Same line as upstream (0646), so a sync does
+  // not conflict. Migration 9003 keeps ai_models/ai_pricing in step.
+  'gpt-6-luna': { input: 0.1, output: 0.5, cacheRead: 0.01, cacheWrite5m: 0.125, cacheWrite1h: 0.125 },
 
   // Jev (TypeSafe AI), a versão FIXADA em lib/ai/decisao/cliente.ts. Fonte:
   // docs.typesafe.ai/models.md, conferida em 23/09/2026 — "Charged per input
