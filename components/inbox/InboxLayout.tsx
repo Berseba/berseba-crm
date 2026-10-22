@@ -521,11 +521,19 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
           It now sits in the conversation header: the `ficha` prop below.
         */}
         {selectedId && (
-          <div className="flex items-center gap-1 border-b border-border px-1 py-1 md:hidden">
+          // Berseba: between `md` and `xl` (tablet, small laptop) the list is
+          // visible but the contact column is not, so the bar stays for the
+          // Ficha door; the back button is phone-only.
+          <div
+            className={cn(
+              "flex items-center gap-1 border-b border-border px-1 py-1",
+              selectedConversation ? "xl:hidden" : "md:hidden",
+            )}
+          >
             <Button
               variant="ghost"
               size="sm"
-              className="h-9 gap-1 px-2"
+              className="h-9 gap-1 px-2 md:hidden"
               onClick={() => handleSelect(null)}
             >
               <CaretLeft size={16} />
