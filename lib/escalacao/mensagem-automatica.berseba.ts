@@ -2,7 +2,7 @@
  * Berseba: a message another system sends from the business's own WhatsApp
  * number is not a person answering from the phone.
  *
- * The WAHA ingestion reads every `fromMe` message that is not our own echo as
+ * The QR-code channel ingestion reads every `fromMe` message that is not our own echo as
  * "a person took over from the phone" and pauses the AI in that conversation
  * (`pausarIaPorAtendimentoManual`). A scheduling system connected to the same
  * number sends reminders the same way, so each reminder paused the agent. At the
