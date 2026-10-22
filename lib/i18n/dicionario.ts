@@ -5781,8 +5781,11 @@ export const DICIONARIO: Traducoes = {
   },
   "Quando chegar mensagem no WhatsApp": { es: "Cuando llegue un mensaje por WhatsApp" },
   "Mensagem enviada pela equipe": { es: "Mensaje enviado por el equipo" },
-  "Origem do envio (user = CRM, external_device = celular)": {
-    es: "Origen del envío (user = CRM, external_device = celular)",
+  "Origem do envio (user = CRM, external_device = celular, ai = IA)": {
+    es: "Origen del envío (user = CRM, external_device = celular, ai = IA)",
+  },
+  "Tags do negócio aberto mais recente do contato": {
+    es: "Etiquetas del negocio abierto más reciente del contacto",
   },
   "Quando uma mensagem não for entregue": { es: "Cuando un mensaje no se entregue" },
   "Código do erro": { es: "Código del error" },

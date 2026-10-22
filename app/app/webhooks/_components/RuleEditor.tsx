@@ -103,17 +103,17 @@ const MESSAGE_FIELDS: CuratedField[] = [
   { value: "contact.tags", label: "Tags do contato", op: "contains", lista: true },
 ];
 /**
- * Berseba (#57): a message the TEAM sent. The conversation's lead is in the
- * context (the contact's most recent open lead), so its tags are a condition
- * too. The origin is at hand for rules that want only the CRM (`user`) or only
- * the phone (`external_device`), and it is the same condition that lets
- * `ai`/`automation` in, which do not trigger it by default.
+ * Berseba (#57): a message the TEAM sent. The lead in the context is the
+ * contact's most recent open lead in ANY pipeline (a conversation has no
+ * pipeline), and the label says so. The origin is at hand for rules that want
+ * only the CRM (`user`) or only the phone (`external_device`); naming `ai` or
+ * `automation` with "é" is also what lets those in (a "não é" opens nothing).
  */
 const MESSAGE_SENT_FIELDS: CuratedField[] = [
   { value: "event.body_preview", label: "Texto da mensagem", op: "contains" },
-  { value: "event.sent_via", label: "Origem do envio (user = CRM, external_device = celular)", op: "eq" },
+  { value: "event.sent_via", label: "Origem do envio (user = CRM, external_device = celular, ai = IA)", op: "eq" },
   { value: "contact.tags", label: "Tags do contato", op: "contains", lista: true },
-  { value: "lead.tags", label: "Tags do lead", op: "contains", lista: true },
+  { value: "lead.tags", label: "Tags do negócio aberto mais recente do contato", op: "contains", lista: true },
 ];
 const CONTACT_FIELDS: CuratedField[] = [
   { value: "contact.tags", label: "Tags do contato", op: "contains", lista: true },

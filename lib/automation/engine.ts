@@ -35,6 +35,7 @@ import {
 } from "@/lib/schemas/webhooks";
 import { logger } from "@/lib/logger";
 import {
+  isStaleBacklog,
   MESSAGE_SENT_TRIGGER,
   readSentMessage,
   ruleAcceptsOrigin,
@@ -148,8 +149,10 @@ export async function buildContext(
   } else if (row.entity_kind === "message" && row.event_type === MESSAGE_SENT_TRIGGER) {
     // Berseba (#57): a message the TEAM sent. `event` becomes the one read from
     // the ROW (text and origin on both emitters, see `message-sent.ts`), and the
-    // context gets the conversation's lead: the contact's most recent open
-    // lead. That is the lead `create_or_move_lead` moves and `add_tag` tags.
+    // context gets the contact's most recent open lead, in ANY pipeline (a
+    // conversation has no pipeline; the editor label says so). That is the lead
+    // `add_tag` tags; `create_or_move_lead` moves it when it is in the target
+    // pipeline and otherwise resolves by contact (see that action).
     const sent = sentMessage ?? (await readSentMessage(admin, row));
     if (sent.ok) {
       context.event = sent.event;
@@ -337,10 +340,13 @@ export async function runAutomationForEvent(
   }
 
   // Berseba (#57): `message.sent` only goes on with the message read from its
-  // row. One that is gone (the echo of our own send, deleted by the send) or
-  // that the channel refused triggers no rule.
+  // row, and never for backlog. Echoes of our own sends, undelivered messages,
+  // group conversations and gone rows trigger no rule (`message-sent.ts`).
   let sentMessage: SentMessage | undefined;
   if (row.event_type === MESSAGE_SENT_TRIGGER) {
+    if (await isStaleBacklog(admin, row)) {
+      return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: "event_too_old" };
+    }
     sentMessage = await readSentMessage(admin, row);
     if (!sentMessage.ok) {
       return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: sentMessage.reason };

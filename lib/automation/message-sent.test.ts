@@ -25,7 +25,7 @@ import "@/lib/automation/actions/add-tag";
 import "@/lib/automation/actions/create-or-move-lead";
 import { automationRulesHandler } from "@/lib/automation/engine.handler";
 import { AUTOMATION_CONSUMER_KEY, buildContext, runAutomationForEvent } from "@/lib/automation/engine";
-import { ruleAcceptsOrigin } from "@/lib/automation/message-sent";
+import { isStaleBacklog, MAX_EVENT_AGE_MS, ruleAcceptsOrigin } from "@/lib/automation/message-sent";
 import type { EventRow } from "@/lib/event-log/dispatcher";
 import { DICIONARIO } from "@/lib/i18n/dicionario";
 import { ENTIDADE_ESPERADA_POR_GATILHO, TRIGGER_EVENTS } from "@/lib/schemas/webhooks";
@@ -52,11 +52,20 @@ interface World {
   /** Leads of the contact, most recent FIRST (the double keeps insertion order). */
   leads?: ReturnType<typeof negocio>[];
   withMessage?: boolean;
+  metadata?: Row;
+  /** Extra `messages` rows (e.g. the original of an echo). */
+  otherMessages?: Row[];
+  isGroup?: boolean;
+  contactKind?: string;
+  /** Rows already in `automation_rule_runs`. */
+  runs?: Row[];
 }
+
+const MESSAGE_CREATED_AT = "2026-10-15T12:00:00.000Z";
 
 function world(w: World = {}) {
   const db = makeDb({
-    contacts: [{ id: CONTACT, organization_id: ORG_ID, name: "Cliente", tags: [] }],
+    contacts: [{ id: CONTACT, organization_id: ORG_ID, name: "Cliente", tags: [], kind: w.contactKind ?? "person" }],
     pipelines: [funilRow({ id: PIPE, name: "Agendamentos" }), funilRow({ id: OTHER_PIPE, name: "Outro" })],
     stages: [NEW_CONTACT, BOOKED, OTHER_STAGE],
     leads: w.leads ?? [openLead("lead-1", NEW_CONTACT.id)],
@@ -89,8 +98,14 @@ function world(w: World = {}) {
             status: w.status ?? "sent",
             sent_via: w.sentVia ?? "external_device",
             body: w.body ?? "Deixamos agendado conforme conversado, até sábado!",
+            type: "text",
+            metadata: w.metadata ?? { fromMe: true },
+            created_at: MESSAGE_CREATED_AT,
           },
+          ...(w.otherMessages ?? []),
         ];
+  tables.conversations = [{ id: CONVERSATION, organization_id: ORG_ID, contact_id: CONTACT, is_group: w.isGroup ?? false }];
+  tables.automation_rule_runs = [...(w.runs ?? [])];
   return { db, tables, admin: db.client as unknown as Parameters<typeof runAutomationForEvent>[0] };
 }
 
@@ -144,6 +159,7 @@ describe("message.sent: registration", () => {
   });
 
   it("a saved rule runs: the engine finds it, records the run and bumps run_count", async () => {
+    // (`world` starts `automation_rule_runs` empty, so the one row below is this run.)
     const { tables, admin } = world();
     const r = await runAutomationForEvent(admin, phoneEvent());
     expect(r).toEqual({ consumer_key: AUTOMATION_CONSUMER_KEY, status: "ok" });
@@ -257,10 +273,26 @@ describe("message.sent: AI and automation messages are ignored by default", () =
     expect(stageOf(tables, "lead-1")).toBe(NEW_CONTACT.id);
   });
 
-  it("ruleAcceptsOrigin: people always, anything else only with the explicit condition", () => {
+  it("ruleAcceptsOrigin: people always, anything else only when the rule NAMES it with eq", () => {
     for (const via of ["user", "crm", "external_device"]) expect(ruleAcceptsOrigin([], { sent_via: via })).toBe(true);
     for (const via of ["ai", "automation", "system", undefined]) expect(ruleAcceptsOrigin([], { sent_via: via })).toBe(false);
     expect(ruleAcceptsOrigin([{ field: "event.sent_via", op: "eq", value: "ai" }], { sent_via: "ai" })).toBe(true);
+    // Naming one origin does not open the others, and `neq` opens none.
+    expect(ruleAcceptsOrigin([{ field: "event.sent_via", op: "eq", value: "ai" }], { sent_via: "automation" })).toBe(false);
+    expect(ruleAcceptsOrigin([{ field: "event.sent_via", op: "neq", value: "user" }], { sent_via: "ai" })).toBe(false);
+  });
+
+  it("an event.sent_via neq user condition does not let AI messages in", async () => {
+    const { tables, admin } = world({
+      sentVia: "ai",
+      conditions: [
+        { field: "event.sent_via", op: "neq", value: "user" },
+        { field: "event.body_preview", op: "contains", value: "deixamos agendado" },
+      ],
+    });
+    const r = await runAutomationForEvent(admin, crmEvent({ request_id: "req-x", actor_type: "ai_agent" }));
+    expect(r.detail).toBe("origin_not_team");
+    expect(stageOf(tables, "lead-1")).toBe(NEW_CONTACT.id);
   });
 });
 
@@ -288,11 +320,17 @@ describe("message.sent: anti-loop and missing messages", () => {
     expect(stageOf(tables, "lead-1")).toBe(NEW_CONTACT.id);
   });
 
-  it("a send the channel refused (status failed) triggers nothing", async () => {
-    const { tables, admin } = world({ sentVia: "user", status: "failed" });
+  it.each(["failed", "queued", "sending"])("a send that did not go out (status %s) triggers nothing", async (status) => {
+    const { tables, admin } = world({ sentVia: "user", status });
     const r = await runAutomationForEvent(admin, crmEvent());
     expect(r.detail).toBe("message_not_delivered");
     expect(stageOf(tables, "lead-1")).toBe(NEW_CONTACT.id);
+  });
+
+  it.each(["delivered", "read"])("status %s went out and triggers the rule", async (status) => {
+    const { tables, admin } = world({ sentVia: "user", status });
+    await runAutomationForEvent(admin, crmEvent());
+    expect(stageOf(tables, "lead-1")).toBe(BOOKED.id);
   });
 
   it("message.received keeps its context: no lead hydrated (existing rules unchanged)", async () => {
@@ -300,5 +338,121 @@ describe("message.sent: anti-loop and missing messages", () => {
     const ctx = await buildContext(admin, { ...phoneEvent(), event_type: "message.received" });
     expect(ctx.lead).toBeUndefined();
     expect((ctx.contact as Row).id).toBe(CONTACT);
+  });
+});
+
+describe("message.sent: the echo of our own send is not a phone reply", () => {
+  const ours = (over: Row = {}): Row => ({
+    id: "msg-ours",
+    organization_id: ORG_ID,
+    conversation_id: CONVERSATION,
+    contact_id: CONTACT,
+    direction: "outbound",
+    status: "sending",
+    sent_via: "ai",
+    type: "text",
+    body: "Deixamos agendado conforme conversado, até sábado!",
+    created_at: "2026-10-15T11:59:55.000Z",
+    ...over,
+  });
+
+  it("an echo flagged at birth by the ingest (metadata.own_send_echo) triggers nothing", async () => {
+    const { tables, admin } = world({ metadata: { fromMe: true, own_send_echo: true } });
+    const r = await runAutomationForEvent(admin, phoneEvent());
+    expect(r).toEqual({ consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: "own_send_echo" });
+    expect(stageOf(tables, "lead-1")).toBe(NEW_CONTACT.id);
+  });
+
+  it.each(["ai", "automation", "user", "system"])(
+    "without the flag: a %s row of ours with the same text just before marks the echo",
+    async (sentVia) => {
+      const { tables, admin } = world({ otherMessages: [ours({ sent_via: sentVia })] });
+      const r = await runAutomationForEvent(admin, phoneEvent());
+      expect(r.detail).toBe("own_send_echo");
+      expect(stageOf(tables, "lead-1")).toBe(NEW_CONTACT.id);
+    },
+  );
+
+  it("the signature line the channel adds does not hide the echo", async () => {
+    const { admin } = world({
+      body: "*Ruth*\nDeixamos agendado conforme conversado, até sábado!",
+      otherMessages: [ours()],
+    });
+    const ev = phoneEvent();
+    ev.payload.body_preview = "*Ruth*\nDeixamos agendado conforme conversado, até sábado!";
+    expect((await runAutomationForEvent(admin, ev)).detail).toBe("own_send_echo");
+  });
+
+  it("control: a row of ours with OTHER text, or outside the window, does not hide a real phone reply", async () => {
+    for (const other of [ours({ body: "Qual horário fica melhor?" }), ours({ created_at: "2026-10-15T11:50:00.000Z" })]) {
+      const { tables, admin } = world({ otherMessages: [other] });
+      await runAutomationForEvent(admin, phoneEvent());
+      expect(stageOf(tables, "lead-1")).toBe(BOOKED.id);
+    }
+  });
+
+  it("control: an earlier phone reply (external_device) with the same text is not 'ours'", async () => {
+    const { tables, admin } = world({ otherMessages: [ours({ sent_via: "external_device" })] });
+    await runAutomationForEvent(admin, phoneEvent());
+    expect(stageOf(tables, "lead-1")).toBe(BOOKED.id);
+  });
+});
+
+describe("message.sent: WhatsApp groups never enter the funnel", () => {
+  it("a team message in a group conversation triggers nothing and creates no lead", async () => {
+    const { tables, admin } = world({ isGroup: true, leads: [] });
+    const r = await runAutomationForEvent(admin, phoneEvent());
+    expect(r).toEqual({ consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: "group_conversation" });
+    expect(tables.crm_leads).toHaveLength(0);
+  });
+
+  it("the group placeholder contact (kind whatsapp_group) is caught too", async () => {
+    const { tables, admin } = world({ contactKind: "whatsapp_group", leads: [] });
+    const r = await runAutomationForEvent(admin, phoneEvent());
+    expect(r.detail).toBe("group_conversation");
+    expect(tables.crm_leads).toHaveLength(0);
+  });
+
+  it("control: the same world without the group creates the lead (the rule does reach the action)", async () => {
+    const { tables, admin } = world({ leads: [] });
+    await runAutomationForEvent(admin, phoneEvent());
+    expect(tables.crm_leads).toHaveLength(1);
+    expect(tables.crm_leads![0]).toMatchObject({ contact_id: CONTACT, stage_id: BOOKED.id });
+  });
+});
+
+describe("message.sent: backlog after a deploy gap does not fire rules", () => {
+  const old = (over: Partial<EventRow> = {}): EventRow => ({
+    ...phoneEvent(),
+    created_at: new Date(Date.now() - (MAX_EVENT_AGE_MS + 60_000)).toISOString(),
+    ...over,
+  });
+
+  it(`an event older than ${MAX_EVENT_AGE_MS / 60_000} minutes on its first pass is skipped`, async () => {
+    const { tables, admin } = world();
+    const r = await runAutomationForEvent(admin, old());
+    expect(r).toEqual({ consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: "event_too_old" });
+    expect(stageOf(tables, "lead-1")).toBe(NEW_CONTACT.id);
+  });
+
+  it("a fresh event runs (control)", async () => {
+    const { tables, admin } = world();
+    await runAutomationForEvent(admin, old({ created_at: new Date(Date.now() - 60_000).toISOString() }));
+    expect(stageOf(tables, "lead-1")).toBe(BOOKED.id);
+  });
+
+  it("an old event the engine already saw still runs: retry after an error, or a postponement coming back", async () => {
+    const retried = world();
+    await runAutomationForEvent(retried.admin, old({ attempts: 1 }));
+    expect(stageOf(retried.tables, "lead-1")).toBe(BOOKED.id);
+
+    const postponed = world({ runs: [{ id: "run-0", organization_id: ORG_ID, event_id: "evt-phone", status: "adiado" }] });
+    await runAutomationForEvent(postponed.admin, old());
+    expect(stageOf(postponed.tables, "lead-1")).toBe(BOOKED.id);
+  });
+
+  it("isStaleBacklog fails open without created_at", async () => {
+    const { admin } = world();
+    expect(await isStaleBacklog(admin, phoneEvent())).toBe(false);
   });
 });
