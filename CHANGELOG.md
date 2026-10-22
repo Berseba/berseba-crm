@@ -8,6 +8,18 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.6.0] — 2026-10-22
+
+### Adicionado
+
+- **Ferramentas de agenda do avec para o salão Mayara Morales** O agente do salão Mayara Morales passa a ter ferramentas para consultar a agenda do avec: os agendamentos da cliente da conversa, os serviços e profissionais, e os horários livres. Também há ferramentas para marcar, remarcar e cancelar, que só entram em uso quando alguém as liga uma a uma na tela do agente. Elas só existem para as organizações configuradas na instalação; para as demais empresas nada muda. Quando o avec não consegue atender, o agente passa a conversa para a equipe com um resumo do que falta fazer.
+
+- **O GPT-6 Luna aparece na escolha de modelo e entra na conta de custo** O GPT-6 Luna, da OpenAI, passa a aparecer na lista de modelos do agente (IA › Agentes › Modelo). Quem já usava esse modelo tinha o gasto registrado sem preço: a tela Uso e orçamento não somava essas chamadas e o teto mensal não disparava por elas. Agora cada chamada é cobrada a US$ 0,10 por milhão de tokens de entrada (US$ 0,01 quando a entrada se repete e vem do cache) e US$ 0,50 por milhão de saída, e entra no orçamento. As chamadas feitas antes da atualização continuam sem custo registrado.
+
+### Corrigido
+
+- **O CRM recebe a correção de segurança do Next.js de 14/10** O CRM passa a rodar no Next.js 16.4.1, que corrige três falhas de segurança divulgadas em 14/10. Neste CRM só uma delas se aplicava: alguém de fora, sem fazer login, conseguia deixar o sistema lento ou fora do ar com requisições preparadas para isso. As outras duas dependem de recursos que o CRM não usa. Nada muda no uso nem na operação: basta atualizar.
+
 ## [2.5.0] — 2026-10-22
 
 ### Alterado
@@ -9375,7 +9387,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.5.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.6.0...HEAD
+[2.6.0]: https://github.com/berseba/berseba-crm/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/berseba/berseba-crm/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/berseba/berseba-crm/compare/v2.3.1...v2.4.0
 [2.3.1]: https://github.com/berseba/berseba-crm/compare/v2.3.0...v2.3.1
