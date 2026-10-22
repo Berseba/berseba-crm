@@ -10,7 +10,7 @@ import {
   type SignupComConviteInput,
 } from "@/lib/auth/schemas";
 import { verifyInviteToken } from "@/lib/auth/invite-token";
-import { criarContaDeConvite, lerConfigPublicaDoGoTrue } from "@/lib/auth/convite-no-gotrue";
+import { completeInviteSignup } from "@/lib/auth/invite-signup";
 import { modoDeCadastro } from "@/lib/auth/politica-de-cadastro";
 import { audit, hashEmail } from "@/lib/audit";
 import { authRateLimited, AUTH_LIMITS } from "@/lib/auth/rate-limit";
@@ -35,6 +35,12 @@ export type SignUpResult =
        * Achado de @KIRAzinx566, com um cliente real travado nessa tela.
        */
       sessao_ativa: boolean;
+      /**
+       * Berseba: where the screen goes next, when the action already knows.
+       * Set on invite signup, which confirms the account and applies the
+       * invite in the same request (`lib/auth/invite-signup.ts`).
+       */
+      destino?: string;
     }
   | {
       ok: false;
@@ -134,56 +140,66 @@ export async function signUp(
     return { ok: false, error: "somente_convite" };
   }
 
-  // ── O GoTrue com o cadastro público FECHADO (#1653) ──────────────────────────
+  // ── Berseba: invite signup is confirmed by the invite itself ─────────────
   //
-  // Com `disable_signup` ligado no GoTrue — é o que fecha `POST /auth/v1/signup`
-  // para quem tem a anon key do navegador, o buraco que esta issue abre — o
-  // `supabase.auth.signUp()` de baixo também é recusado, inclusive para quem
-  // TEM convite. Só se entra aqui quando o próprio GoTrue diz que está fechado
-  // (`GET /auth/v1/settings`, público); nos outros casos — instalação aberta e
-  // até `so_convite` que ainda não sincronizou — o caminho de baixo continua
-  // exatamente o de antes.
-  //
-  // A ordem em relação à trava de política acima continua sendo a mesma: sem
-  // convite válido não se chega aqui.
-  if (convite !== null && (await lerConfigPublicaDoGoTrue())?.disable_signup === true) {
-    const criada = await criarContaDeConvite({
+  // A valid invite for this exact email (checked above) is the proof of the
+  // address, so the account is created already confirmed and joins the
+  // organization in this same request. No confirmation email: on 2026-10-09
+  // that email never reached two invitees and locked them out
+  // (`lib/auth/invite-signup.ts` has the incident and the trade-off). This also
+  // covers upstream's `disable_signup` case (#1653): the admin API does not
+  // depend on public signup being open.
+  if (convite !== null) {
+    const result = await completeInviteSignup({
       email: parsed.data.email,
       password: parsed.data.password,
-      inviteToken: convite,
       fullName: (parsed.data as SignupComConviteInput).full_name,
-      emailRedirectTo: `${origin}/auth/confirm?type=signup`,
+      inviteToken: convite,
+      requestId,
     });
 
-    if (!criada.ok) {
+    if (!result.ok) {
       await audit({
         action: "auth.signup_failed",
         metadata: {
           email_hash: hashEmail(parsed.data.email),
-          // Mesmos motivos do caminho de baixo, para a trilha continuar
-          // distinguível sem mapa novo: `conta_ja_existe_com_convite` já é o
-          // vocabulário de quem chega com convite na mão.
-          reason: criada.motivo === "conta_ja_existe" ? "conta_ja_existe_com_convite" : criada.motivo,
-          detalhe: criada.detalhe ?? null,
-          via: "admin_convite",
+          // `conta_ja_existe_com_convite` keeps the vocabulary the trail
+          // already uses for this case.
+          reason: result.reason === "account_exists" ? "conta_ja_existe_com_convite" : result.reason,
+          detalhe: result.detail ?? null,
+          via: "invite_confirmed",
         },
         requestId,
         ip,
         userAgent,
       });
-      if (criada.motivo === "conta_ja_existe") return { ok: false, error: "conta_ja_existe" };
-      if (criada.motivo === "rate_limited") return { ok: false, error: "rate_limited" };
+      if (result.reason === "account_exists") return { ok: false, error: "conta_ja_existe" };
+      if (result.reason === "rate_limited") return { ok: false, error: "rate_limited" };
+      if (result.reason === "invalid_invite" || result.reason === "invite_revoked") {
+        return { ok: false, error: "validation_error", details: { invite: ["convite_invalido"] } };
+      }
       return { ok: false, error: "signup_failed" };
     }
 
     await audit({
-      action: "auth.signup_requested",
-      metadata: { email_hash: hashEmail(parsed.data.email), via: "admin_convite" },
+      action: "auth.signup_confirmed",
+      actorUserId: result.userId,
+      metadata: { via: "invite_confirmed", account_created: result.created },
       requestId,
       ip,
       userAgent,
     });
-    return { ok: true, sessao_ativa: criada.sessao_ativa };
+
+    // Open the session now, so the person lands inside the organization
+    // instead of on a login screen. If this fails the account and the
+    // membership are already in place: the login screen finishes the job.
+    const supabase = await createClient();
+    const { data: signedIn } = await supabase.auth.signInWithPassword({
+      email: parsed.data.email,
+      password: parsed.data.password,
+    });
+    if (signedIn?.session) return { ok: true, sessao_ativa: true, destino: "/app" };
+    return { ok: true, sessao_ativa: false, destino: "/login" };
   }
 
   const supabase = await createClient();

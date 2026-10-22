@@ -16,6 +16,12 @@ updates:
       # Minor e patch dentro do 22 continuam entrando pelo grupo acima.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # Berseba (BERSEBA.md): the Playwright accessibility audit stays on
+      # upstream's axe 4.13. 4.14 added `label-content-name-mismatch`, which
+      # fails two e2e specs on upstream components (language picker, user
+      # menu). Lift this when upstream moves to 4.14.
+      - dependency-name: "@axe-core/playwright"
+        update-types: ["version-update:semver-minor", "version-update:semver-major"]
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:

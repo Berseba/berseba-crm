@@ -100,6 +100,13 @@ export function SignupForm({ convite }: { convite?: ConviteDoSignup }) {
          * conta própria vai à recuperação, que é o caminho auditado e com teto
          * de tentativas — e não uma segunda porta de provisionamento.
          */
+        // Berseba: invite signup already confirmed the account and joined the
+        // organization; the action says where to go (`/app`, or `/login` when
+        // the session could not be opened).
+        if (res.destino) {
+          router.replace(res.destino);
+          return;
+        }
         if (res.sessao_ativa) {
           router.replace(convite ? `/team/accept-invite/${convite.token}` : "/get-started");
           return;
@@ -109,6 +116,10 @@ export function SignupForm({ convite }: { convite?: ConviteDoSignup }) {
       }
       if (res.error === "rate_limited") {
         setServerError(t("Muitas tentativas. Aguarde alguns minutos."));
+      } else if (res.error === "validation_error" && convite && res.details?.["invite"]) {
+        // Berseba: expired, revoked or issued for another email. "Confira os
+        // campos" would send the person looking for a typo that is not there.
+        setServerError(t("Este convite não vale mais. Peça um novo a quem te convidou."));
       } else if (res.error === "validation_error") {
         setServerError(t("Dados inválidos. Confira os campos."));
       } else if (res.error === "conta_ja_existe" && convite) {

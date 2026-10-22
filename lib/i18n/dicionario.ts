@@ -957,6 +957,26 @@ export const DICIONARIO: Traducoes = {
     es: "Abre la acción correspondiente en el CRM o en el calendario para confirmar.",
   },
   "Feedback para a próxima sugestão": { es: "Comentarios para la próxima sugerencia" },
+  // Berseba — invite signup, unconfirmed login and owner handover
+  // (`components/auth/{SignupForm,LoginForm}.tsx`, `app/admin/(protected)/tenants/new/_form.tsx`)
+  "Este convite não vale mais. Peça um novo a quem te convidou.": {
+    es: "Esta invitación ya no es válida. Pide una nueva a quien te invitó.",
+  },
+  "Seu e-mail ainda não foi confirmado. Abra o link que enviamos para a sua caixa de entrada (confira também o spam) e depois entre de novo.": {
+    es: "Tu correo aún no fue confirmado. Abre el enlace que enviamos a tu bandeja de entrada (revisa también el spam) y luego vuelve a entrar.",
+  },
+  "Reenviar confirmação": { es: "Reenviar confirmación" },
+  "Reenviando...": { es: "Reenviando..." },
+  "Enviamos um novo link de confirmação.": { es: "Enviamos un nuevo enlace de confirmación." },
+  "Não foi possível reenviar agora. Tente de novo em instantes.": {
+    es: "No se pudo reenviar ahora. Inténtalo de nuevo en unos instantes.",
+  },
+  "Seu acesso é provisório: ele termina quando o responsável aceitar o convite. Se você precisa continuar na organização depois disso, peça a ele que convide você pela tela Equipe.": {
+    es: "Tu acceso es provisional: termina cuando el responsable acepte la invitación. Si necesitas seguir en la organización después, pídele que te invite desde la pantalla Equipo.",
+  },
+  "Se o responsável for outra pessoa, você sai da organização quando ele aceitar o convite.": {
+    es: "Si el responsable es otra persona, sales de la organización cuando acepte la invitación.",
+  },
   // Nicho da organização (`lib/organizacoes/nicho.ts`) — urgência médica e afirmação clínica
   "Nicho da organização": { es: "Nicho de la organización" },
   "Nicho salvo.": { es: "Nicho guardado." },

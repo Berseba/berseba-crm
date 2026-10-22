@@ -17,7 +17,12 @@ import {
 
 export type SignInResult = {
   ok: false;
-  error: "invalid_credentials" | "rate_limited" | "validation_error" | "mfa_required";
+  error:
+    | "invalid_credentials"
+    | "rate_limited"
+    | "validation_error"
+    | "mfa_required"
+    | "email_not_confirmed";
   details?: Record<string, unknown>;
   challengeId?: string;
 };
@@ -69,6 +74,24 @@ export async function signInWithPassword(input: LoginInput, next?: string): Prom
     email: parsed.data.email,
     password: parsed.data.password,
   });
+
+  // Berseba: the account exists, the password is right, and the email was
+  // never confirmed. GoTrue only answers `email_not_confirmed` AFTER the
+  // password matched (supabase/auth `internal/api/token.go`,
+  // ResourceOwnerPasswordGrant), so naming it reveals nothing to someone who
+  // does not know the password. Before this, the screen said "Email ou senha
+  // incorretos" and the person kept retyping a correct password (2026-10-09).
+  // Not counted against the account budget: it is not a wrong password.
+  if (error?.code === "email_not_confirmed") {
+    await audit({
+      action: "auth.login_failed",
+      metadata: { email_hash: hashEmail(parsed.data.email), reason: "email_not_confirmed" },
+      requestId,
+      ip,
+      userAgent,
+    });
+    return { ok: false, error: "email_not_confirmed" };
+  }
 
   if (error || !data.user) {
     // Só senha errada gasta o orçamento da conta.

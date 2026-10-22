@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { signInWithPassword } from "@/app/actions/auth/signInWithPassword";
+import { resendConfirmation } from "@/app/actions/auth/resendConfirmation";
 import { Eye, EyeSlash } from "@/lib/ui/icons";
 
 export function LoginForm({ next }: { next?: string }) {
@@ -19,10 +20,15 @@ export function LoginForm({ next }: { next?: string }) {
   const [isPending, startTransition] = useTransition();
   const [serverError, setServerError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
+  // Berseba: the email of a login that answered `email_not_confirmed`; it
+  // drives the notice with the "Reenviar confirmação" button.
+  const [unconfirmedEmail, setUnconfirmedEmail] = useState<string | null>(null);
+  const [resendState, setResendState] = useState<"idle" | "sending" | "sent" | "failed" | "rate_limited">("idle");
 
   const {
     register,
     handleSubmit,
+    getValues,
     formState: { errors },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -31,6 +37,8 @@ export function LoginForm({ next }: { next?: string }) {
 
   const onSubmit = (values: LoginInput) => {
     setServerError(null);
+    setUnconfirmedEmail(null);
+    setResendState("idle");
     startTransition(async () => {
       // Server Action redirects on success — no return value reaches here.
       // On failure, an error discriminator is returned and rendered inline.
@@ -47,6 +55,10 @@ export function LoginForm({ next }: { next?: string }) {
         router.replace(`/login/mfa${params.toString() ? `?${params}` : ""}`);
         return;
       }
+      if (res.error === "email_not_confirmed") {
+        setUnconfirmedEmail(values.email);
+        return;
+      }
       if (res.error === "invalid_credentials") {
         setServerError(t("Email ou senha incorretos."));
       } else if (res.error === "rate_limited") {
@@ -57,6 +69,14 @@ export function LoginForm({ next }: { next?: string }) {
         setServerError(t("Erro inesperado. Tente novamente."));
       }
     });
+  };
+
+  const onResend = async () => {
+    const email = unconfirmedEmail ?? getValues("email");
+    setResendState("sending");
+    const res = await resendConfirmation({ email });
+    if (res.ok) setResendState("sent");
+    else setResendState(res.error === "rate_limited" ? "rate_limited" : "failed");
   };
 
   return (
@@ -101,6 +121,37 @@ export function LoginForm({ next }: { next?: string }) {
           <p className="text-xs text-destructive">{t(errors.password.message ?? "")}</p>
         )}
       </div>
+      {unconfirmedEmail && (
+        <div
+          className="space-y-2 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning-fg"
+          role="alert"
+        >
+          <p>
+            {t(
+              "Seu e-mail ainda não foi confirmado. Abra o link que enviamos para a sua caixa de entrada (confira também o spam) e depois entre de novo.",
+            )}
+          </p>
+          {resendState === "sent" ? (
+            <p role="status">{t("Enviamos um novo link de confirmação.")}</p>
+          ) : (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={resendState === "sending"}
+              onClick={onResend}
+            >
+              {resendState === "sending" ? t("Reenviando...") : t("Reenviar confirmação")}
+            </Button>
+          )}
+          {resendState === "rate_limited" && (
+            <p>{t("Muitas tentativas. Aguarde alguns minutos.")}</p>
+          )}
+          {resendState === "failed" && (
+            <p>{t("Não foi possível reenviar agora. Tente de novo em instantes.")}</p>
+          )}
+        </div>
+      )}
       {serverError && (
         <div
           className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
