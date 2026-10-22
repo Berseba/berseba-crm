@@ -200,6 +200,16 @@ const schema = z.object({
   // devolve 401 em toda chamada — por isso `getWacallsClient()` exige os dois.
   WACALLS_API_TOKEN: z.string().optional().default(""),
 
+  // ─── Berseba: avec agenda API (salon Mayara Morales) — OPTIONAL, OFF BY DEFAULT ───
+  //
+  // Install level, never per organization: the address is on the VPS's internal network.
+  // Off unless all three are set; parsed (and refused when malformed) by
+  // `lib/integrations/avec/config.ts`, never here, so a bad value never stops the boot.
+  AVEC_API_URL: z.string().optional().default(""),
+  AVEC_API_KEY: z.string().optional().default(""),
+  /** Comma-separated organization ids that get the `avec_*` agent tools. */
+  AVEC_API_ORG_IDS: z.string().optional().default(""),
+
   // ─── Canal Datafy (recorte do #1130) — OPCIONAL, DESLIGADO POR PADRÃO ───
   //
   // Só `true` liga (decisão do dono, doc 54). Vazio = a instalação não oferece o

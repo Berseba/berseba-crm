@@ -5469,6 +5469,74 @@ create policy "messages_select" on public.messages
     )
   );
 
+-- ---- conversations_select / messages_select: visibility scope once per statement (migration 9001) ----
+-- Berseba fork block, placed right after the two policies it rewrites (not at the end
+-- of the file, where upstream appends on every release and a sync would
+-- conflict). Why and the branch-by-branch parity: the header of
+-- supabase/migrations/20261014190000_9001_conversation_visibility_once_per_query.sql.
+
+create or replace function public.fn_conversation_visibility_scope()
+returns table (org_id uuid, slice text)
+language sql stable security definer
+set search_path = public
+as $$
+  with me as materialized (
+    select public.fn_is_platform_admin() as is_platform_admin
+  ),
+  members as materialized (
+    select u.org_id, public.fn_user_role_in_org(u.org_id) as role
+      from public.fn_user_org_ids() as u(org_id), me
+     where not me.is_platform_admin and u.org_id is not null
+  ),
+  visible as (
+    select o.id as org_id, 'all'::text as visibility
+      from public.organizations o, me
+     where me.is_platform_admin
+    union all
+    select m.org_id,
+           case
+             when m.role in ('viewer', 'manager', 'admin') then 'all'
+             else coalesce(
+               (select o.settings->>'visibility_mode'
+                  from public.organizations o where o.id = m.org_id),
+               'own_and_unassigned')
+           end
+      from members m
+     where m.role is not null
+  )
+  select v.org_id, s.slice
+    from visible v
+   cross join (values ('mine'), ('unassigned'), ('others')) as s(slice)
+   where s.slice = 'mine'
+      or v.visibility = 'all'
+      or (v.visibility = 'own_and_unassigned' and s.slice = 'unassigned');
+$$;
+
+revoke all on function public.fn_conversation_visibility_scope() from public;
+revoke execute on function public.fn_conversation_visibility_scope() from anon;
+grant execute on function public.fn_conversation_visibility_scope()
+  to authenticated, service_role;
+
+alter policy "conversations_select" on public.conversations
+  using (
+    (organization_id,
+     case
+       when assigned_to_user_id = (select auth.uid()) then 'mine'
+       when assigned_to_user_id is null then 'unassigned'
+       else 'others'
+     end)
+    in (select s.org_id, s.slice from public.fn_conversation_visibility_scope() s)
+  );
+
+alter policy "messages_select" on public.messages
+  using (
+    (select public.fn_is_platform_admin())
+    or exists (
+      select 1 from public.conversations c
+      where c.id = messages.conversation_id
+    )
+  );
+
 create policy "messages_insert" on public.messages
   for insert with check (
     (organization_id in (select public.fn_user_org_ids()))
@@ -24614,9 +24682,9 @@ as $$
     'tenant.suspended',
     'user.profile_updated',
     -- mensagem ('message.failed' saiu aqui na 0417: ele ganhou consumidor)
+    -- Berseba 9002 (#57): 'message.sent' left the list, it became an automation trigger
     'message.outbound',
     'message.sending',
-    'message.sent',
     -- LGPD
     'lgpd.export_delivered',
     'lgpd.export_generated',
@@ -47377,3 +47445,35 @@ alter table public.campaign_recipients
   ));
 
 notify pgrst, 'reload schema';
+
+-- ---- gpt-6-luna in the catalog and in the bill (migration 9003) ----
+-- Idempotent mirror of migration 9003; this appendix is what reaches every
+-- self-host (install.sh and update.sh apply only the baseline). Both tables
+-- move together so the catalog x pricing invariant keeps the two sides equal.
+-- Price from OpenAI's pricing page (developers.openai.com/api/docs/pricing),
+-- read 2026-10-21: US$ 0.10 / 0.50 per 1M = 10/50 cents, the same numbers as
+-- lib/agent-engine/edge/llm/pricing.ts.
+insert into public.ai_models
+  (provider, model_id, display_name, description, context_window,
+   input_price_per_million_cents, output_price_per_million_cents, supports_tools)
+values
+  ('openai', 'gpt-6-luna', 'GPT-6 Luna',
+   'O mais barato da linha 6, rápido para atendimento e tarefas simples.', 1050000, 10, 50, true)
+on conflict (provider, model_id) do update set
+  display_name = excluded.display_name,
+  description = excluded.description,
+  context_window = excluded.context_window,
+  input_price_per_million_cents = excluded.input_price_per_million_cents,
+  output_price_per_million_cents = excluded.output_price_per_million_cents,
+  supports_tools = excluded.supports_tools,
+  deprecated_at = null;
+
+insert into public.ai_pricing
+  (model, prompt_cents_per_million_tokens, completion_cents_per_million_tokens, notes)
+values
+  ('gpt-6-luna', 10, 50, 'catálogo 9003 — OpenAI pricing page, read 2026-10-21: US$ 0.10 / 0.50 per 1M, cached input 0.01; same numbers as pricing.ts')
+on conflict (model) do update set
+  prompt_cents_per_million_tokens = excluded.prompt_cents_per_million_tokens,
+  completion_cents_per_million_tokens = excluded.completion_cents_per_million_tokens,
+  notes = excluded.notes,
+  superseded_at = null;

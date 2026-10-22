@@ -369,7 +369,7 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
   // `131047` — descobrindo a regra pelo erro, uma mensagem por vez. Barrar aqui
   // é o pedido explícito do dono: se não dá para enviar, que não deixe tentar.
   //
-  // Reusa o `blockedReason` que já existe (contato bloqueado/anonimizado) em vez
+  // Reusa o `blockedReason` que já existe (contato anonimizado) em vez
   // de um segundo mecanismo de bloqueio: dois caminhos para desabilitar o mesmo
   // composer divergem, e o segundo esquece de cobrir o áudio ou o anexo.
   const janela = estadoDaJanela(
@@ -386,10 +386,15 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
         : `${t("A janela de 24h fechou há")} ${formatarDecorrido(janela.fechadaHaMs)}. ${t("Só um modelo aprovado sai daqui — texto livre é recusado pela plataforma.")}`
       : null;
 
-  const blockedReason = selectedConversation?.contacts?.is_blocked
-    ? t("Contato bloqueado — envio de mensagens desabilitado.")
-    : selectedConversation?.contacts?.is_anonymized
-      ? t("Contato anonimizado — não é possível enviar mensagens.")
+  // Berseba: an opted-out contact no longer locks the composer. The server
+  // refuses the AI, automations and campaigns, never a person (see
+  // `app/api/v1/messages/_handler.ts`), so the attendant gets a notice instead.
+  const blockedReason = selectedConversation?.contacts?.is_anonymized
+    ? t("Contato anonimizado — não é possível enviar mensagens.")
+    : null;
+  const optOutNotice =
+    selectedConversation?.contacts?.is_blocked && !blockedReason && !supportReadonly
+      ? t("Este contato pediu para sair. A IA, as automações, as campanhas e os modelos não enviam para ele. Responda só ao que ele escrever.")
       : null;
 
   // Altura da grade: a conta desconta TUDO que fica acima e abaixo dela.
@@ -516,11 +521,19 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
           conversa, e só aparece quando há uma.
         */}
         {selectedId && (
-          <div className="flex items-center gap-1 border-b border-border px-1 py-1 md:hidden">
+          // Berseba: between `md` and `xl` (tablet, small laptop) the list is
+          // visible but the contact column is not, so the bar stays for the
+          // Ficha door; the back button is phone-only.
+          <div
+            className={cn(
+              "flex items-center gap-1 border-b border-border px-1 py-1",
+              selectedConversation ? "xl:hidden" : "md:hidden",
+            )}
+          >
             <Button
               variant="ghost"
               size="sm"
-              className="h-9 gap-1 px-2"
+              className="h-9 gap-1 px-2 md:hidden"
               onClick={() => handleSelect(null)}
             >
               <CaretLeft size={16} />
@@ -619,6 +632,11 @@ export function InboxLayout({ initialSelectedId = null, rascunho = null }: Inbox
                 provider={selectedConversation.channel_sessions?.provider ?? null}
                 motivo={motivoDaJanela}
               />
+            )}
+            {optOutNotice && (
+              <p role="status" data-testid="aviso-opt-out" className="border-t px-4 py-2 text-xs text-muted-foreground">
+                {optOutNotice}
+              </p>
             )}
             <Composer
               // Trocar a chave quando o rascunho sai REMONTA o composer: o texto
