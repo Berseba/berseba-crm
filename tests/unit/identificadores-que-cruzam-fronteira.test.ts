@@ -28,6 +28,7 @@ import { describe, expect, it } from "vitest";
 import { ALFABETO_DO_NOME_NO_STORAGE } from "@/lib/ai/skills/package";
 import { TETO_NOME_DE_SESSAO_WAHA, nomeCurtoDaSessao, nomeDaSessaoNovo } from "@/lib/channels/nome-da-sessao";
 import { randomId } from "@/lib/random-id";
+import { avecIdempotencyKey } from "@/lib/mcp/tools/avec";
 import { nomeDaSessaoDeVoz } from "@/lib/wacalls/nome-da-sessao";
 
 const RAIZ = process.cwd();
@@ -93,6 +94,23 @@ const FRONTEIRAS: Fronteira[] = [
     lacuna:
       "a chave entra na NOSSA API, não na deles: quem impõe a forma somos nós (UUID v4) e o terceiro não publica teto nenhum sobre ela.",
     medir: () => [randomId()],
+  },
+  // Berseba: the key the avec tools send to the avec API (salon Mayara Morales).
+  {
+    id: "avec.idempotency-key",
+    terceiro: "API do avec (Berseba/berseba-mayara-morales)",
+    teto: 128,
+    forma: /^[!-~]{8,128}$/,
+    fonte:
+      "Berseba/berseba-mayara-morales docs/integracao-crm.md — «Todo POST exige Idempotency-Key (8 a 128 caracteres)»",
+    medir: () =>
+      ["avec_book", "avec_reschedule", "avec_cancel"].map(
+        (tool) =>
+          avecIdempotencyKey({ sourceJobId: VERSAO } as never, tool, {
+            appointment_id: "88123-901-430008-2026-10-23",
+            slot_id: "430008-901-2026-10-24-1430",
+          }) ?? "",
+      ),
   },
   {
     id: "webhook.cabecalhos-de-saida",
@@ -195,6 +213,8 @@ const SITES: { arquivo: string; fronteira: string; papel?: "gerador" | "validado
   { arquivo: "app/api/v1/channel-sessions/route.ts", fronteira: "api.idempotency-key", papel: "validador" },
   { arquivo: "app/api/v1/lgpd/requests/[id]/approve/route.ts", fronteira: "api.idempotency-key", papel: "validador" },
   { arquivo: "app/api/v1/onboarding/whatsapp/session/route.ts", fronteira: "api.idempotency-key", papel: "validador" },
+  // Berseba: sends the key `lib/mcp/tools/avec.ts` derives per job (stable on retry, not a uuid).
+  { arquivo: "lib/integrations/avec/client.ts", fronteira: "avec.idempotency-key" },
 ];
 
 describe("todo identificador que cruza fronteira cabe no que o terceiro aceita", () => {
@@ -317,7 +337,7 @@ describe("a varredura é de classe: site novo de fronteira reprova", () => {
     // Só o cabeçalho como tal (`'Idempotency-Key'`/`"Idempotency-Key"`), não a
     // prosa dos comentários: o que cruza fronteira é o cabeçalho.
     const achados = caminhosCom(/['"]Idempotency-Key['"]/);
-    const registrados = SITES.filter((s) => s.fronteira === "api.idempotency-key").map((s) => s.arquivo);
+    const registrados = SITES.filter((s) => s.fronteira === "api.idempotency-key" || s.fronteira === "avec.idempotency-key").map((s) => s.arquivo); // Berseba: avec
     expect(achados.sort()).toEqual([...registrados].sort());
   });
 
