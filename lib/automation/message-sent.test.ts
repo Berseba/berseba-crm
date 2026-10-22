@@ -421,6 +421,35 @@ describe("message.sent: WhatsApp groups never enter the funnel", () => {
   });
 });
 
+describe("message.sent: another system's reminder is not the team (#75)", () => {
+  const AVEC = "Estamos passando para lembrar que deixamos agendado o seu horário";
+  const withPatterns = (patterns: unknown) => {
+    const w = world({ body: AVEC });
+    w.tables.organizations = [{ id: ORG_ID, settings: { automated_outbound_patterns: patterns } }];
+    return w;
+  };
+
+  it("a phone message matching the org's automated snippet triggers nothing", async () => {
+    const { tables, admin } = withPatterns(["Estamos passando para lembrar"]);
+    const r = await runAutomationForEvent(admin, phoneEvent());
+    expect(r).toEqual({ consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: "another_system" });
+    expect(stageOf(tables, "lead-1")).toBe(NEW_CONTACT.id);
+  });
+
+  it("without the setting the same text still moves the card (control)", async () => {
+    const { tables, admin } = withPatterns(undefined);
+    await runAutomationForEvent(admin, phoneEvent());
+    expect(stageOf(tables, "lead-1")).toBe(BOOKED.id);
+  });
+
+  it("a CRM message (sent_via user) is never checked against the snippets", async () => {
+    const w = world({ body: AVEC, sentVia: "user" });
+    w.tables.organizations = [{ id: ORG_ID, settings: { automated_outbound_patterns: ["Estamos passando para lembrar"] } }];
+    await runAutomationForEvent(w.admin, phoneEvent());
+    expect(stageOf(w.tables, "lead-1")).toBe(BOOKED.id);
+  });
+});
+
 describe("message.sent: backlog after a deploy gap does not fire rules", () => {
   const old = (over: Partial<EventRow> = {}): EventRow => ({
     ...phoneEvent(),
