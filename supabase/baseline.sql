@@ -24682,9 +24682,9 @@ as $$
     'tenant.suspended',
     'user.profile_updated',
     -- mensagem ('message.failed' saiu aqui na 0417: ele ganhou consumidor)
+    -- Berseba 9002 (#57): 'message.sent' left the list, it became an automation trigger
     'message.outbound',
     'message.sending',
-    'message.sent',
     -- LGPD
     'lgpd.export_delivered',
     'lgpd.export_generated',
