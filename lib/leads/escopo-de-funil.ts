@@ -57,6 +57,10 @@ export type AlvoDeFunil =
   | "sem_funil";
 
 export const ALVO_DE_FUNIL: Record<string, AlvoDeFunil> = {
+  // Berseba: avec agenda writes touch no lead
+  avec_book: "sem_funil",
+  avec_reschedule: "sem_funil",
+  avec_cancel: "sem_funil",
   // ---- escrevem em crm_leads: o coração do escopo ----
   crm_create_lead: "pipeline_no_argumento",
   crm_update_lead: "funil_vem_do_lead",

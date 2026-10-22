@@ -10,6 +10,15 @@
  *  `apenasHumano` no catálogo — nunca alcançável pelo agente publicado).
  */
 import type { McpToolDefinition } from "../types";
+// Berseba: avec agenda tools (salon Mayara Morales)
+import {
+  avecBook,
+  avecCancel,
+  avecFindServices,
+  avecFreeSlots,
+  avecMyAppointments,
+  avecReschedule,
+} from "./avec";
 import { TOOL_CATALOG, VALID_TOOL_IDS } from "./catalog";
 import { crmSearchContacts, crmGetContact, crmProposeContactField } from "./contacts";
 import {
@@ -99,6 +108,13 @@ import { crmDraftProposal, crmPrepararProposta } from "./propostas";
 // nivel do array — o server core ja recebe args como `Record<string,
 // unknown>` e cada handler valida no Zod do registerTool.
 export const allTools: ReadonlyArray<McpToolDefinition> = [
+  // Berseba: avec agenda (read, then write)
+  avecMyAppointments,
+  avecFindServices,
+  avecFreeSlots,
+  avecBook,
+  avecReschedule,
+  avecCancel,
   // read
   crmListEventTypes,
   crmFindFreeSlots,
