@@ -127,7 +127,7 @@ describe("catálogo de modelos", () => {
                              'gpt-5.6-sol','gpt-5.6-terra','gpt-5.6-luna','gpt-5.5',
                              'gpt-5.5-pro','gpt-5.4','gpt-5.4-mini','gpt-5.4-nano',
                              'gpt-5.4-pro','gemini-3.1-pro-preview','gemini-3.5-flash',
-                             'gemini-2.5-flash-lite','gemini-2.0-flash')
+                             'gemini-2.5-flash-lite','gemini-2.0-flash','gpt-6-luna')
           and (p.model is null or p.notes not like 'catálogo%')
         order by 1;`,
     );
@@ -149,6 +149,8 @@ describe("catálogo de modelos", () => {
       "gpt-5.6-sol",
       "gpt-5.6-terra",
       "gpt-5.6-luna",
+      // Used in production (migration 9003): missing here means the ModelPicker hides it.
+      "gpt-6-luna",
       "gemini-3.5-flash",
     ]) {
       expect(ids.has(esperado), `${esperado} ausente do catálogo`).toBe(true);

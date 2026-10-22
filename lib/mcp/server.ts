@@ -20,6 +20,7 @@ import { McpAuthError, ensureRole, ensureScope, type McpAuthResult } from "./aut
 import { verificarTetoMcp } from "./rate-limit";
 import { allTools } from "./tools";
 import { deCapacidadeDesligada, deModuloDesligado } from "./tools/catalog";
+import { isAvecToolHiddenFor } from "@/lib/integrations/avec/config"; // Berseba
 import { higienizarUuidsDeAterro } from "./uuid-de-aterro";
 import type { McpContext } from "./types";
 
@@ -58,6 +59,7 @@ export function createMcpServer(
   for (const tool of allTools) {
     if (deModuloDesligado(tool.name, modulosLigados)) continue;
     if (deCapacidadeDesligada(tool.name, capacidadesLigadas)) continue;
+    if (isAvecToolHiddenFor(tool.name, auth.organizationId)) continue; // Berseba
     server.registerTool(
       tool.name,
       {
