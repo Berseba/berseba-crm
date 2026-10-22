@@ -156,6 +156,16 @@ export function NewTenantForm() {
           </p>
           {created.owner_invitation && (
             <div className="space-y-3">
+              {/* Berseba: `fn_accept_team_invite` with role admin deletes every
+                  `provisional_until_handover` membership of the organization,
+                  and this one is marked so (the owner is someone else). Said
+                  here because on 2026-10-09 the setup admin found out by losing
+                  access. */}
+              <p className="rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-sm text-warning-fg">
+                {t(
+                  "Seu acesso é provisório: ele termina quando o responsável aceitar o convite. Se você precisa continuar na organização depois disso, peça a ele que convide você pela tela Equipe.",
+                )}
+              </p>
               <p>
                 {created.owner_invitation.email_dispatched
                   ? t("Convite enviado por e-mail.")
@@ -311,6 +321,12 @@ export function NewTenantForm() {
                 {...register("owner_email")}
                 aria-invalid={!!errors.owner_email}
               />
+              {/* Berseba: see the note on the confirmation card above. */}
+              <p className="text-xs text-muted-foreground">
+                {t(
+                  "Se o responsável for outra pessoa, você sai da organização quando ele aceitar o convite.",
+                )}
+              </p>
               {errors.owner_email && (
                 <p className="text-xs text-error-fg">{t(errors.owner_email.message ?? "")}</p>
               )}

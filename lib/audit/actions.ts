@@ -41,6 +41,9 @@ export const AUDIT_ACTIONS = [
   // Audited because it changes how the AI handles a patient on the organization's
   // WhatsApp, with no migration involved.
   "org.nicho_changed",
+  // "Reenviar confirmação" on the login screen, after a login answered
+  // `email_not_confirmed` (`app/actions/auth/resendConfirmation.ts`).
+  "auth.signup_confirmation_resent",
   // ── end of the Berseba block ─────────────────────────────────────────────
   "ad_tracking_link.saved",
   "auth.login_success",
