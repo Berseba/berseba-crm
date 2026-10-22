@@ -8,6 +8,26 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.7.0] — 2026-10-22
+
+### Adicionado
+
+- **Automação pode disparar com a mensagem que a equipe envia** Na tela de Automações há um gatilho novo, "Mensagem enviada pela equipe". Ele dispara quando alguém da equipe responde ao cliente, pelo CRM ou pelo celular, e a regra enxerga o texto da mensagem, o contato e o negócio aberto da conversa. Assim dá para fazer o funil andar sozinho: por exemplo, quando a recepção escrever "deixamos agendado", mover o card para "Horário marcado". Mensagens escritas pela IA ou por outra automação não disparam esse gatilho, a menos que a regra peça isso numa condição de "Origem do envio".
+
+### Corrigido
+
+- **Lembretes automáticos de outro sistema enviados pelo mesmo número não pausam mais a IA** Quando um sistema de agenda ligado ao mesmo número de WhatsApp mandava um lembrete, o CRM entendia que alguém da equipe tinha respondido pelo celular e pausava a IA naquela conversa. Se o cliente respondesse ao lembrete logo em seguida, ninguém atendia. Agora cada empresa pode listar trechos fixos dessas mensagens automáticas; a mensagem que contém um desses trechos não pausa a IA. A resposta de uma pessoa pelo celular continua pausando como antes. Sem a lista configurada, nada muda.
+
+- **As Propostas de melhoria agora avaliam todas as organizações, sem repetir conversa** A rodada automática que gera as Propostas de melhoria dos agentes pegava as 10 conversas mais recentes do servidor inteiro. Numa instalação com várias organizações, a que mais atendia ocupava todas as vagas e as menores nunca recebiam proposta. Quando não havia conversa nova, as mesmas 10 eram avaliadas de novo a cada 6 horas, pagando a IA para chegar à mesma conclusão. E um erro em uma organização (sem saldo de IA, sem modelo configurado) interrompia a rodada de todas as outras.
+
+  Agora cada organização tem a sua própria cota por rodada (`FLYWHEEL_BATCH_LIMIT`, 10 por padrão, passou a valer por organização), cada conversa é avaliada uma vez só, considerando a última mensagem de cada contato nos últimos 7 dias, e o erro de uma organização não atrapalha as demais. Uma resposta da IA fora do formato esperado conta como avaliação inconclusiva, em vez de ser paga de novo a cada rodada, e duas rodadas ao mesmo tempo (a automática e uma manual) não cobram a mesma conversa duas vezes. Como antes, o custo de cada avaliação é registrado na organização dona da conversa e respeita o orçamento de IA dela.
+
+- **A devolução automática para a IA responde a mensagem que o cliente mandou enquanto esperava** Com a devolução automática ligada (Configurações › Distribuição de atendimento), a conversa voltava para a IA, mas a mensagem que o cliente tinha mandado enquanto ela estava com a equipe ficava sem resposta: a IA só respondia a próxima mensagem, e a conversa já tinha saído da fila da equipe. Agora, quando a conversa volta, a IA responde na hora a mensagem pendente, se ela chegou depois da última ação da equipe e há menos de 24 horas. A mensagem em que a própria IA passou a conversa para a equipe não é respondida de novo. Você não precisa fazer nada; se tinha desligado a devolução automática por causa disso, já pode religá-la.
+
+- **A conversa aberta no Inbox volta a mostrar a última mensagem quando a IA passou o atendimento** Ao abrir no Inbox uma conversa que a IA passou para a equipe, às vezes ela aparecia rolada até o topo, na mensagem mais antiga carregada, em vez da última. Quem atende precisava descer a conversa inteira até chegar ao que o cliente acabou de dizer. Isso acontecia quando o cartão "Por que a IA passou para você" carregava antes das mensagens. Agora a conversa abre sempre no fim. É a mesma correção que o DeskcommCRM lançou na v1.79.0, trazida antes da próxima sincronização.
+
+- **"Cancelar" sozinho não bloqueia mais o contato, e a atendente sempre consegue responder** Quando o cliente mandava só a palavra "Cancelar" (por exemplo, no botão de cancelar horário de um lembrete de confirmação), o sistema entendia que ele não queria mais receber mensagens: bloqueava o contato, calava a IA e travava a resposta da atendente, que via "envio de mensagens desabilitado". Agora "Cancelar" sozinho é tratado como uma mensagem comum; continuam bloqueando os pedidos claros, como "parar", "sair", "stop", "cancelar inscrição" e "quero cancelar as mensagens". E, mesmo com o contato bloqueado, a atendente pode responder pelo CRM: o bloqueio impede apenas a IA, as automações, as campanhas e os modelos de mensagem, e a conversa mostra um aviso. Contatos que já foram bloqueados por "Cancelar" continuam bloqueados até um administrador desbloqueá-los na ficha do contato.
+
 ## [2.6.0] — 2026-10-22
 
 ### Adicionado
@@ -9387,7 +9407,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.6.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/berseba/berseba-crm/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/berseba/berseba-crm/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/berseba/berseba-crm/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/berseba/berseba-crm/compare/v2.3.1...v2.4.0
