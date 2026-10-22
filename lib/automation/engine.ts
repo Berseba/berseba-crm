@@ -34,6 +34,13 @@ import {
   GATILHOS_DO_TRIGGER_DE_LEAD,
 } from "@/lib/schemas/webhooks";
 import { logger } from "@/lib/logger";
+import {
+  isStaleBacklog,
+  MESSAGE_SENT_TRIGGER,
+  readSentMessage,
+  ruleAcceptsOrigin,
+  type SentMessage,
+} from "@/lib/automation/message-sent";
 
 export const AUTOMATION_CONSUMER_KEY = "automation-rules";
 
@@ -63,8 +70,18 @@ interface RuleRow {
   actions: Array<{ type: string; config?: Record<string, unknown> }>;
 }
 
-/** Hidrata o contexto avaliado pelas condições/ações a partir do entity do evento. */
-export async function buildContext(admin: SupabaseClient, row: EventRow): Promise<Record<string, unknown>> {
+/**
+ * Hidrata o contexto avaliado pelas condições/ações a partir do entity do evento.
+ *
+ * Berseba (#57): `sentMessage` is the read the engine already made for
+ * `message.sent`, passed in so the same row is not read twice. A caller
+ * without it (the Resend route) gets the same hydration, read here.
+ */
+export async function buildContext(
+  admin: SupabaseClient,
+  row: EventRow,
+  sentMessage?: SentMessage,
+): Promise<Record<string, unknown>> {
   const context: Record<string, unknown> = { event: row.payload };
   // Admin client bypassa RLS — todo lookup filtra organization_id do evento
   // (doutrina multi-tenant; um FK cross-org corrompido nunca vaza pro contexto).
@@ -127,6 +144,36 @@ export async function buildContext(admin: SupabaseClient, row: EventRow): Promis
           .eq("organization_id", org)
           .maybeSingle();
         if (contact) context.contact = contact;
+      }
+    }
+  } else if (row.entity_kind === "message" && row.event_type === MESSAGE_SENT_TRIGGER) {
+    // Berseba (#57): a message the TEAM sent. `event` becomes the one read from
+    // the ROW (text and origin on both emitters, see `message-sent.ts`), and the
+    // context gets the contact's most recent open lead, in ANY pipeline (a
+    // conversation has no pipeline; the editor label says so). That is the lead
+    // `add_tag` tags; `create_or_move_lead` moves it when it is in the target
+    // pipeline and otherwise resolves by contact (see that action).
+    const sent = sentMessage ?? (await readSentMessage(admin, row));
+    if (sent.ok) {
+      context.event = sent.event;
+      if (sent.contactId) {
+        const { data: contact } = await admin
+          .from("contacts")
+          .select("*")
+          .eq("id", sent.contactId)
+          .eq("organization_id", org)
+          .maybeSingle();
+        if (contact) context.contact = contact;
+        const { data: lead } = await admin
+          .from("crm_leads")
+          .select("*")
+          .eq("organization_id", org)
+          .eq("contact_id", sent.contactId)
+          .eq("status", "open")
+          .order("created_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
+        if (lead) context.lead = lead;
       }
     }
   } else if (row.entity_kind === "message" && row.entity_id) {
@@ -292,7 +339,21 @@ export async function runAutomationForEvent(
     return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "ok", detail: "no_rules" };
   }
 
-  const context = await buildContext(admin, row);
+  // Berseba (#57): `message.sent` only goes on with the message read from its
+  // row, and never for backlog. Echoes of our own sends, undelivered messages,
+  // group conversations and gone rows trigger no rule (`message-sent.ts`).
+  let sentMessage: SentMessage | undefined;
+  if (row.event_type === MESSAGE_SENT_TRIGGER) {
+    if (await isStaleBacklog(admin, row)) {
+      return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: "event_too_old" };
+    }
+    sentMessage = await readSentMessage(admin, row);
+    if (!sentMessage.ok) {
+      return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: sentMessage.reason };
+    }
+  }
+
+  const context = await buildContext(admin, row, sentMessage);
   // O pré-check acima só acha o contato pelo payload (`contact_id`/`conversation_id`).
   // O aniversário (`contact.birthday`) traz o contato em `entity_id`, e o evento de
   // negócio ou de compromisso traz o contato pelo lead/compromisso: o contexto
@@ -300,7 +361,16 @@ export async function runAutomationForEvent(
   if ((context.contact as { is_personal?: boolean } | undefined)?.is_personal === true) {
     return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "skipped", detail: "contato_pessoal" };
   }
-  const applicable = matched.filter((r) => evaluateConditions(r.conditions ?? [], context));
+  // Berseba (#57): an AI or automation message does not trigger `message.sent`,
+  // unless the rule has a condition on `event.sent_via` (then it decides).
+  const fromAcceptedOrigin =
+    row.event_type === MESSAGE_SENT_TRIGGER
+      ? matched.filter((r) => ruleAcceptsOrigin(r.conditions, context.event as Record<string, unknown>))
+      : matched;
+  if (!fromAcceptedOrigin.length) {
+    return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "ok", detail: "origin_not_team" };
+  }
+  const applicable = fromAcceptedOrigin.filter((r) => evaluateConditions(r.conditions ?? [], context));
   if (!applicable.length) {
     return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "ok", detail: "no_match" };
   }

@@ -102,6 +102,19 @@ const MESSAGE_FIELDS: CuratedField[] = [
   { value: "event.body_preview", label: "Texto da mensagem", op: "contains" },
   { value: "contact.tags", label: "Tags do contato", op: "contains", lista: true },
 ];
+/**
+ * Berseba (#57): a message the TEAM sent. The lead in the context is the
+ * contact's most recent open lead in ANY pipeline (a conversation has no
+ * pipeline), and the label says so. The origin is at hand for rules that want
+ * only the CRM (`user`) or only the phone (`external_device`); naming `ai` or
+ * `automation` with "é" is also what lets those in (a "não é" opens nothing).
+ */
+const MESSAGE_SENT_FIELDS: CuratedField[] = [
+  { value: "event.body_preview", label: "Texto da mensagem", op: "contains" },
+  { value: "event.sent_via", label: "Origem do envio (user = CRM, external_device = celular, ai = IA)", op: "eq" },
+  { value: "contact.tags", label: "Tags do contato", op: "contains", lista: true },
+  { value: "lead.tags", label: "Tags do negócio aberto mais recente do contato", op: "contains", lista: true },
+];
 const CONTACT_FIELDS: CuratedField[] = [
   { value: "contact.tags", label: "Tags do contato", op: "contains", lista: true },
   { value: "contact.name", label: "Nome do contato", op: "contains" },
@@ -139,6 +152,7 @@ const CURATED_FIELDS: Record<TriggerEvent, CuratedField[]> = {
   "lead.reopened": LEAD_FIELDS,
   "lead.assigned": LEAD_FIELDS,
   "message.received": MESSAGE_FIELDS,
+  "message.sent": MESSAGE_SENT_FIELDS,
   // O que a regra quer filtrar numa falha é o MOTIVO (só o 131047, só o
   // timeout) e de QUEM é o contato — `event.erro.codigo` é o mesmo valor que a
   // coluna `messages.error_code` grava, então quem compara com o webhook da
