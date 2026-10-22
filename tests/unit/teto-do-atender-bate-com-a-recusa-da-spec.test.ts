@@ -68,7 +68,9 @@ const CATALOGO_DA_TELA = TOOL_CATALOG.filter(
   // A spec roda numa instalação nova, sem módulo opcional instalado: a rota
   // tira do catálogo servido o que é de módulo desligado (`deModuloDesligado`),
   // e as capacidades de honorários (#1578) não entram na conta da tela.
-  (entrada) => !deModuloDesligado(entrada.name, []),
+  // Berseba: nor the avec tools, which the route serves only to the organizations in
+  // AVEC_API_ORG_IDS (lib/integrations/avec/config.ts) — none on a fresh install.
+  (entrada) => !deModuloDesligado(entrada.name, []) && !entrada.name.startsWith("avec_"),
 ).map((entrada) => ({
   ...entrada,
   marcavel: !IDS_DO_HARNESS.has(entrada.name),
