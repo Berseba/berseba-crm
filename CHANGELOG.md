@@ -8,6 +8,18 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.5.0] — 2026-10-22
+
+### Alterado
+
+- **A sugestão de resposta da IA ocupa menos espaço e pode ser recolhida; a ficha do contato abre no tablet** O quadro "Sugestão para revisar", que aparece acima do campo de mensagem, ficou com cerca de metade da altura: o feedback e os botões Aprovar e Rejeitar estão numa linha só. Um novo botão com uma seta recolhe o quadro para uma única linha, que mostra o estado e o começo do texto sugerido; clicar nessa linha abre de novo. O navegador lembra a escolha de cada atendente, então quem prefere ver o histórico da conversa não precisa recolher a cada atendimento. Se a sugestão falhar, o motivo continua aparecendo mesmo com o quadro recolhido.
+
+  No tablet e em notebooks com tela menor (de 768 a 1279 pixels de largura), a ficha do contato, onde ficam as tags, o funil e os dados do contato, não tinha como ser aberta: a coluna da direita só aparece em telas maiores e o botão "Ficha" só existia no celular. Agora o botão "Ficha" aparece no topo da conversa também nessas telas.
+
+### Corrigido
+
+- **A caixa de entrada não trava mais para carregar e contar as conversas** A lista de conversas e os contadores das abas (Fila, Automático, Todas) ficavam lentos e às vezes não carregavam: o banco conferia, conversa por conversa, quem podia ver cada uma, e essa conferência custava caro. Por isso uma conversa assumida ou fechada demorava a sair da Fila. Agora a regra de quem vê o quê é calculada uma vez por consulta — a mesma regra, sem mudar o que cada pessoa enxerga — e a contagem que levava cerca de 4 segundos leva cerca de 20 milissegundos. As mensagens de uma conversa também abrem mais rápido pelo mesmo motivo.
+
 ## [2.4.0] — 2026-10-20
 
 ### Adicionado
@@ -9363,7 +9375,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.4.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.5.0...HEAD
+[2.5.0]: https://github.com/berseba/berseba-crm/compare/v2.4.0...v2.5.0
 [2.4.0]: https://github.com/berseba/berseba-crm/compare/v2.3.1...v2.4.0
 [2.3.1]: https://github.com/berseba/berseba-crm/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/berseba/berseba-crm/compare/v2.2.0...v2.3.0
