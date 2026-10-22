@@ -84,6 +84,7 @@ import {
   type ClienteDaCascata,
   type ResultadoDaVarredura,
 } from "@/lib/lgpd/cascata";
+import { runUnmatchedClickRetention } from "@/lib/plataformas-de-anuncio/click-ref-retention";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -597,6 +598,10 @@ async function handle(req: NextRequest): Promise<Response> {
     return fail("forbidden", "Cron secret missing or invalid.", 403, { requestId });
   }
 
+  // Berseba: 90-day cleanup of ad clicks that never became a conversation.
+  // Never throws (failures are logged and audited inside), so it cannot stop the steps below.
+  const cliques = await runUnmatchedClickRetention(requestId);
+
   let resultado: ResultadoDaRetencao;
   let varredura: ResultadoDaVarredura = {
     examinados: 0,
@@ -746,6 +751,7 @@ async function handle(req: NextRequest): Promise<Response> {
   return ok(
     {
       ...resultado,
+      ...cliques,
       anonimizacoes_examinadas: varredura.examinados,
       anonimizacoes_completadas: varredura.completados.length,
       anonimizacoes_tem_resto: varredura.temResto,
