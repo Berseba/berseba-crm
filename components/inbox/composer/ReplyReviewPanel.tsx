@@ -17,12 +17,14 @@ const COLLAPSED_KEY = "berseba.reply_review.collapsed";
 const collapsedListeners = new Set<() => void>();
 let collapsedInMemory: boolean | null = null;
 function getCollapsedSnapshot(): boolean {
-  if (collapsedInMemory !== null) return collapsedInMemory;
-  try {
-    return window.localStorage.getItem(COLLAPSED_KEY) === "1";
-  } catch {
-    return false;
+  if (collapsedInMemory === null) {
+    try {
+      collapsedInMemory = window.localStorage.getItem(COLLAPSED_KEY) === "1";
+    } catch {
+      collapsedInMemory = false;
+    }
   }
+  return collapsedInMemory;
 }
 function getCollapsedServerSnapshot(): boolean {
   return false;
@@ -149,13 +151,16 @@ export function ReplyReviewPanel({
       className="mb-2 space-y-2 rounded-md border bg-muted/30 px-3 py-2"
       aria-label={t("Assistência do agente")}
     >
-      <div className="flex items-center gap-2">
-        <p className="shrink-0 text-sm font-medium">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <p className="text-sm font-medium">
           {t(draft ? (statuses[draft.status] ?? "Assistência do agente") : "Assistência do agente")}
         </p>
         {draft && collapsed && body ? (
+          // Mouse shortcut only: the caret below is the labelled control.
           <button
             type="button"
+            tabIndex={-1}
+            aria-hidden
             className="min-w-0 flex-1 truncate text-left text-xs text-muted-foreground hover:text-foreground"
             onClick={toggleCollapsed}
             title={t("Mostrar sugestão")}
@@ -165,7 +170,7 @@ export function ReplyReviewPanel({
         ) : (
           <span className="flex-1" />
         )}
-        {draft && (
+        {draft && (draft.status !== "failed" || body) && (
           <Button
             type="button"
             variant="ghost"
@@ -189,9 +194,10 @@ export function ReplyReviewPanel({
           {t(busy ? "Preparando…" : "Sugerir resposta")}
         </Button>
       </div>
-      {draft && !collapsed && (
+      {/* Collapsed hides the draft, never the reason a draft failed. */}
+      {draft && (!collapsed || draft.status === "failed") && (
         <>
-          {body && (
+          {body && !collapsed && (
             <Textarea
               aria-label={t("Resposta sugerida")}
               value={body}
@@ -201,7 +207,7 @@ export function ReplyReviewPanel({
               className="max-h-40 min-h-[56px] px-3 py-2"
             />
           )}
-          {draft.proposals.length > 0 && (
+          {draft.proposals.length > 0 && !collapsed && (
             <details className="text-xs">
               <summary>{t("Ações propostas: precisam de autorização separada")}</summary>
               <p>{t("Abra a ação correspondente no CRM ou na agenda para confirmar.")}</p>

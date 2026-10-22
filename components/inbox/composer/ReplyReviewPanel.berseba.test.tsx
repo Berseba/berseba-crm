@@ -80,4 +80,55 @@ describe("ReplyReviewPanel collapse (Berseba)", () => {
     );
     expect(window.localStorage.getItem(KEY)).toBe("0");
   });
+
+  it("keeps the failure reason visible while collapsed", async () => {
+    window.localStorage.setItem(KEY, "1");
+    get.mockResolvedValue({
+      data: {
+        drafts: [
+          {
+            id: "d2",
+            revision: "r1",
+            status: "failed",
+            original_body: null,
+            edited_body: null,
+            error_code: null,
+            proposals: [],
+          },
+        ],
+      },
+    });
+    renderPanel();
+    expect(
+      await screen.findByText("Confira a configuração do agente e tente gerar novamente."),
+    ).toBeInTheDocument();
+    // Nothing to collapse on a failed draft, so no caret.
+    expect(screen.queryByRole("button", { name: "Mostrar sugestão" })).not.toBeInTheDocument();
+  });
+
+  it("a failed send keeps its text collapsed but shows the reason", async () => {
+    window.localStorage.setItem(KEY, "1");
+    get.mockResolvedValue({
+      data: {
+        drafts: [
+          {
+            id: "d3",
+            revision: "r1",
+            status: "failed",
+            original_body: SUGGESTION,
+            edited_body: null,
+            error_code: null,
+            proposals: [],
+          },
+        ],
+      },
+    });
+    renderPanel();
+    expect(
+      await screen.findByText("Confira a configuração do agente e tente gerar novamente."),
+    ).toBeInTheDocument();
+    expect(screen.queryByLabelText("Resposta sugerida")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Mostrar sugestão" }));
+    expect(screen.getByLabelText("Resposta sugerida")).toBeDisabled();
+  });
 });
