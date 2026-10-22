@@ -25,6 +25,7 @@ import {
 } from "@/lib/escalacao/atendimento-manual";
 import { agenteAceitaComandoDeCelular, lerComandoDeControle } from "@/lib/escalacao/comando-de-canal";
 import { devolverAtendimentoAoAgente } from "@/lib/escalacao/retomada";
+import { ehMensagemAutomaticaDeOutroSistema } from "@/lib/escalacao/mensagem-automatica.berseba";
 import { getWahaClient } from "@/lib/waha/client";
 import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
 import { canonicalPhoneBR } from "@/lib/channels/phone-variants";
@@ -1224,7 +1225,8 @@ async function handleOutboundFromUserPhone(
           detalhe: devolucao.detalhe,
         });
       }
-    } else {
+    } else if (!(await ehMensagemAutomaticaDeOutroSistema(admin, session.organization_id, bodyOf(p)))) {
+      // Berseba: a reminder another system sends from this number is not a person.
       await pausarIaPorAtendimentoManual(admin, {
         organizationId: session.organization_id,
         conversationId,
