@@ -52,6 +52,15 @@ vi.mock("@/lib/env", () => ({
 }));
 const auditou = vi.fn();
 vi.mock("@/lib/audit", () => ({ audit: (...args: unknown[]) => auditou(...args) }));
+// Berseba: the handler also runs the ad click cleanup. This file measures the
+// other steps, and a fake database that knows nothing about those tables would
+// make the step audit a failure (its own cases: `click-ref-retention.berseba.test.ts`).
+vi.mock("@/lib/plataformas-de-anuncio/click-ref-retention", () => ({
+  runUnmatchedClickRetention: async () => ({
+    unmatched_clicks_deleted: { google_ads_click_refs: 0, meta_ads_click_refs: 0 },
+    unmatched_clicks_failures: 0,
+  }),
+}));
 
 /** O banco que o handler do cron enxerga nesta rodada. */
 let bancoDoCron: { cliente: ClienteDaCascata } | null = null;

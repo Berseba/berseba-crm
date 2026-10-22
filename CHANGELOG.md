@@ -8,6 +8,28 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.4.0] — 2026-10-20
+
+### Adicionado
+
+- **A mensagem do WhatsApp passa a ser a do botão em que a pessoa tocou** O endereço de captura da Meta agora abre o WhatsApp com a mensagem do botão em que a pessoa tocou, quando a página envia esse texto. Sem ele, vale o modelo de mensagem configurado, como antes. O código de origem continua no fim da mensagem, e o texto do botão nunca é gravado junto com a origem do clique. Você não precisa fazer nada.
+
+### Alterado
+
+- **Cliques de anúncio que nunca viraram conversa são apagados após 90 dias** Os cliques registrados pelos endereços de captura do Google Ads e da Meta que nunca viraram uma conversa no WhatsApp passam a ser apagados depois de 90 dias, na rotina diária de retenção de dados. Os cliques que viraram contato continuam guardados, com a origem do contato. Os links rastreáveis não são afetados: seus cliques e suas métricas continuam como estão. Você não precisa fazer nada.
+
+### Corrigido
+
+- **Quem clica muitas vezes no endereço de captura ainda chega ao WhatsApp** Os endereços de captura do Google Ads e da Meta mostravam uma tela vazia de erro quando muitas pessoas clicavam a partir da mesma conexão em pouco tempo (comum em internet de celular, em que muita gente sai pelo mesmo endereço). Agora quem passa de 30 acessos por minuto para a mesma organização, a partir do mesmo endereço, ainda chega ao WhatsApp do mesmo jeito, só sem o código de origem na mensagem. A tela de erro fica só para um volume muito alto vindo do mesmo endereço (mais de 120 acessos por minuto, somando todas as organizações), e ela é dada antes de qualquer consulta ao banco de dados. Você não precisa fazer nada.
+
+## [2.3.1] — 2026-10-20
+
+### Corrigido
+
+- **O freio de urgência médica não falha mais em silêncio** Quando um paciente relatava uma emergência médica e o banco de dados falhava por um instante, o freio do nicho Saúde se desligava sem avisar ninguém: a IA respondia como numa conversa comum, sem a orientação de emergência e sem chamar uma pessoa. No modo assistido, se o alerta crítico não conseguisse ser aberto, o sistema registrava como se tivesse aberto. Agora as duas falhas fazem o atendimento ser tentado de novo em seguida e, se continuarem, viram um aviso para a equipe na Central.
+
+- **O endereço de captura da Meta passa a abrir o WhatsApp para quem clica** O endereço de captura de UTM da Meta (Configurações › Conversões) pedia login a quem clicava no botão da página: o visitante recebia um erro de acesso em vez de ir para o WhatsApp. Agora o endereço abre o WhatsApp para quem clica, como o endereço de captura do Google Ads já fazia. A origem do contato só é registrada quando a página repassa os parâmetros da campanha (UTM) para este endereço, ou quando o anúncio aponta direto para ele. Do endereço da página, o sistema guarda só os parâmetros de campanha; o resto (nome, telefone ou e-mail que a página tenha repassado) não é mais gravado. Você não precisa fazer nada.
+
 ## [2.3.0] — 2026-10-08
 
 ### Alterado
@@ -9341,7 +9363,9 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.3.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/berseba/berseba-crm/compare/v2.3.1...v2.4.0
+[2.3.1]: https://github.com/berseba/berseba-crm/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/berseba/berseba-crm/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/berseba/berseba-crm/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/berseba/berseba-crm/compare/v2.0.0...v2.1.0
