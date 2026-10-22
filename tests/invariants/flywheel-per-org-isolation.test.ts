@@ -35,6 +35,8 @@ afterAll(async () => {
 
 type ModelCall = { tenantId: string; jobId: string; purpose: string; prompt: string };
 const calls: ModelCall[] = [];
+/** job_id → raw judge text, to simulate a prose-wrapped answer on one turn. */
+const judgeTextByJob = new Map<string, string>();
 
 vi.mock("../../lib/agent-engine/edge/llm/run-model-call", () => ({
   runModelCall: vi.fn(
@@ -55,7 +57,7 @@ vi.mock("../../lib/agent-engine/edge/llm/run-model-call", () => ({
         result: {
           text:
             input.purpose === "flywheel_judge"
-              ? '{"verdict":"no","missing_facts":["store type"]}'
+              ? (judgeTextByJob.get(input.jobId) ?? '{"verdict":"no","missing_facts":["store type"]}')
               : '{"content":"Keep facts from other topics when consolidating.","scope":"org"}',
         },
       };
@@ -126,6 +128,7 @@ async function rowsByOrg(table: "flywheel_judge_verdicts" | "flywheel_distiller_
 
 beforeEach(() => {
   calls.length = 0;
+  judgeTextByJob.clear();
 });
 
 describe("flywheel collector", () => {
@@ -235,5 +238,66 @@ describe("flywheel run", () => {
     await runFlywheelOnce(pool as never, {} as never, { limit: 10, log: LOG });
     expect(calls.filter(ours)).toEqual([]);
     expect(await rowsByOrg("flywheel_judge_verdicts", orgA)).toBe(12);
+  });
+
+  it("a prose answer is recorded once as unknown and that turn is never paid for again", async () => {
+    const { runFlywheelOnce, collectPendingTurns } = await import("../../lib/agent-engine/flywheel/live");
+    const orgId = await createOrg("prose");
+    const proseTurn = await createTurn(orgId, await createContact(orgId, "prose-fact"), 5);
+    const nextTurn = await createTurn(orgId, await createContact(orgId, "prose-fact"), 10);
+    judgeTextByJob.set(proseTurn, "Sure! Looking at this conversation, the agent handled it well.");
+
+    const result = await runFlywheelOnce(pool as never, {} as never, { limit: 10, log: LOG });
+
+    const { rows } = await pool.query<{ trace_id: string; verdict: string; error: string | null }>(
+      `select trace_id, verdict, provenance->>'error' as error
+       from flywheel_judge_verdicts where organization_id = $1 order by trace_id`,
+      [orgId],
+    );
+    expect(rows).toEqual(
+      expect.arrayContaining([
+        { trace_id: proseTurn, verdict: "unknown", error: "unparsable" },
+        { trace_id: nextTurn, verdict: "no", error: null },
+      ]),
+    );
+    expect(rows).toHaveLength(2);
+    expect(result.failedOrgs).toBe(0);
+    expect((await collectPendingTurns(pool as never, 10)).filter((t) => t.organization_id === orgId)).toEqual([]);
+
+    calls.length = 0;
+    await runFlywheelOnce(pool as never, {} as never, { limit: 10, log: LOG });
+    expect(calls.filter((c) => c.tenantId === orgId)).toEqual([]);
+  });
+
+  it("a second run while one holds the lock collects and pays nothing", async () => {
+    const { runFlywheelOnce, collectPendingTurns } = await import("../../lib/agent-engine/flywheel/live");
+    const orgId = await createOrg("locked");
+    const turn = await createTurn(orgId, await createContact(orgId, "locked-fact"), 5);
+
+    // Another process (the worker, or a manual `pnpm flywheel:judge`) is mid-run.
+    const otherRun = new pg.Client({ connectionString: `postgresql://postgres:postgres@127.0.0.1:${PORT}/postgres` });
+    await otherRun.connect();
+    try {
+      const { rows } = await otherRun.query<{ locked: boolean }>(
+        "select pg_try_advisory_lock(hashtextextended('flywheel:live_run', 0)) as locked",
+      );
+      expect(rows[0]!.locked).toBe(true);
+
+      const result = await runFlywheelOnce(pool as never, {} as never, { limit: 10, log: LOG });
+
+      expect(result).toMatchObject({ skipped: true, judged: 0, proposals: 0 });
+      expect(calls).toEqual([]);
+    } finally {
+      await otherRun.end();
+    }
+
+    // The lock dies with the other session, and the turn is still there to judge.
+    expect((await collectPendingTurns(pool as never, 10)).map((t) => t.job_id)).toContain(turn);
+    const result = await runFlywheelOnce(pool as never, {} as never, { limit: 10, log: LOG });
+    expect(result.skipped).toBe(false);
+    expect(calls.filter((c) => c.jobId === turn).map((c) => c.purpose)).toEqual([
+      "flywheel_judge",
+      "flywheel_distiller",
+    ]);
   });
 });

@@ -64,7 +64,8 @@ export async function collectPendingTurns(pool: pg.Pool, limitPerOrg: number): P
          and j.created_at > now() - make_interval(days => $4)
          and exists (
            select 1 from llm_calls c
-           where c.organization_id = j.organization_id and c.job_id = j.id and c.purpose = 'agent_turn'
+           where c.organization_id = j.organization_id and c.purpose = 'agent_turn'
+             and c.created_at > now() - make_interval(days => $4) and c.job_id = j.id
          )
        order by j.organization_id, j.contact_id, j.created_at desc
      ), pending as (
@@ -152,20 +153,53 @@ function distillerPrompt(missingFacts: string[]): string {
   ].join('\n');
 }
 
-function parseJson<T>(text: string): T {
-  const valor = extrairJsonDoTexto(text);
-  if (valor === null) throw new Error('saída do modelo sem JSON');
-  return valor as T;
+type JudgeOutput = {
+  verdict: 'yes' | 'no' | 'unknown';
+  missingFacts: string[];
+  /** Set when the call succeeded but its answer was unusable. */
+  error?: 'unparsable' | 'invalid_verdict';
+};
+
+/** An unusable answer is a TURN-level outcome, never a throw: it is recorded as
+ *  `unknown` so the turn is not picked again. Throwing used to stop the org's
+ *  round with no verdict row, and the next run paid the judge for the same turn
+ *  again, forever, while every turn ranked after it stayed unjudged. */
+function readJudgeOutput(text: string): JudgeOutput {
+  const value = extrairJsonDoTexto(text);
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return { verdict: 'unknown', missingFacts: [], error: 'unparsable' };
+  }
+  const { verdict, missing_facts: missingFacts } = value as { verdict?: unknown; missing_facts?: unknown };
+  const facts = Array.isArray(missingFacts) ? missingFacts.filter((f): f is string => typeof f === 'string') : [];
+  if (verdict === 'yes' || verdict === 'no' || verdict === 'unknown') return { verdict, missingFacts: facts };
+  return { verdict: 'unknown', missingFacts: [], error: 'invalid_verdict' };
 }
+
+/** Null when the distiller's answer has no usable `content`. */
+function readDistillerOutput(text: string): { content: string; scope?: string } | null {
+  const value = extrairJsonDoTexto(text);
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const { content, scope } = value as { content?: unknown; scope?: unknown };
+  if (typeof content !== 'string' || content.trim() === '') return null;
+  return { content, scope: typeof scope === 'string' ? scope : undefined };
+}
+
+// One run at a time across the installation: the worker loop and a manual
+// `pnpm flywheel:judge` collected the same pending turns and both paid the judge.
+// The verdict's `on conflict do nothing` protected the row, not the spend.
+const RUN_LOCK_KEY = 'flywheel:live_run';
 
 
 export interface FlywheelRunResult {
   runId: string;
   judged: number;
   proposals: number;
-  /** Orgs whose round stopped on an error (budget, model, provider, bad output).
-   *  The other orgs still run; the failed org's turns stay pending for next run. */
+  /** Orgs whose round stopped on a model-call error (budget, model, provider,
+   *  credential). The other orgs still run; the failed org's turns stay pending.
+   *  An unusable ANSWER is not a failure: it is recorded as `unknown`. */
   failedOrgs: number;
+  /** True when another run held the lock: nothing was collected or paid. */
+  skipped: boolean;
   /** Task 8.2 — outcomes de follow-up (converted/replied/exhausted/opted_out/
    *  handoff/in_flight) por pointer+version, por org tocada nesta rodada
    *  (via os turnos coletados). Fecha o loop: o flywheel passa a enxergar
@@ -180,6 +214,34 @@ export async function runFlywheelOnce(
   opts: { limit: number; log: Logger },
 ): Promise<FlywheelRunResult> {
   const runId = crypto.randomUUID();
+  const lockClient = await pool.connect();
+  let locked = false;
+  try {
+    const { rows } = await lockClient.query<{ locked: boolean }>(
+      'select pg_try_advisory_lock(hashtextextended($1, 0)) as locked',
+      [RUN_LOCK_KEY],
+    );
+    locked = rows[0]?.locked === true;
+    if (!locked) {
+      opts.log.info('flywheel: another run holds the lock; skipping', { run_id: runId });
+      return { runId, judged: 0, proposals: 0, failedOrgs: 0, skipped: true, followupOutcomes: [] };
+    }
+    return await runLocked(pool, llmCfg, opts, runId);
+  } finally {
+    try {
+      if (locked) await lockClient.query('select pg_advisory_unlock(hashtextextended($1, 0))', [RUN_LOCK_KEY]);
+    } finally {
+      lockClient.release();
+    }
+  }
+}
+
+async function runLocked(
+  pool: pg.Pool,
+  llmCfg: LlmEdgeConfig,
+  opts: { limit: number; log: Logger },
+  runId: string,
+): Promise<FlywheelRunResult> {
   const { limit, log } = opts;
   const turns = await collectPendingTurns(pool, limit);
   log.info('flywheel: turnos reais coletados', { run_id: runId, turns: turns.length });
@@ -196,7 +258,9 @@ export async function runFlywheelOnce(
 
   // One failure boundary per org: an org out of budget, without a model or with
   // a provider error used to abort the whole run, so every org after it in the
-  // batch was never judged either.
+  // batch was never judged either. Only a THROWN model call reaches this catch:
+  // it is not safe to pin on one turn (a 400 for an invalid model id is an org
+  // problem), so the org stops and its turns are retried next run.
   for (const [orgId, orgTurns] of turnsByOrg) {
     try {
       for (const turn of orgTurns) {
@@ -229,7 +293,7 @@ export async function runFlywheelOnce(
     log.info('flywheel: outcomes de follow-up por fluxo', { run_id: runId, organization_id: orgId, stats });
   }
 
-  return { runId, judged, proposals, failedOrgs, followupOutcomes };
+  return { runId, judged, proposals, failedOrgs, skipped: false, followupOutcomes };
 }
 
 /** Judge one turn and, on "no", distill one proposal. Every write and every LLM
@@ -257,8 +321,14 @@ async function judgeTurn(
     },
     { log },
   );
-  const verdict = parseJson<{ verdict: string; missing_facts?: string[] }>(judgedCall.result.text);
-  const verdictValue = ['yes', 'no', 'unknown'].includes(verdict.verdict) ? verdict.verdict : 'unknown';
+  const judgeOutput = readJudgeOutput(judgedCall.result.text);
+  const verdictValue = judgeOutput.verdict;
+  if (judgeOutput.error) {
+    log.warn('flywheel: unusable judge answer recorded as unknown', {
+      job_id: turn.job_id,
+      error: judgeOutput.error,
+    });
+  }
 
   const { rowCount } = await pool.query(
     `insert into flywheel_judge_verdicts
@@ -274,7 +344,12 @@ async function judgeTurn(
       optionOrder,
       judgedCall.provider,
       judgedCall.model,
-      JSON.stringify({ source: 'live_turn', job_id: turn.job_id, contact_id: turn.contact_id }),
+      JSON.stringify({
+        source: 'live_turn',
+        job_id: turn.job_id,
+        contact_id: turn.contact_id,
+        ...(judgeOutput.error ? { error: judgeOutput.error } : {}),
+      }),
       runId,
     ],
   );
@@ -290,11 +365,17 @@ async function judgeTurn(
         leadId: turn.contact_id,
         jobId: turn.job_id,
         purpose: 'flywheel_distiller',
-        messages: [{ role: 'user', content: distillerPrompt(verdict.missing_facts ?? []) }],
+        messages: [{ role: 'user', content: distillerPrompt(judgeOutput.missingFacts) }],
       },
       { log },
     );
-    const proposal = parseJson<{ content: string; scope?: string }>(distilled.result.text);
+    const proposal = readDistillerOutput(distilled.result.text);
+    if (proposal === null) {
+      // The verdict is already saved; losing this one proposal must not stop the
+      // org's round.
+      log.warn('flywheel: unusable distiller answer; no proposal for this turn', { job_id: turn.job_id });
+      return { judged: inserted, proposal: false };
+    }
     const isOrg = proposal.scope?.toLowerCase().trim() === 'org';
     await pool.query(
       `insert into flywheel_distiller_proposals
