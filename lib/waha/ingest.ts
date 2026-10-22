@@ -1195,7 +1195,8 @@ async function handleOutboundFromUserPhone(
   //   mexer no automa. -> ESTRITO   (na dúvida NÃO age; calar/ligar a IA por
   //                                  engano é pior que não agir)
   // Quem reaproveitar esta condição para pular o INSERT reabre o #108.
-  const ehEco = await ehEcoDeEnvioNosso(admin, session.organization_id, conversationId, p);
+  // Berseba (#57): the same query already ran before the insert; reuse it.
+  const ehEco = ecoAoNascer;
   let comandoAplicado: typeof comando = null;
   if (!ehEco) {
     let revogar = true;
