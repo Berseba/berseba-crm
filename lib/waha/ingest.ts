@@ -25,6 +25,7 @@ import {
 } from "@/lib/escalacao/atendimento-manual";
 import { agenteAceitaComandoDeCelular, lerComandoDeControle } from "@/lib/escalacao/comando-de-canal";
 import { devolverAtendimentoAoAgente } from "@/lib/escalacao/retomada";
+import { ehMensagemAutomaticaDeOutroSistema } from "@/lib/escalacao/mensagem-automatica.berseba";
 import { getWahaClient } from "@/lib/waha/client";
 import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
 import { canonicalPhoneBR } from "@/lib/channels/phone-variants";
@@ -1123,6 +1124,13 @@ async function handleOutboundFromUserPhone(
   // quem decide se vale é o interruptor do agente, lá embaixo.
   const comando = lerComandoDeControle(bodyOf(p));
 
+  // Berseba (#57, BERSEBA.md): the echo of our own send is born FLAGGED, so the
+  // `message.sent` automation trigger never reads it as a phone reply. Decided
+  // before the insert because the trigger emits the event on INSERT and the
+  // drain runs every couple of seconds. It only tags the row: the insert itself
+  // stays tolerant (#108), and the AI-pause decision below keeps its own check.
+  const ecoAoNascer = await ehEcoDeEnvioNosso(admin, session.organization_id, conversationId, p);
+
   const now = new Date().toISOString();
   const { data: insertedOutbound, error: insertErr } = await admin
     .from("messages")
@@ -1141,7 +1149,7 @@ async function handleOutboundFromUserPhone(
       media_mime: mediaMimeOf(p),
       sent_via: "external_device",
       sent_at: dataDoTimestamp(p.timestamp, now),
-      metadata: { raw_type: p.type, fromMe: true },
+      metadata: { raw_type: p.type, fromMe: true, ...(ecoAoNascer ? { own_send_echo: true } : {}) },
     })
     .select("id")
     .maybeSingle();
@@ -1224,7 +1232,8 @@ async function handleOutboundFromUserPhone(
           detalhe: devolucao.detalhe,
         });
       }
-    } else {
+    } else if (!(await ehMensagemAutomaticaDeOutroSistema(admin, session.organization_id, bodyOf(p)))) {
+      // Berseba: a reminder another system sends from this number is not a person.
       await pausarIaPorAtendimentoManual(admin, {
         organizationId: session.organization_id,
         conversationId,

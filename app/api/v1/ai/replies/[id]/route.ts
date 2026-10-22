@@ -26,7 +26,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return fail("validation_failed", "Campos inválidos.", 422, { requestId });
   const db = await createClient(),
     p = parsed.data;
-  // Berseba (9001): a draft with a product goes out as one photo whose caption is
+  // Berseba (9004): a draft with a product goes out as one photo whose caption is
   // this body, and WhatsApp caps a caption. Refused here, before approving, so the
   // attendant shortens it instead of watching the send fail. The worker checks again.
   if (p.action === "approve" && p.body !== undefined && !captionFits(p.body)) {

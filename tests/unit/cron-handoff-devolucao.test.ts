@@ -119,6 +119,11 @@ vi.mock("@/lib/logger", () => ({
 vi.mock("@/lib/escalacao/retomada", () => ({
   devolverAtendimentoAoAgente: (...a: unknown[]) => devolver(...a),
 }));
+// Berseba: the "client waiting" guard reads `messages`, which this fake does not
+// model; it has its own test (`devolucao-por-pendencia.berseba.test.ts`).
+vi.mock("@/lib/escalacao/devolucao-por-pendencia.berseba", () => ({
+  filtrarClienteAguardando: async (_admin: unknown, vencidas: unknown[]) => vencidas,
+}));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
     from: (tabela: keyof Banco) => {

@@ -1,6 +1,6 @@
 -- manifest: Assisted-mode drafts carry the catalog product the agent picked (ai_reply_drafts.product_code), and an approved reply may be recorded as an image whose caption is the approved text
 -- ============================================================================
--- 9001 — An Assisted-mode draft can carry a product photo (Berseba).
+-- 9004 — An Assisted-mode draft can carry a product photo (Berseba).
 --
 -- In autonomous mode `send_message({ body, produto_codigo })` sends the product's
 -- catalog photo with the text as its caption. In Assisted mode the draft is
@@ -29,7 +29,7 @@
 alter table public.ai_reply_drafts add column if not exists product_code text;
 
 comment on column public.ai_reply_drafts.product_code is
-  'catalog_products.codigo the agent attached in Assisted mode (migration 9001). The approved reply sends that product''s cover photo with the approved body as its caption. Server-written only.';
+  'catalog_products.codigo the agent attached in Assisted mode (migration 9004). The approved reply sends that product''s cover photo with the approved body as its caption. Server-written only.';
 
 create or replace function public.fn_reply_record_receipt(p_org uuid,p_job uuid,p_worker text,p_acquired_at timestamptz,p_message uuid,p_external text,p_echo_ids text[] default '{}')
 returns jsonb language plpgsql security definer set search_path=public as $$
@@ -47,7 +47,7 @@ begin
  perform 1 from public.job_queue where organization_id=p_org and id=p_job for update;
  perform 1 from public.ai_reply_drafts where organization_id=p_org and id=d.id for update;
  if public.fn_reply_receipt_policy(p_org,p_job,p_worker,p_acquired_at)->>'current'<>'true' then return null;end if;
- -- 9001: a draft with a product goes out as one image whose caption is the approved body.
+ -- 9004: a draft with a product goes out as one image whose caption is the approved body.
  select * into m from public.messages where organization_id=p_org and id=p_message and conversation_id=d.conversation_id and contact_id=d.contact_id and channel_session_id=d.channel_session_id and direction='outbound' and (type='text' or (type='image' and d.product_code is not null)) and body=d.approved_body and exists(select 1 from public.send_ledger l where l.organization_id=p_org and l.job_id=p_job and l.seq=1 and l.id::text=messages.metadata->>'idempotency_key') for update;
  if not found then return null;end if;
  delete from public.messages where organization_id=p_org and conversation_id=d.conversation_id and sent_via='external_device' and external_id=any(p_echo_ids) and id<>p_message;

@@ -37,15 +37,52 @@ interface TraceMaterial {
   rollingSummary: string;
 }
 
-async function collectRecentTurns(pool: pg.Pool, limit: number): Promise<TurnRow[]> {
+// The judge reads the contact's CURRENT conversation (buildMaterial), not the
+// state at turn time, so a stale turn says nothing about that turn. The window
+// also keeps the first run after an upgrade from backfilling the whole history.
+export const LOOKBACK_DAYS = 7;
+
+/**
+ * Turns still waiting for a verdict, at most `limitPerOrg` per organization.
+ *
+ * - Per org: a global "10 most recent" let one busy org take every slot, and the
+ *   other orgs were never judged.
+ * - Latest turn per contact: the material is per contact, so two turns of the
+ *   same contact in one run were the same judge call twice. Once the latest turn
+ *   has a verdict, the contact is skipped until it has a newer turn.
+ * - Skips judged turns BEFORE the LLM call. The `on conflict do nothing` on the
+ *   insert only deduplicated the row, after the judge call was already paid, so
+ *   a quiet installation re-judged the same turns on every run.
+ */
+export async function collectPendingTurns(pool: pg.Pool, limitPerOrg: number): Promise<TurnRow[]> {
   const { rows } = await pool.query<TurnRow>(
-    `select j.id as job_id, j.organization_id, j.contact_id
-     from job_queue j
-     where j.kind = 'inbound_turn' and j.status = 'done' and j.contact_id is not null
-       and exists (select 1 from llm_calls c where c.job_id = j.id and c.purpose = 'agent_turn')
-     order by j.created_at desc
-     limit $1`,
-    [limit],
+    `with latest_per_contact as (
+       select distinct on (j.organization_id, j.contact_id)
+              j.id, j.organization_id, j.contact_id, j.created_at
+       from job_queue j
+       where j.kind = 'inbound_turn' and j.status = 'done' and j.contact_id is not null
+         and j.created_at > now() - make_interval(days => $4)
+         and exists (
+           select 1 from llm_calls c
+           where c.organization_id = j.organization_id and c.purpose = 'agent_turn'
+             and c.created_at > now() - make_interval(days => $4) and c.job_id = j.id
+         )
+       order by j.organization_id, j.contact_id, j.created_at desc
+     ), pending as (
+       select l.id, l.organization_id, l.contact_id,
+              row_number() over (partition by l.organization_id order by l.created_at desc) as rank_in_org
+       from latest_per_contact l
+       where not exists (
+         select 1 from flywheel_judge_verdicts v
+         where v.organization_id = l.organization_id
+           and v.dataset = $1 and v.trace_id = l.id::text and v.dimension = $2
+       )
+     )
+     select id as job_id, organization_id, contact_id
+     from pending
+     where rank_in_org <= $3
+     order by organization_id, rank_in_org`,
+    [DATASET, DIMENSION, limitPerOrg, LOOKBACK_DAYS],
   );
   return rows;
 }
@@ -116,17 +153,53 @@ function distillerPrompt(missingFacts: string[]): string {
   ].join('\n');
 }
 
-function parseJson<T>(text: string): T {
-  const valor = extrairJsonDoTexto(text);
-  if (valor === null) throw new Error('saída do modelo sem JSON');
-  return valor as T;
+type JudgeOutput = {
+  verdict: 'yes' | 'no' | 'unknown';
+  missingFacts: string[];
+  /** Set when the call succeeded but its answer was unusable. */
+  error?: 'unparsable' | 'invalid_verdict';
+};
+
+/** An unusable answer is a TURN-level outcome, never a throw: it is recorded as
+ *  `unknown` so the turn is not picked again. Throwing used to stop the org's
+ *  round with no verdict row, and the next run paid the judge for the same turn
+ *  again, forever, while every turn ranked after it stayed unjudged. */
+function readJudgeOutput(text: string): JudgeOutput {
+  const value = extrairJsonDoTexto(text);
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return { verdict: 'unknown', missingFacts: [], error: 'unparsable' };
+  }
+  const { verdict, missing_facts: missingFacts } = value as { verdict?: unknown; missing_facts?: unknown };
+  const facts = Array.isArray(missingFacts) ? missingFacts.filter((f): f is string => typeof f === 'string') : [];
+  if (verdict === 'yes' || verdict === 'no' || verdict === 'unknown') return { verdict, missingFacts: facts };
+  return { verdict: 'unknown', missingFacts: [], error: 'invalid_verdict' };
 }
+
+/** Null when the distiller's answer has no usable `content`. */
+function readDistillerOutput(text: string): { content: string; scope?: string } | null {
+  const value = extrairJsonDoTexto(text);
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
+  const { content, scope } = value as { content?: unknown; scope?: unknown };
+  if (typeof content !== 'string' || content.trim() === '') return null;
+  return { content, scope: typeof scope === 'string' ? scope : undefined };
+}
+
+// One run at a time across the installation: the worker loop and a manual
+// `pnpm flywheel:judge` collected the same pending turns and both paid the judge.
+// The verdict's `on conflict do nothing` protected the row, not the spend.
+const RUN_LOCK_KEY = 'flywheel:live_run';
 
 
 export interface FlywheelRunResult {
   runId: string;
   judged: number;
   proposals: number;
+  /** Orgs whose round stopped on a model-call error (budget, model, provider,
+   *  credential). The other orgs still run; the failed org's turns stay pending.
+   *  An unusable ANSWER is not a failure: it is recorded as `unknown`. */
+  failedOrgs: number;
+  /** True when another run held the lock: nothing was collected or paid. */
+  skipped: boolean;
   /** Task 8.2 — outcomes de follow-up (converted/replied/exhausted/opted_out/
    *  handoff/in_flight) por pointer+version, por org tocada nesta rodada
    *  (via os turnos coletados). Fecha o loop: o flywheel passa a enxergar
@@ -137,89 +210,74 @@ export interface FlywheelRunResult {
 export async function runFlywheelOnce(
   pool: pg.Pool,
   llmCfg: LlmEdgeConfig,
+  /** `limit` is PER ORGANIZATION (see collectPendingTurns). */
   opts: { limit: number; log: Logger },
 ): Promise<FlywheelRunResult> {
   const runId = crypto.randomUUID();
+  const lockClient = await pool.connect();
+  let locked = false;
+  try {
+    const { rows } = await lockClient.query<{ locked: boolean }>(
+      'select pg_try_advisory_lock(hashtextextended($1, 0)) as locked',
+      [RUN_LOCK_KEY],
+    );
+    locked = rows[0]?.locked === true;
+    if (!locked) {
+      opts.log.info('flywheel: another run holds the lock; skipping', { run_id: runId });
+      return { runId, judged: 0, proposals: 0, failedOrgs: 0, skipped: true, followupOutcomes: [] };
+    }
+    return await runLocked(pool, llmCfg, opts, runId);
+  } finally {
+    try {
+      if (locked) await lockClient.query('select pg_advisory_unlock(hashtextextended($1, 0))', [RUN_LOCK_KEY]);
+    } finally {
+      lockClient.release();
+    }
+  }
+}
+
+async function runLocked(
+  pool: pg.Pool,
+  llmCfg: LlmEdgeConfig,
+  opts: { limit: number; log: Logger },
+  runId: string,
+): Promise<FlywheelRunResult> {
   const { limit, log } = opts;
-  const turns = await collectRecentTurns(pool, limit);
+  const turns = await collectPendingTurns(pool, limit);
   log.info('flywheel: turnos reais coletados', { run_id: runId, turns: turns.length });
   let judged = 0;
   let proposals = 0;
+  let failedOrgs = 0;
 
+  const turnsByOrg = new Map<string, TurnRow[]>();
   for (const turn of turns) {
-    const material = await buildMaterial(pool, turn);
-    const optionOrder = parseInt(turn.job_id.slice(0, 8), 16) % 2 === 0 ? 'yes_first' : 'no_first';
+    const orgTurns = turnsByOrg.get(turn.organization_id) ?? [];
+    orgTurns.push(turn);
+    turnsByOrg.set(turn.organization_id, orgTurns);
+  }
 
-    const judgedCall = await runModelCall(
-      pool,
-      llmCfg,
-      {
-        tenantId: turn.organization_id,
-        leadId: turn.contact_id,
-        jobId: turn.job_id,
-        purpose: 'flywheel_judge',
-        messages: [{ role: 'user', content: judgePrompt(material, optionOrder) }],
-      },
-      { log },
-    );
-    const verdict = parseJson<{ verdict: string; missing_facts?: string[] }>(judgedCall.result.text);
-    const verdictValue = ['yes', 'no', 'unknown'].includes(verdict.verdict) ? verdict.verdict : 'unknown';
-
-    const { rowCount } = await pool.query(
-      `insert into flywheel_judge_verdicts
-         (organization_id, dataset, trace_id, dimension, verdict, option_order, judge_family, model, provenance, run_id)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
-       on conflict (dataset, trace_id, dimension) do nothing`,
-      [
-        turn.organization_id,
-        DATASET,
-        turn.job_id,
-        DIMENSION,
-        verdictValue,
-        optionOrder,
-        judgedCall.provider,
-        judgedCall.model,
-        JSON.stringify({ source: 'live_turn', job_id: turn.job_id, contact_id: turn.contact_id }),
-        runId,
-      ],
-    );
-    const inserted = (rowCount ?? 0) > 0;
-    if (inserted) judged += 1;
-    log.info('flywheel: veredito gravado', { job_id: turn.job_id, verdict: verdictValue, inserted });
-
-    if (verdictValue === 'no' && inserted) {
-      const distilled = await runModelCall(
-        pool,
-        llmCfg,
-        {
-          tenantId: turn.organization_id,
-          leadId: turn.contact_id,
-          jobId: turn.job_id,
-          purpose: 'flywheel_distiller',
-          messages: [{ role: 'user', content: distillerPrompt(verdict.missing_facts ?? []) }],
-        },
-        { log },
-      );
-      const proposal = parseJson<{ content: string; scope?: string }>(distilled.result.text);
-      const isOrg = proposal.scope?.toLowerCase().trim() === 'org';
-      await pool.query(
-        `insert into flywheel_distiller_proposals
-           (organization_id, run_id, dataset, type, target, content, evidence)
-         values ($1,$2,$3,$4,$5,$6,$7)`,
-        [
-          turn.organization_id,
-          runId,
-          DATASET,
-          isOrg ? 'org_memory_entry' : 'playbook_bullet',
-          isOrg ? 'org' : 'tenant',
-          proposal.content,
-          JSON.stringify({ trace_ids: [turn.job_id], dimension: DIMENSION, verdict_run_id: runId }),
-        ],
-      );
-      proposals += 1;
-      log.info('flywheel: proposta do distiller gravada (gate humano pendente)', { job_id: turn.job_id });
+  // One failure boundary per org: an org out of budget, without a model or with
+  // a provider error used to abort the whole run, so every org after it in the
+  // batch was never judged either. Only a THROWN model call reaches this catch:
+  // it is not safe to pin on one turn (a 400 for an invalid model id is an org
+  // problem), so the org stops and its turns are retried next run.
+  for (const [orgId, orgTurns] of turnsByOrg) {
+    try {
+      for (const turn of orgTurns) {
+        const outcome = await judgeTurn(pool, llmCfg, turn, runId, log);
+        if (outcome.judged) judged += 1;
+        if (outcome.proposal) proposals += 1;
+      }
+    } catch (err) {
+      failedOrgs += 1;
+      log.error('flywheel: org round failed; other orgs continue', {
+        run_id: runId,
+        organization_id: orgId,
+        error: (err instanceof Error ? err.message : String(err)).slice(0, 200),
+      });
     }
   }
+
   // Task 8.2 — o sinal (followup_enrollments.outcome) já existe (Ondas 4/5);
   // aqui só agregamos por org tocada nesta rodada (via os turnos coletados
   // acima) e logamos, pra a rodada do flywheel surfacear "flow X converte a
@@ -227,16 +285,116 @@ export async function runFlywheelOnce(
   // óbvio existe pra artefatos de rodada do flywheel (ver flywheel_judge_verdicts/
   // flywheel_distiller_proposals no baseline) — log + retorno no resultado é
   // suficiente por instrução do brief.
-  const orgIds = [...new Set(turns.map((t) => t.organization_id))];
   const followupOutcomes: FlywheelRunResult['followupOutcomes'] = [];
-  for (const orgId of orgIds) {
+  for (const orgId of turnsByOrg.keys()) {
     const stats = await aggregateFollowupOutcomes(pool, orgId);
     if (stats.length === 0) continue;
     followupOutcomes.push({ organization_id: orgId, stats });
     log.info('flywheel: outcomes de follow-up por fluxo', { run_id: runId, organization_id: orgId, stats });
   }
 
-  return { runId, judged, proposals, followupOutcomes };
+  return { runId, judged, proposals, failedOrgs, skipped: false, followupOutcomes };
+}
+
+/** Judge one turn and, on "no", distill one proposal. Every write and every LLM
+ *  call carries the turn's own organization_id: cost, BYOK key and budget are
+ *  resolved for that org inside runModelCall. */
+async function judgeTurn(
+  pool: pg.Pool,
+  llmCfg: LlmEdgeConfig,
+  turn: TurnRow,
+  runId: string,
+  log: Logger,
+): Promise<{ judged: boolean; proposal: boolean }> {
+  const material = await buildMaterial(pool, turn);
+  const optionOrder = parseInt(turn.job_id.slice(0, 8), 16) % 2 === 0 ? 'yes_first' : 'no_first';
+
+  const judgedCall = await runModelCall(
+    pool,
+    llmCfg,
+    {
+      tenantId: turn.organization_id,
+      leadId: turn.contact_id,
+      jobId: turn.job_id,
+      purpose: 'flywheel_judge',
+      messages: [{ role: 'user', content: judgePrompt(material, optionOrder) }],
+    },
+    { log },
+  );
+  const judgeOutput = readJudgeOutput(judgedCall.result.text);
+  const verdictValue = judgeOutput.verdict;
+  if (judgeOutput.error) {
+    log.warn('flywheel: unusable judge answer recorded as unknown', {
+      job_id: turn.job_id,
+      error: judgeOutput.error,
+    });
+  }
+
+  const { rowCount } = await pool.query(
+    `insert into flywheel_judge_verdicts
+       (organization_id, dataset, trace_id, dimension, verdict, option_order, judge_family, model, provenance, run_id)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+     on conflict (dataset, trace_id, dimension) do nothing`,
+    [
+      turn.organization_id,
+      DATASET,
+      turn.job_id,
+      DIMENSION,
+      verdictValue,
+      optionOrder,
+      judgedCall.provider,
+      judgedCall.model,
+      JSON.stringify({
+        source: 'live_turn',
+        job_id: turn.job_id,
+        contact_id: turn.contact_id,
+        ...(judgeOutput.error ? { error: judgeOutput.error } : {}),
+      }),
+      runId,
+    ],
+  );
+  const inserted = (rowCount ?? 0) > 0;
+  log.info('flywheel: veredito gravado', { job_id: turn.job_id, verdict: verdictValue, inserted });
+
+  if (verdictValue === 'no' && inserted) {
+    const distilled = await runModelCall(
+      pool,
+      llmCfg,
+      {
+        tenantId: turn.organization_id,
+        leadId: turn.contact_id,
+        jobId: turn.job_id,
+        purpose: 'flywheel_distiller',
+        messages: [{ role: 'user', content: distillerPrompt(judgeOutput.missingFacts) }],
+      },
+      { log },
+    );
+    const proposal = readDistillerOutput(distilled.result.text);
+    if (proposal === null) {
+      // The verdict is already saved; losing this one proposal must not stop the
+      // org's round.
+      log.warn('flywheel: unusable distiller answer; no proposal for this turn', { job_id: turn.job_id });
+      return { judged: inserted, proposal: false };
+    }
+    const isOrg = proposal.scope?.toLowerCase().trim() === 'org';
+    await pool.query(
+      `insert into flywheel_distiller_proposals
+         (organization_id, run_id, dataset, type, target, content, evidence)
+       values ($1,$2,$3,$4,$5,$6,$7)`,
+      [
+        turn.organization_id,
+        runId,
+        DATASET,
+        isOrg ? 'org_memory_entry' : 'playbook_bullet',
+        isOrg ? 'org' : 'tenant',
+        proposal.content,
+        JSON.stringify({ trace_ids: [turn.job_id], dimension: DIMENSION, verdict_run_id: runId }),
+      ],
+    );
+    log.info('flywheel: proposta do distiller gravada (gate humano pendente)', { job_id: turn.job_id });
+    return { judged: inserted, proposal: true };
+  }
+  return { judged: inserted, proposal: false };
 }
 
 /** Loop agendado do flywheel (4B) — intervalo por knob; erro nunca derruba o worker. */

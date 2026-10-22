@@ -8,6 +8,72 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.7.0] — 2026-10-22
+
+### Adicionado
+
+- **Automação pode disparar com a mensagem que a equipe envia** Na tela de Automações há um gatilho novo, "Mensagem enviada pela equipe". Ele dispara quando alguém da equipe responde ao cliente, pelo CRM ou pelo celular, e a regra enxerga o texto da mensagem, o contato e o negócio aberto da conversa. Assim dá para fazer o funil andar sozinho: por exemplo, quando a recepção escrever "deixamos agendado", mover o card para "Horário marcado". Mensagens escritas pela IA ou por outra automação não disparam esse gatilho, a menos que a regra peça isso numa condição de "Origem do envio".
+
+### Corrigido
+
+- **Lembretes automáticos de outro sistema enviados pelo mesmo número não pausam mais a IA** Quando um sistema de agenda ligado ao mesmo número de WhatsApp mandava um lembrete, o CRM entendia que alguém da equipe tinha respondido pelo celular e pausava a IA naquela conversa. Se o cliente respondesse ao lembrete logo em seguida, ninguém atendia. Agora cada empresa pode listar trechos fixos dessas mensagens automáticas; a mensagem que contém um desses trechos não pausa a IA. A resposta de uma pessoa pelo celular continua pausando como antes. Sem a lista configurada, nada muda.
+
+- **As Propostas de melhoria agora avaliam todas as organizações, sem repetir conversa** A rodada automática que gera as Propostas de melhoria dos agentes pegava as 10 conversas mais recentes do servidor inteiro. Numa instalação com várias organizações, a que mais atendia ocupava todas as vagas e as menores nunca recebiam proposta. Quando não havia conversa nova, as mesmas 10 eram avaliadas de novo a cada 6 horas, pagando a IA para chegar à mesma conclusão. E um erro em uma organização (sem saldo de IA, sem modelo configurado) interrompia a rodada de todas as outras.
+
+  Agora cada organização tem a sua própria cota por rodada (`FLYWHEEL_BATCH_LIMIT`, 10 por padrão, passou a valer por organização), cada conversa é avaliada uma vez só, considerando a última mensagem de cada contato nos últimos 7 dias, e o erro de uma organização não atrapalha as demais. Uma resposta da IA fora do formato esperado conta como avaliação inconclusiva, em vez de ser paga de novo a cada rodada, e duas rodadas ao mesmo tempo (a automática e uma manual) não cobram a mesma conversa duas vezes. Como antes, o custo de cada avaliação é registrado na organização dona da conversa e respeita o orçamento de IA dela.
+
+- **A devolução automática para a IA responde a mensagem que o cliente mandou enquanto esperava** Com a devolução automática ligada (Configurações › Distribuição de atendimento), a conversa voltava para a IA, mas a mensagem que o cliente tinha mandado enquanto ela estava com a equipe ficava sem resposta: a IA só respondia a próxima mensagem, e a conversa já tinha saído da fila da equipe. Agora, quando a conversa volta, a IA responde na hora a mensagem pendente, se ela chegou depois da última ação da equipe e há menos de 24 horas. A mensagem em que a própria IA passou a conversa para a equipe não é respondida de novo. Você não precisa fazer nada; se tinha desligado a devolução automática por causa disso, já pode religá-la.
+
+- **A conversa aberta no Inbox volta a mostrar a última mensagem quando a IA passou o atendimento** Ao abrir no Inbox uma conversa que a IA passou para a equipe, às vezes ela aparecia rolada até o topo, na mensagem mais antiga carregada, em vez da última. Quem atende precisava descer a conversa inteira até chegar ao que o cliente acabou de dizer. Isso acontecia quando o cartão "Por que a IA passou para você" carregava antes das mensagens. Agora a conversa abre sempre no fim. É a mesma correção que o DeskcommCRM lançou na v1.79.0, trazida antes da próxima sincronização.
+
+- **"Cancelar" sozinho não bloqueia mais o contato, e a atendente sempre consegue responder** Quando o cliente mandava só a palavra "Cancelar" (por exemplo, no botão de cancelar horário de um lembrete de confirmação), o sistema entendia que ele não queria mais receber mensagens: bloqueava o contato, calava a IA e travava a resposta da atendente, que via "envio de mensagens desabilitado". Agora "Cancelar" sozinho é tratado como uma mensagem comum; continuam bloqueando os pedidos claros, como "parar", "sair", "stop", "cancelar inscrição" e "quero cancelar as mensagens". E, mesmo com o contato bloqueado, a atendente pode responder pelo CRM: o bloqueio impede apenas a IA, as automações, as campanhas e os modelos de mensagem, e a conversa mostra um aviso. Contatos que já foram bloqueados por "Cancelar" continuam bloqueados até um administrador desbloqueá-los na ficha do contato.
+
+## [2.6.0] — 2026-10-22
+
+### Adicionado
+
+- **Ferramentas de agenda do avec para o salão Mayara Morales** O agente do salão Mayara Morales passa a ter ferramentas para consultar a agenda do avec: os agendamentos da cliente da conversa, os serviços e profissionais, e os horários livres. Também há ferramentas para marcar, remarcar e cancelar, que só entram em uso quando alguém as liga uma a uma na tela do agente. Elas só existem para as organizações configuradas na instalação; para as demais empresas nada muda. Quando o avec não consegue atender, o agente passa a conversa para a equipe com um resumo do que falta fazer.
+
+- **O GPT-6 Luna aparece na escolha de modelo e entra na conta de custo** O GPT-6 Luna, da OpenAI, passa a aparecer na lista de modelos do agente (IA › Agentes › Modelo). Quem já usava esse modelo tinha o gasto registrado sem preço: a tela Uso e orçamento não somava essas chamadas e o teto mensal não disparava por elas. Agora cada chamada é cobrada a US$ 0,10 por milhão de tokens de entrada (US$ 0,01 quando a entrada se repete e vem do cache) e US$ 0,50 por milhão de saída, e entra no orçamento. As chamadas feitas antes da atualização continuam sem custo registrado.
+
+### Corrigido
+
+- **O CRM recebe a correção de segurança do Next.js de 14/10** O CRM passa a rodar no Next.js 16.4.1, que corrige três falhas de segurança divulgadas em 14/10. Neste CRM só uma delas se aplicava: alguém de fora, sem fazer login, conseguia deixar o sistema lento ou fora do ar com requisições preparadas para isso. As outras duas dependem de recursos que o CRM não usa. Nada muda no uso nem na operação: basta atualizar.
+
+## [2.5.0] — 2026-10-22
+
+### Alterado
+
+- **A sugestão de resposta da IA ocupa menos espaço e pode ser recolhida; a ficha do contato abre no tablet** O quadro "Sugestão para revisar", que aparece acima do campo de mensagem, ficou com cerca de metade da altura: o feedback e os botões Aprovar e Rejeitar estão numa linha só. Um novo botão com uma seta recolhe o quadro para uma única linha, que mostra o estado e o começo do texto sugerido; clicar nessa linha abre de novo. O navegador lembra a escolha de cada atendente, então quem prefere ver o histórico da conversa não precisa recolher a cada atendimento. Se a sugestão falhar, o motivo continua aparecendo mesmo com o quadro recolhido.
+
+  No tablet e em notebooks com tela menor (de 768 a 1279 pixels de largura), a ficha do contato, onde ficam as tags, o funil e os dados do contato, não tinha como ser aberta: a coluna da direita só aparece em telas maiores e o botão "Ficha" só existia no celular. Agora o botão "Ficha" aparece no topo da conversa também nessas telas.
+
+### Corrigido
+
+- **A caixa de entrada não trava mais para carregar e contar as conversas** A lista de conversas e os contadores das abas (Fila, Automático, Todas) ficavam lentos e às vezes não carregavam: o banco conferia, conversa por conversa, quem podia ver cada uma, e essa conferência custava caro. Por isso uma conversa assumida ou fechada demorava a sair da Fila. Agora a regra de quem vê o quê é calculada uma vez por consulta — a mesma regra, sem mudar o que cada pessoa enxerga — e a contagem que levava cerca de 4 segundos leva cerca de 20 milissegundos. As mensagens de uma conversa também abrem mais rápido pelo mesmo motivo.
+
+## [2.4.0] — 2026-10-20
+
+### Adicionado
+
+- **A mensagem do WhatsApp passa a ser a do botão em que a pessoa tocou** O endereço de captura da Meta agora abre o WhatsApp com a mensagem do botão em que a pessoa tocou, quando a página envia esse texto. Sem ele, vale o modelo de mensagem configurado, como antes. O código de origem continua no fim da mensagem, e o texto do botão nunca é gravado junto com a origem do clique. Você não precisa fazer nada.
+
+### Alterado
+
+- **Cliques de anúncio que nunca viraram conversa são apagados após 90 dias** Os cliques registrados pelos endereços de captura do Google Ads e da Meta que nunca viraram uma conversa no WhatsApp passam a ser apagados depois de 90 dias, na rotina diária de retenção de dados. Os cliques que viraram contato continuam guardados, com a origem do contato. Os links rastreáveis não são afetados: seus cliques e suas métricas continuam como estão. Você não precisa fazer nada.
+
+### Corrigido
+
+- **Quem clica muitas vezes no endereço de captura ainda chega ao WhatsApp** Os endereços de captura do Google Ads e da Meta mostravam uma tela vazia de erro quando muitas pessoas clicavam a partir da mesma conexão em pouco tempo (comum em internet de celular, em que muita gente sai pelo mesmo endereço). Agora quem passa de 30 acessos por minuto para a mesma organização, a partir do mesmo endereço, ainda chega ao WhatsApp do mesmo jeito, só sem o código de origem na mensagem. A tela de erro fica só para um volume muito alto vindo do mesmo endereço (mais de 120 acessos por minuto, somando todas as organizações), e ela é dada antes de qualquer consulta ao banco de dados. Você não precisa fazer nada.
+
+## [2.3.1] — 2026-10-20
+
+### Corrigido
+
+- **O freio de urgência médica não falha mais em silêncio** Quando um paciente relatava uma emergência médica e o banco de dados falhava por um instante, o freio do nicho Saúde se desligava sem avisar ninguém: a IA respondia como numa conversa comum, sem a orientação de emergência e sem chamar uma pessoa. No modo assistido, se o alerta crítico não conseguisse ser aberto, o sistema registrava como se tivesse aberto. Agora as duas falhas fazem o atendimento ser tentado de novo em seguida e, se continuarem, viram um aviso para a equipe na Central.
+
+- **O endereço de captura da Meta passa a abrir o WhatsApp para quem clica** O endereço de captura de UTM da Meta (Configurações › Conversões) pedia login a quem clicava no botão da página: o visitante recebia um erro de acesso em vez de ir para o WhatsApp. Agora o endereço abre o WhatsApp para quem clica, como o endereço de captura do Google Ads já fazia. A origem do contato só é registrada quando a página repassa os parâmetros da campanha (UTM) para este endereço, ou quando o anúncio aponta direto para ele. Do endereço da página, o sistema guarda só os parâmetros de campanha; o resto (nome, telefone ou e-mail que a página tenha repassado) não é mais gravado. Você não precisa fazer nada.
+
 ## [2.3.0] — 2026-10-08
 
 ### Alterado
@@ -9341,7 +9407,12 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.3.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.7.0...HEAD
+[2.7.0]: https://github.com/berseba/berseba-crm/compare/v2.6.0...v2.7.0
+[2.6.0]: https://github.com/berseba/berseba-crm/compare/v2.5.0...v2.6.0
+[2.5.0]: https://github.com/berseba/berseba-crm/compare/v2.4.0...v2.5.0
+[2.4.0]: https://github.com/berseba/berseba-crm/compare/v2.3.1...v2.4.0
+[2.3.1]: https://github.com/berseba/berseba-crm/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/berseba/berseba-crm/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/berseba/berseba-crm/compare/v2.1.0...v2.2.0
 [2.1.0]: https://github.com/berseba/berseba-crm/compare/v2.0.0...v2.1.0

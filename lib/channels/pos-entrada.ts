@@ -58,6 +58,7 @@ import { acelerarPipelineDeEventos } from "@/lib/dev/kick-local-pipeline";
 import { origemDoNegocioPeloCanal } from "@/lib/channels/origem-do-negocio";
 import { autorizarContatoParaIA } from "@/lib/ai/elegibilidade/autorizacao";
 import { casarCampanha, lerCampanhas } from "@/lib/ai/elegibilidade/campanha";
+import { devolverAoAgenteSePrazoVenceu } from "@/lib/escalacao/devolucao-por-pendencia.berseba";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -168,6 +169,8 @@ export async function aplicarEfeitosPosEntrada(
     });
     return;
   }
+  // Berseba: before the lead step, which skips `force_human` contacts.
+  await devolverAoAgenteSePrazoVenceu(admin, entrada);
   await guardarOrigemDaPagina(admin, entrada);
   await abrirDemanda(admin, entrada);
   await avaliarCampanha(admin, entrada);

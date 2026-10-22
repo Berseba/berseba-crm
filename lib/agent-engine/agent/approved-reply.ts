@@ -57,7 +57,7 @@ export function createApprovedReplyHandler(
           [job.organization_id, job.contact_id, policy.channel_session_id],
         );
         if (!rows[0]) throw new StaleServiceBoundaryError();
-        // Berseba (9001): a draft with a product sends its cover photo, caption = body.
+        // Berseba (9004): a draft with a product sends its cover photo, caption = body.
         // Resolved before the chain and outside the number lock (the copy is network),
         // like the autonomous turn; a refusal settles without sending anything.
         const photo = await prepareApprovedReplyPhoto(

@@ -1,5 +1,5 @@
 /**
- * THE PHOTO OF AN APPROVED ASSISTED-MODE REPLY (Berseba, migration 9001).
+ * THE PHOTO OF AN APPROVED ASSISTED-MODE REPLY (Berseba, migration 9004).
  *
  * In autonomous mode `send_message({ body, produto_codigo })` sends the catalog
  * photo with the text as its caption (`fotos-do-produto.ts`). In Assisted mode the

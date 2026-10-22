@@ -36,6 +36,15 @@ import {
  * o motor rodaria a regra duas vezes por mudança de lead.
  */
 export const ENTIDADE_ESPERADA_POR_GATILHO = {
+  // Berseba (#57, BERSEBA.md): a message the TEAM sent, so the funnel closes
+  // itself when reception writes "deixamos agendado". At the top on purpose
+  // (golden rule 7: upstream extends this map further down). Two emitters, one
+  // entity: the CRM send (`app/api/v1/messages/_handler.ts`, thin payload) and
+  // the phone reply (`fn_emit_message_event`, an `external_device` row born
+  // `sent`). The engine reads the message row (`lib/automation/message-sent.ts`)
+  // and only lets people's messages through; AI and automation stay out unless
+  // the rule asks for them explicitly.
+  "message.sent": "message",
   "lead.created": "crm_lead",
   "lead.stage_changed": "crm_lead",
   // Os quatro do ENCAMENTO (#1528), que nascem do trigger do banco

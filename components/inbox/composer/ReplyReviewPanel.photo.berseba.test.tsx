@@ -1,6 +1,6 @@
 /**
  * The review panel shows the product photo an Assisted-mode draft carries
- * (Berseba, migration 9001), and does not let a caption over WhatsApp's limit be
+ * (Berseba, migration 9004), and does not let a caption over WhatsApp's limit be
  * approved.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";

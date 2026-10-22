@@ -12,7 +12,7 @@ export const dynamic = "force-dynamic";
 const THUMBNAIL_TTL_SECONDS = 3600;
 
 /**
- * The product an Assisted-mode draft carries (Berseba, migration 9001): its name
+ * The product an Assisted-mode draft carries (Berseba, migration 9004): its name
  * and a signed URL of the cover, for the thumbnail in the review panel.
  *
  * Both reads go through the user's session, so RLS decides: the draft only if the

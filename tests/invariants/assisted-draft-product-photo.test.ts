@@ -1,5 +1,5 @@
 /**
- * AN ASSISTED-MODE DRAFT CARRIES THE PRODUCT PHOTO (Berseba, migration 9001).
+ * AN ASSISTED-MODE DRAFT CARRIES THE PRODUCT PHOTO (Berseba, migration 9004).
  *
  * Measured against the real baseline, the real approval worker
  * (`createApprovedReplyHandler`) and an HTTP receiver standing in for WAHA:

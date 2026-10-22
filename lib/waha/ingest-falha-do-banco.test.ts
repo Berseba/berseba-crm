@@ -31,6 +31,7 @@ function banco(opts: { contato?: Falha; conversa?: Falha; insert?: Falha }) {
       eq: () => q,
       in: () => q,
       is: () => q,
+      gte: () => q,
       limit: () => q,
       order: () => q,
       maybeSingle: async () => ({ data: null, error: null }),

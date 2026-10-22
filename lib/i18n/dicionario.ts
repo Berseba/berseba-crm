@@ -37,6 +37,9 @@ import type { Idioma } from "./idiomas";
 type Traducoes = Record<string, Partial<Record<Exclude<Idioma, "pt-BR">, string>>>;
 
 export const DICIONARIO: Traducoes = {
+  // Berseba: collapse control of the reply suggestion panel (ReplyReviewPanel).
+  "Mostrar sugestão": { es: "Mostrar sugerencia" },
+  "Recolher sugestão": { es: "Contraer sugerencia" },
   // Roteador do Jev sob demanda e resultados.
   "Como o roteador consulta as IAs": { es: "Cómo consulta el enrutador a las IA" },
   "Modo do roteador salvo.": { es: "Se guardó el modo del enrutador." },
@@ -985,7 +988,7 @@ export const DICIONARIO: Traducoes = {
       es: "Para los demás nichos, hoy esto no cambia nada — el valor queda reservado para uso futuro.",
     },
   "Aprovar e enviar": { es: "Aprobar y enviar" },
-  // Berseba (9001): the product photo on an Assisted-mode draft.
+  // Berseba (9004): the product photo on an Assisted-mode draft.
   "Aprovar envia a foto do produto com este texto como legenda. Não altera dados, agenda ou a autonomia do agente.":
     {
       es: "Aprobar envía la foto del producto con este texto como leyenda. No cambia datos, agenda ni la autonomía del agente.",
@@ -5792,6 +5795,13 @@ export const DICIONARIO: Traducoes = {
     es: "Con este disparador la automatización no puede asignar responsable ni mover el lead: el propio cambio volvería a disparar la automatización, sin fin.",
   },
   "Quando chegar mensagem no WhatsApp": { es: "Cuando llegue un mensaje por WhatsApp" },
+  "Mensagem enviada pela equipe": { es: "Mensaje enviado por el equipo" },
+  "Origem do envio (user = CRM, external_device = celular, ai = IA)": {
+    es: "Origen del envío (user = CRM, external_device = celular, ai = IA)",
+  },
+  "Tags do negócio aberto mais recente do contato": {
+    es: "Etiquetas del negocio abierto más reciente del contacto",
+  },
   "Quando uma mensagem não for entregue": { es: "Cuando un mensaje no se entregue" },
   "Código do erro": { es: "Código del error" },
   "Janela de 24 horas fechada: texto livre é recusado pela plataforma (131047). Envie um modelo aprovado ou aguarde o cliente escrever.": {
@@ -7447,8 +7457,8 @@ export const DICIONARIO: Traducoes = {
   "Só um modelo aprovado sai daqui — texto livre é recusado pela plataforma.": {
     es: "Desde aquí solo puedes enviar una plantilla aprobada. La plataforma rechaza el texto libre.",
   },
-  "Contato bloqueado — envio de mensagens desabilitado.": {
-    es: "Contacto bloqueado — envío de mensajes deshabilitado.",
+  "Este contato pediu para sair. A IA, as automações, as campanhas e os modelos não enviam para ele. Responda só ao que ele escrever.": {
+    es: "Este contacto pidió darse de baja. La IA, las automatizaciones, las campañas y las plantillas no le envían. Responde solo a lo que él escriba.",
   },
   "Contato anonimizado — não é possível enviar mensagens.": {
     es: "Contacto anonimizado — no es posible enviar mensajes.",

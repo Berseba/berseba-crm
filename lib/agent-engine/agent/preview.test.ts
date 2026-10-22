@@ -145,7 +145,7 @@ it('uses only supplied in-memory sample contact in sandbox', () => {
   expect(context.context.contact.phone).toBe('+5511999999999');
 });
 
-describe('produto_codigo in preview (Berseba, migration 9001)', () => {
+describe('produto_codigo in preview (Berseba, migration 9004)', () => {
   const assisted = () => ({ ...preview(), kind: 'assisted' as const, contactId: 'contact' });
 
   it('keeps an existing product code on the candidate, so the Assisted draft can carry the photo', async () => {
