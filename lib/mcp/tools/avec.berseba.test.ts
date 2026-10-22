@@ -179,6 +179,7 @@ describe("request shape", () => {
     expect(call.headers.Authorization).toBe("Bearer test-key");
     expect(call.headers["Idempotency-Key"]).toBeUndefined();
     expect(r).toMatchObject({ ok: true, total: 1 });
+    expect((r.agendamentos as unknown[])[0]).toMatchObject({ status: "1", can_change: true });
     // No client name or phone reaches the model or the audit log.
     expect(JSON.stringify(r)).not.toMatch(/Ana Teste|99999-0001|client_/);
   });
@@ -303,6 +304,7 @@ describe("errors → handoff", () => {
     [409, "ambiguous_appointment", true],
     [409, "ambiguous_client", true],
     [409, "idempotency_in_flight", false],
+    [409, "already_booked", false],
     [422, "not_allowed", true],
     [422, "client_not_found", true],
     [422, "invalid_request", true],
@@ -388,6 +390,22 @@ describe("idempotency", () => {
     );
     expect(r).toMatchObject({ ok: false, motivo: "sem_chave_de_idempotencia", handoff: true });
     expect(calls).toHaveLength(0);
+  });
+});
+
+describe("status", () => {
+  it("shows the status name and whether the API lets it change", async () => {
+    answer(200, {
+      data: [
+        { ...APPOINTMENT, status: "1.5", status_name: "Confirmado" },
+        { ...APPOINTMENT, id: "x-2", status: "3", status_name: "Em Atendimento" },
+      ],
+    });
+    const r = await run(tools.avecMyAppointments, {});
+    expect(r.agendamentos).toMatchObject([
+      { status: "Confirmado", can_change: true },
+      { status: "Em Atendimento", can_change: false },
+    ]);
   });
 });
 

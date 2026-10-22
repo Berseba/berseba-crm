@@ -40,6 +40,9 @@ const appointmentSchema = z.object({
   end_time: z.string(),
   starts_at: z.string(),
   status: text,
+  // 1 Agendado, 1.5 Confirmado, 2 Aguardando, 3 Em Atendimento, 3.5 Finalizado, 4 Pago, 0.6 Faltou
+  // (cancelled ones are left out by the API). Optional: older API versions did not send it.
+  status_name: text.optional(),
 });
 export type AvecAppointment = z.infer<typeof appointmentSchema>;
 

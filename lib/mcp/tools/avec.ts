@@ -163,6 +163,16 @@ function failure(err: unknown, options: { slotTakenTwice?: boolean; isWrite?: bo
         "ofereça outro à cliente.",
     };
   }
+  if (err.code === "already_booked") {
+    return {
+      ok: false,
+      code: err.code,
+      handoff: false,
+      mensagem:
+        "a cliente já tem esse serviço com essa profissional nesse dia. Mostre o horário que ela " +
+        "já tem (avec_my_appointments) e ofereça remarcar esse em vez de marcar outro.",
+    };
+  }
   if (err.code === "idempotency_in_flight") {
     return {
       ok: false,
@@ -248,6 +258,9 @@ export function weekdayOf(date: string): string | null {
   return Number.isNaN(day.getTime()) ? null : WEEKDAYS[day.getUTCDay()]!;
 }
 
+/** The avec API only cancels or reschedules Agendado (1) and Confirmado (1.5). */
+const CHANGEABLE_STATUS = new Set(["1", "1.5"]);
+
 function appointmentView(a: AvecAppointment) {
   return {
     appointment_id: a.id,
@@ -259,6 +272,8 @@ function appointmentView(a: AvecAppointment) {
     date: a.date,
     start_time: a.start_time,
     end_time: a.end_time,
+    status: a.status_name ?? a.status,
+    can_change: a.status !== null && CHANGEABLE_STATUS.has(a.status),
   };
 }
 
@@ -291,7 +306,8 @@ export const avecMyAppointments: McpToolDefinition<typeof myAppointmentsShape> =
     "Lista os agendamentos da cliente DESTA conversa na agenda do salão (avec), pelo telefone " +
     "dela — você não informa telefone. Sem datas, traz de hoje até 13 dias à frente (no máximo " +
     "14 dias por consulta). Use sempre antes de remarcar ou cancelar, para pegar o " +
-    "appointment_id. Se vier mais de um, pergunte qual antes de agir.",
+    "appointment_id. Se vier mais de um, pergunte qual antes de agir. Só os de can_change: true " +
+    "podem ser remarcados ou cancelados; os outros, passe para a equipe.",
   inputSchema: myAppointmentsShape,
   category: "read",
   requiresRole: "agent",
