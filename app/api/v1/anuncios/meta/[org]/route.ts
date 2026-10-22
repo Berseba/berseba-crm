@@ -39,10 +39,15 @@
  * aceitável; perder o lead não.
  */
 import { NextResponse, type NextRequest } from "next/server";
+import { z } from "zod";
 
-import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
 import { normalizarUtm } from "@/lib/leads/origem-do-site";
+import { buttonText } from "@/lib/plataformas-de-anuncio/button-text";
 import { criarClickRef } from "@/lib/plataformas-de-anuncio/captura-de-clique";
+import {
+  CAPTURE_WINDOW_SECONDS,
+  checkCaptureRateLimit,
+} from "@/lib/plataformas-de-anuncio/capture-rate-limit";
 import { lerConfigDaLanding } from "@/lib/plataformas-de-anuncio/landing-config";
 import {
   clientIp,
@@ -59,23 +64,35 @@ interface RouteContext {
   params: Promise<{ org: string }>;
 }
 
-const TETO_POR_IP = 30;
-const JANELA_SEGUNDOS = 60;
-
 export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response> {
-  const { org } = await ctx.params;
+  // Berseba: same slug check as the Google route, before the slug reaches the
+  // rate-limit key or the lookup.
+  const params = z
+    .object({
+      org: z
+        .string()
+        .min(1)
+        .max(100)
+        .regex(/^[a-zA-Z0-9_-]+$/),
+    })
+    .safeParse(await ctx.params);
+  if (!params.success) return paginaDeSaida(null);
+  const { org } = params.data;
 
-  const ip = clientIp(req);
-  if (ip !== null) {
-    const limite = await checkRateLimit(`meta-lp:${org}:${ip}`, TETO_POR_IP, JANELA_SEGUNDOS);
-    if (!limite.allowed) {
-      // 429 sem corpo de marketing: quem estoura este teto num clique real não
-      // existe — é abuso, não humano legítimo.
-      return new NextResponse(null, { status: 429, headers: { "Retry-After": String(JANELA_SEGUNDOS) } });
-    }
+  // Berseba (#67): IP-wide bucket first, then per (org, IP). See
+  // `lib/plataformas-de-anuncio/capture-rate-limit.ts`.
+  const limite = await checkCaptureRateLimit("meta", org, clientIp(req));
+  if (limite === "blocked") {
+    return new NextResponse(null, {
+      status: 429,
+      headers: { "Retry-After": String(CAPTURE_WINDOW_SECONDS) },
+    });
   }
 
   const parametros = new URL(req.url).searchParams;
+  // Berseba: the message of the button that was tapped, when the page sends it.
+  // Never part of `utm`: `normalizarUtm` keeps a closed list of keys.
+  const texto = buttonText(parametros.get("texto"));
   // A MESMA normalização do `[dk1:]`: lista fechada de chaves e teto por valor.
   // O que não for chave de campanha não atravessa — nome, telefone e e-mail
   // ficam de fora por construção, não por filtro de última hora.
@@ -101,25 +118,42 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response
   const config = await lerConfigDaLanding(admin, "meta_ads_landing_pages", organizationId);
   if (!config) return paginaDeSaida(null);
 
+  // Berseba: every path without a ref sends the button's message when there is
+  // one, else the template without its marker. The number is always the config's.
+  const mensagemSemRef = texto ?? textoSemRef(config.messageTemplate);
+
+  // Berseba (#67): over the per-(org, IP) bucket the visitor still reaches
+  // WhatsApp, only without the ref and without a write.
+  if (limite === "no_ref") {
+    return paginaDeSaida(whatsAppUrl(config.whatsappE164, mensagemSemRef));
+  }
+
   // Sem UTM nenhuma não há o que guardar, e um ref que não aponta para origem
   // alguma só suja a mensagem do lead. A pessoa vai para o WhatsApp do mesmo
   // jeito, sem ref.
   if (Object.keys(utm).length === 0) {
     logger.warn("[anuncios.meta.landing] hit sem UTM", { org });
-    return paginaDeSaida(whatsAppUrl(config.whatsappE164, textoSemRef(config.messageTemplate)));
+    return paginaDeSaida(whatsAppUrl(config.whatsappE164, mensagemSemRef));
   }
 
-  const queryRaw = Object.fromEntries(parametros.entries());
+  // Berseba: `query_raw` keeps only the normalized keys, like the tracked-link
+  // path (`rastreio/links.ts`). The whole query string of an anonymous visitor
+  // was stored uncapped and kept forever, with whatever name, phone or e-mail
+  // the page forwarded. `normalizarUtm` already keeps `fbclid` and `gclid`.
   const criado = await criarClickRef(admin, "meta_ads_click_refs", organizationId, {
     utm,
-    query_raw: queryRaw,
+    query_raw: utm,
   });
   if (!criado) {
     // Falha ao gravar: mesma régua — a pessoa não paga o preço de um erro
     // nosso, só a atribuição é que se perde.
-    return paginaDeSaida(whatsAppUrl(config.whatsappE164, textoSemRef(config.messageTemplate)));
+    return paginaDeSaida(whatsAppUrl(config.whatsappE164, mensagemSemRef));
   }
 
-  const mensagem = config.messageTemplate.replaceAll("{token}", criado.token);
+  // Berseba: with the button's message, the ref goes after it; without, the
+  // configured template as before.
+  const mensagem = texto
+    ? `${texto} [ref:${criado.token}]`
+    : config.messageTemplate.replaceAll("{token}", criado.token);
   return paginaDeSaida(whatsAppUrl(config.whatsappE164, mensagem));
 }
