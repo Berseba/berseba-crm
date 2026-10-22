@@ -2974,7 +2974,7 @@
   "O cliente ainda não escreveu — a janela de 24h nunca abriu. Só um modelo aprovado sai daqui.": "客户尚未发消息——24 小时窗口从未开启。此处只能发送已批准的模板。",
   "A janela de 24h fechou há": "24 小时窗口已关闭，距今",
   "Só um modelo aprovado sai daqui — texto livre é recusado pela plataforma.": "此处只能发送已批准的模板——自由文本会被平台拒绝。",
-  "Contato bloqueado — envio de mensagens desabilitado.": "联系人已被阻止——消息发送已禁用。",
+  "Este contato pediu para sair. A IA, as automações, as campanhas e os modelos não enviam para ele. Responda só ao que ele escrever.": "该联系人已要求退订。AI、自动化、营销活动和模板不会向其发送。只回复对方发来的消息。",
   "Contato anonimizado — não é possível enviar mensagens.": "联系人已匿名化——无法发送消息。",
   "Responsável": "负责人",
   "Boas-vindas ao": "欢迎来到",

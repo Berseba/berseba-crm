@@ -450,9 +450,24 @@ describe("ehPedidoDeOptOut — pedido INEQUÍVOCO, o que autoriza bloquear", () 
     expect(ehPedidoDeOptOut("tem como parar a dor?")).toBe(false);
   });
 
-  it("cancelar sozinho sai; cancelar UMA COISA fica", () => {
-    expect(ehPedidoDeOptOut("cancelar")).toBe(true);
+  // Berseba: bare "cancelar" cancels an appointment, not the channel (see the
+  // comment in PALAVRAS_DE_OPT_OUT). Only cancelling the subscription blocks.
+  it("bare cancelar is not an opt-out; cancelling the subscription is", () => {
+    expect(ehPedidoDeOptOut("cancelar")).toBe(false);
+    expect(ehPedidoDeOptOut("Cancelar")).toBe(false);
+    expect(ehOptOutProvavel("Cancelar")).toBe(false);
     expect(ehPedidoDeOptOut("quero cancelar o pedido")).toBe(false);
+    expect(ehPedidoDeOptOut("quero cancelar a inscrição")).toBe(true);
+    expect(ehPedidoDeOptOut("Cancelar.")).toBe(false);
+    expect(ehPedidoDeOptOut("Cancelar 👍")).toBe(false);
+  });
+
+  it("cancelling the messages or one's own subscription blocks, in pt and es", () => {
+    expect(ehPedidoDeOptOut("quero cancelar as mensagens")).toBe(true);
+    expect(ehPedidoDeOptOut("cancelar minha inscrição")).toBe(true);
+    expect(ehPedidoDeOptOut("cancelar mi suscripción")).toBe(true);
+    // one message, not the channel
+    expect(ehPedidoDeOptOut("pode cancelar a mensagem que mandei?")).toBe(false);
   });
 });
 

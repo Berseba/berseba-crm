@@ -4431,7 +4431,7 @@
   "O cliente ainda não escreveu — a janela de 24h nunca abriu. Só um modelo aprovado sai daqui.": "The client hasn't written yet — the 24-hour window never opened. Only an approved template can go out from here.",
   "A janela de 24h fechou há": "Time since the 24-hour window closed:",
   "Só um modelo aprovado sai daqui — texto livre é recusado pela plataforma.": "Only an approved template can go out from here — free text is rejected by the platform.",
-  "Contato bloqueado — envio de mensagens desabilitado.": "Contact blocked — sending messages disabled.",
+  "Este contato pediu para sair. A IA, as automações, as campanhas e os modelos não enviam para ele. Responda só ao que ele escrever.": "This contact opted out. The AI, automations, campaigns and templates don't send to them. Only reply to what they write.",
   "Contato anonimizado — não é possível enviar mensagens.": "Contact anonymized — messages can't be sent.",
   "Responsável": "Owner",
   "Boas-vindas ao": "Welcome to",
