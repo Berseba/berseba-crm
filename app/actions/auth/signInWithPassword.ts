@@ -82,7 +82,12 @@ export async function signInWithPassword(input: LoginInput, next?: string): Prom
   // does not know the password. Before this, the screen said "Email ou senha
   // incorretos" and the person kept retyping a correct password (2026-10-09).
   // Not counted against the account budget: it is not a wrong password.
-  if (error?.code === "email_not_confirmed") {
+  // The message is the fallback for GoTrue builds that send no `error_code`
+  // (auth-js then leaves `code` undefined).
+  if (
+    error &&
+    (error.code === "email_not_confirmed" || /email not confirmed/i.test(error.message))
+  ) {
     await audit({
       action: "auth.login_failed",
       metadata: { email_hash: hashEmail(parsed.data.email), reason: "email_not_confirmed" },
