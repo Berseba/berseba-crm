@@ -26,6 +26,9 @@
  *     with the same text, created just before, marks it as an echo too.
  *   - A message that did not go out: only `sent`, `delivered` and `read` pass
  *     (`queued` without a configured channel and `failed` do not).
+ *   - A message ANOTHER SYSTEM sent from the business's number (a scheduling
+ *     system's reminder), when the organization lists its snippet in
+ *     `settings.automated_outbound_patterns` (#75).
  *   - A WhatsApp GROUP conversation: a group contact never enters a funnel
  *     (CLAUDE.md), and `create_or_move_lead` would create a lead for it.
  *   - A message that no longer exists (an echo already deleted by the send).
@@ -47,6 +50,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { RuleCondition } from "@/lib/automation/conditions";
 import type { EventRow } from "@/lib/event-log/dispatcher";
+import { casaComPadraoAutomatico, lerPadroesAutomaticos } from "@/lib/escalacao/mensagem-automatica.berseba";
 import { semAssinatura } from "@/lib/messaging/assinatura";
 
 export const MESSAGE_SENT_TRIGGER = "message.sent";
@@ -104,6 +108,7 @@ export type SentMessageSkip =
   | "message_not_found"
   | "message_not_delivered"
   | "own_send_echo"
+  | "another_system"
   | "group_conversation";
 
 export type SentMessage =
@@ -131,6 +136,9 @@ export async function readSentMessage(admin: SupabaseClient, row: EventRow): Pro
   if (!msg.status || !DELIVERED_STATUSES.has(msg.status)) return { ok: false, reason: "message_not_delivered" };
   if (msg.sent_via === "external_device" && (await isOwnSendEcho(admin, org, msg))) {
     return { ok: false, reason: "own_send_echo" };
+  }
+  if (msg.sent_via === "external_device" && (await isAnotherSystemMessage(admin, org, msg.body))) {
+    return { ok: false, reason: "another_system" };
   }
   const contactId = msg.contact_id ?? (typeof payload.contact_id === "string" ? payload.contact_id : null);
   if (await isGroupConversation(admin, org, msg.conversation_id, contactId)) {
@@ -196,6 +204,19 @@ async function isOwnSendEcho(admin: SupabaseClient, org: string, msg: MessageRow
     if (echoBody.length > 0 && (written === echoBody || written === semAssinatura(echoBody).trim())) return true;
   }
   return false;
+}
+
+/**
+ * A message another system sent from the business's own number (a scheduling
+ * system's reminder), per `organizations.settings.automated_outbound_patterns`
+ * (#75). It is not the team writing, so it must not move the funnel either. A
+ * read failure answers "a person", the same fail-closed as the AI-pause guard.
+ */
+async function isAnotherSystemMessage(admin: SupabaseClient, org: string, body: string | null): Promise<boolean> {
+  if (!body) return false;
+  const { data, error } = await admin.from("organizations").select("settings").eq("id", org).maybeSingle();
+  if (error) return false;
+  return casaComPadraoAutomatico(body, lerPadroesAutomaticos((data as { settings?: unknown } | null)?.settings));
 }
 
 /** A WhatsApp group conversation, by the conversation flag or the group placeholder contact. */

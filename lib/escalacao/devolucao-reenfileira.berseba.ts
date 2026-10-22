@@ -74,7 +74,9 @@ async function ultimaMensagem(
   // A reply that failed never reached the client: it does not answer anything.
   if (direcao === "outbound") consulta = consulta.neq("status", "failed");
   const { data, error } = await consulta
-    .order("sent_at", { ascending: false })
+    // NULLS LAST: PostgREST sorts a descending column with NULLS FIRST, so a
+    // row that never got `sent_at` would win over newer sent ones.
+    .order("sent_at", { ascending: false, nullsFirst: false })
     .order("created_at", { ascending: false })
     .limit(1);
   if (error) throw new Error(`messages: ${error.message}`);
