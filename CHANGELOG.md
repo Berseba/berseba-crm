@@ -8,6 +8,16 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.10.0] — 2026-10-23
+
+### Adicionado
+
+- **A atendente do salão Mayara Morales marca na agenda do avec seguindo as receitas do salão** Para o salão Mayara Morales, a atendente virtual marca, remarca e cancela direto na agenda do avec os serviços simples: corte, sobrancelha, tintura de raiz, tonalizante, escova, tratamento, progressiva e selamento. Cada serviço segue a receita que o próprio salão usa na agenda (por exemplo, corte com lavagem e secagem com a mesma auxiliar, ou tintura com a secagem 1h30 depois), e quem faz cada um vem de uma lista fechada, não do cadastro do avec. A atendente oferece até 2 horários com dia, hora e profissional (sem horário, passa para a equipe), preferindo os colados em clientes que a profissional já tem no dia. Mechas, noiva, maquiagem, penteado, cliente sem cadastro e visitas com mais de um serviço continuam com a equipe. Outras organizações não mudam.
+
+### Corrigido
+
+- **O radar de risco e as regras por tempo voltam a funcionar em empresa com muitos negócios abertos** A partir de cerca de 400 negócios abertos, a consulta que confere a agenda de cada contato ficava grande demais e era recusada. O radar de risco parava de atualizar, e as regras por tempo que respeitam a agenda pulavam todos os negócios da empresa. Agora a agenda é consultada em partes, e o resultado é o mesmo para qualquer tamanho de empresa.
+
 ## [2.9.0] — 2026-10-23
 
 ### ⚠️ Requer atenção
@@ -9503,7 +9513,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.9.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.10.0...HEAD
+[2.10.0]: https://github.com/berseba/berseba-crm/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/berseba/berseba-crm/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/berseba/berseba-crm/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/berseba/berseba-crm/compare/v2.6.0...v2.7.0
