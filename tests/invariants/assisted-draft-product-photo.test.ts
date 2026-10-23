@@ -157,7 +157,8 @@ async function deliver(job: Record<string, unknown>, copy: CopiarFoto) {
     }
     let raw = "";
     for await (const chunk of req) raw += chunk;
-    posts.push({ url: req.url ?? "", body: raw ? JSON.parse(raw) : {} });
+    // Upstream v1.87.0 marks the chat as read after the reply (`/api/sendSeen`): not a message.
+    if (!(req.url ?? "").includes("/api/sendSeen")) posts.push({ url: req.url ?? "", body: raw ? JSON.parse(raw) : {} });
     res.end(JSON.stringify({ id: "accepted-" + String(job.id) }));
   });
   await new Promise<void>((r) => receiver.listen(0, "127.0.0.1", r));
