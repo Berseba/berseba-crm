@@ -276,6 +276,7 @@ describe("GET /api/v1/ai/jev", () => {
       "jailbreak_detect",
       "intent_router",
       "followup_classify",
+      "afirmacao_de_fato",
     ]);
     expect(d.tem_ia_de_sempre).toBe(true);
     expect(d.numeros).toEqual({
@@ -713,6 +714,40 @@ describe("PATCH /api/v1/ai/jev", () => {
   });
 });
 
+describe("PATCH — trocar a origem para a OpenRouter com aceite já gravado (#2964)", () => {
+  // O aceite gravado foi dado a um texto que nomeava só a TypeSafe AI. Via
+  // OpenRouter a mensagem passa por mais um operador nos EUA: sem aceite novo,
+  // ela sairia por um caminho que ninguém aceitou.
+  beforeEach(() => {
+    estado.credenciais = [credencial({ provider: "openrouter", label: "Conversa" })];
+    estado.settings = { jev: { ligado: true, modo: "observacao", aceite: ACEITE_ANTIGO } };
+  });
+
+  it("sem aceite_lgpd, a troca é recusada com jev_exige_aceite e nada é escrito", async () => {
+    const { status, corpo } = await mudar({ origem: "openrouter" });
+    expect(status).toBe(422);
+    expect(corpo.error.code).toBe("jev_exige_aceite");
+    expect(corpo.error.message).toMatch(/pela OpenRouter/);
+    expect(escritas()).toEqual([]);
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  it("com aceite_lgpd, troca e regrava o aceite com quem e quando", async () => {
+    const { status, corpo } = await mudar({ origem: "openrouter", aceite_lgpd: true });
+    expect(status).toBe(200);
+    const jev = estado.settings.jev as Linha;
+    expect(jev.origem).toBe("openrouter");
+    expect(corpo.data.config.aceite.por).toBe(USUARIO);
+    expect(corpo.data.config.aceite.em).not.toBe(ACEITE_ANTIGO.em);
+    expect(audit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "ai.jev.origem_alterada",
+        metadata: expect.objectContaining({ aceite_registrado: true }),
+      }),
+    );
+  });
+});
+
 describe("o Jev por tarefa na rota", () => {
   it("GET: cada tarefa com o estado que vale agora — o clima, pelo `modo`, sem nada gravado", async () => {
     expect((await ler()).corpo.data.por_tarefa).toEqual([
@@ -725,6 +760,10 @@ describe("o Jev por tarefa na rota", () => {
       expect.objectContaining({ id: "followup", ponto: "followup_classify", estado: "desligada", novo: false }),
       // A conferência de campo (#2234) tem alcance "conversa": nasce desligada até o aceite dela.
       expect.objectContaining({ id: "campo_do_negocio", ponto: null, estado: "desligada", novo: false }),
+      // O sinal de urgência da mensagem represada (#2232): também em cascata, também sem ponto.
+      expect.objectContaining({ id: "sinal_de_urgencia", ponto: null, estado: "desligada", novo: false }),
+      // A conferência de fato (#2231) cabe no aceite de cada mensagem, mas com o Jev desligado nada roda.
+      expect.objectContaining({ id: "afirmacao_de_fato", ponto: "afirmacao_de_fato", estado: "desligada", novo: false }),
     ]);
 
     estado.settings = { jev: { ligado: true, modo: "decide", aceite: ACEITE_ANTIGO } };
@@ -748,6 +787,7 @@ describe("o Jev por tarefa na rota", () => {
       expect.objectContaining({ id: "jailbreak_detect", rotulo: "Perceber tentativa de manipulação" }),
       expect.objectContaining({ id: "intent_router", rotulo: "Escolher qual agente atende" }),
       expect.objectContaining({ id: "followup_classify", rotulo: "Ler a resposta ao follow-up" }),
+      expect.objectContaining({ id: "afirmacao_de_fato", rotulo: "Conferir afirmações de fato na resposta" }),
     ]);
   });
 
@@ -824,6 +864,8 @@ describe("o Jev por tarefa na rota", () => {
       ["opt_out", false],
       ["followup", false],
       ["campo_do_negocio", false],
+      ["sinal_de_urgencia", false],
+      ["afirmacao_de_fato", false],
     ]);
     estado.camadas = [
       { organization_id: ORG, layer: "jailbreak", enabled: false },
@@ -837,6 +879,8 @@ describe("o Jev por tarefa na rota", () => {
       ["opt_out", false],
       ["followup", false],
       ["campo_do_negocio", false],
+      ["sinal_de_urgencia", false],
+      ["afirmacao_de_fato", false],
     ]);
   });
 
@@ -852,6 +896,8 @@ describe("o Jev por tarefa na rota", () => {
       ["opt_out", false],
       ["followup", false],
       ["campo_do_negocio", false],
+      ["sinal_de_urgencia", false],
+      ["afirmacao_de_fato", false],
     ]);
     // O ativo de OUTRA empresa não conta — o filtro é o da sessão.
     const intencoes = (n: number) => [{ count: n }];
@@ -864,6 +910,8 @@ describe("o Jev por tarefa na rota", () => {
       ["opt_out", false],
       ["followup", false],
       ["campo_do_negocio", false],
+      ["sinal_de_urgencia", false],
+      ["afirmacao_de_fato", false],
     ]);
     // Ativo, mas sem intenção nenhuma (o estado logo depois de criar um) ou com
     // mais do que cabe numa pergunta: o Jev nunca é perguntado, e "Só observa"
@@ -881,6 +929,8 @@ describe("o Jev por tarefa na rota", () => {
       ["opt_out", false],
       ["followup", false],
       ["campo_do_negocio", false],
+      ["sinal_de_urgencia", false],
+      ["afirmacao_de_fato", false],
     ]);
     // E o cartão segue dizendo que a tarefa observa: é o que ela faz quando há roteador.
     const roteador = (await ler()).corpo.data.por_tarefa.find((t: { id: string }) => t.id === "roteador");
@@ -1024,7 +1074,7 @@ describe("o Jev por tarefa na rota", () => {
     // As outras tarefas não têm pedidos percebidos.
     expect(d.por_tarefa.find((t: { id: string }) => t.id === "manipulacao").percebidos).toBeNull();
     const lidas = estado.consultas.filter((c) => c.tabela === "jev_observacoes" && !c.head);
-    expect(lidas.length, "a leitura dos pedidos percebidos (controle positivo)").toBe(2);
+    expect(lidas.length, "a leitura dos pedidos percebidos (controle positivo)").toBe(3);
     expect(
       lidas.every(
         (c) =>
@@ -1053,7 +1103,17 @@ describe("o Jev por tarefa na rota", () => {
     vi.mocked(haQuemAtendaAOrganizacao).mockResolvedValue(haQuem);
     const d = (await ler()).corpo.data;
     const motivos = Object.fromEntries(d.por_tarefa.map((t: { id: string; sem_atendente: unknown }) => [t.id, t.sem_atendente]));
-    expect(motivos).toEqual({ clima: null, manipulacao: null, roteador: null, humano: motivo, opt_out: motivo, followup: null, campo_do_negocio: null });
+    expect(motivos).toEqual({
+      clima: null,
+      manipulacao: null,
+      roteador: null,
+      humano: motivo,
+      opt_out: motivo,
+      followup: null,
+      campo_do_negocio: null,
+      sinal_de_urgencia: motivo,
+      afirmacao_de_fato: null,
+    });
     // A organização é a da sessão, e a pergunta é a do portão do worker.
     expect(vi.mocked(haQuemAtendaAOrganizacao).mock.calls.map(([, org]) => org)).toEqual([ORG]);
   });

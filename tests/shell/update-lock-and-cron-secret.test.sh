@@ -87,7 +87,7 @@ chmod +x "$WORK/bin/"*
 new_project() {
   local p="$WORK/$1"
   mkdir -p "$p/proj/hostgator-setup-kit" "$p/log"
-  cp "$KIT/_common.sh" "$KIT/_i18n.sh" "$KIT/agent.sh" "$KIT/update.sh" "$KIT/manutencao.sh" \
+  cp "$KIT/_common.sh" "$KIT/_i18n.sh" "$KIT/_manifestos.sh" "$KIT/agent.sh" "$KIT/update.sh" "$KIT/manutencao.sh" \
     "$p/proj/hostgator-setup-kit/"
   : > "$p/proj/docker-compose.prod.yml"
   printf 'INTERNAL_SECRET="scheduler-secret-9z9z"\nINTERNAL_CRON_SECRET="%s"\nNEXT_PUBLIC_APP_URL="%s"\n' "$OLD" "$URL" > "$p/proj/.env"

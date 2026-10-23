@@ -6,27 +6,19 @@
 source "$(dirname "$0")/_common.sh"
 enter_project
 
-DEFAULT_BACKUP_DIR="$PROJECT_DIR/backups"
-BACKUP_DIR="${BACKUP_DIR:-$DEFAULT_BACKUP_DIR}"
-# The dump holds every customer's data and the WAHA snapshot holds the WhatsApp
-# sessions: owner-only, always. They used to come out 644 (readable by any user
-# on the machine). `umask` covers what this shell writes; the snapshots are
-# written by a container, which ignores it, so each file is also chmod'ed after
-# its final `mv`, and the loop below closes the 644 files older versions left.
-#
-# The folder goes to 700 only when it is the kit's own (`backups/` in the
-# project). A BACKUP_DIR set by the operator may be a shared mount another user
-# or a copy job reads; changing its mode would break that far from here, and
-# the 600 on each file already protects what matters.
+BACKUP_DIR="${BACKUP_DIR:-$PROJECT_DIR/backups}"
+# Backup é o banco inteiro, a sessão do WhatsApp (quem a lê fala pelo número da
+# empresa) e os anexos dos clientes: só o dono lê. Todo arquivo de backup nasce
+# no HOST, deste umask e com dono = quem chamou: os `tar` dos contêineres mandam
+# o snapshot pela saída padrão em vez de gravar numa montagem — gravado lá
+# dentro, ele nasceria do umask da imagem (022) e do root do contêiner, ilegível
+# para quem roda o backup pelo grupo docker. O `chmod` fecha a pasta que um
+# backup antigo deixou 755; onde o sistema de arquivos o recusa (CIFS/NFS), o
+# backup segue — os arquivos já nascem 600 — em vez de derrubar o update.sh.
 umask 077
 mkdir -p "$BACKUP_DIR"
-if [ "$BACKUP_DIR" = "$DEFAULT_BACKUP_DIR" ]; then
-  chmod 700 "$BACKUP_DIR" \
-    || c_ylw "⚠ não consegui deixar a pasta $BACKUP_DIR só para o dono — confira as permissões dela."
-fi
-for f in "$BACKUP_DIR"/db-*.sql.gz "$BACKUP_DIR"/waha-*.tgz "$BACKUP_DIR"/storage-*.tgz; do
-  if [ -f "$f" ]; then chmod 600 "$f" || true; fi
-done
+chmod 700 "$BACKUP_DIR" 2>/dev/null \
+  || c_ylw "⚠ não consegui fechar a pasta $BACKUP_DIR (chmod 700): os arquivos deste backup saem legíveis só pelo dono, mas a pasta ficou como estava."
 # Timestamp vem do host (não do script) pra manter determinismo do kit.
 ts="$(date +%Y%m%d-%H%M%S)"
 
@@ -54,7 +46,6 @@ if ! gzip -t "$parcial_db" 2>/dev/null; then
   die "o dump do banco saiu corrompido (gzip -t reprovou) — removi o arquivo para ninguém confiar nele. Sem backup válido, não siga com atualização."
 fi
 mv "$parcial_db" "$BACKUP_DIR/db-$ts.sql.gz"
-chmod 600 "$BACKUP_DIR/db-$ts.sql.gz" || true
 c_grn "✓ banco: $(du -h "$BACKUP_DIR/db-$ts.sql.gz" | awk '{print $1}') (conferido)"
 
 step "Snapshot das sessões do WhatsApp → $BACKUP_DIR/waha-$ts.tgz"
@@ -65,8 +56,7 @@ vol="$(volume_waha_data)"
 # retenção dos 14 e o pareamento do WhatsApp — o que este snapshot existe para
 # poupar — só se dava por perdido no dia do restore.
 parcial="$BACKUP_DIR/.waha-$ts.tgz.parcial"
-if ! docker run --rm -v "${vol}:/data:ro" -v "$BACKUP_DIR:/out" alpine:3.20 \
-       tar czf "/out/${parcial##*/}" -C /data . 2>/dev/null; then
+if ! docker run --rm -v "${vol}:/data:ro" alpine:3.20 tar czf - -C /data . 2>/dev/null > "$parcial"; then
   rm -f "$parcial"
   c_ylw "⚠ não consegui ler o volume das sessões ('$vol'): o backup do banco está feito, mas o pareamento do WhatsApp NÃO entrou nele."
 elif ! tar_tem_sessao "$parcial"; then
@@ -74,7 +64,6 @@ elif ! tar_tem_sessao "$parcial"; then
   c_ylw "⚠ o snapshot das sessões saiu VAZIO — a montagem /app/.sessions do contêiner waha resolveu para '$vol' e não tem sessão gravada. Este backup NÃO salva o pareamento do WhatsApp (o restore vai pedir o QR code de novo). Confira a montagem antes de considerar o backup completo."
 else
   mv "$parcial" "$BACKUP_DIR/waha-$ts.tgz"
-  chmod 600 "$BACKUP_DIR/waha-$ts.tgz" || true
   c_grn "✓ sessões WhatsApp salvas ($(du -h "$BACKUP_DIR/waha-$ts.tgz" | awk '{print $1}'))"
 fi
 
@@ -84,10 +73,13 @@ fi
 # restauração devolvia anexos quebrados. Por isso aqui falha é FALHA.
 if [ "${SINGLE_SERVER:-0}" = "1" ]; then
   step "Arquivos anexados (Storage) → $BACKUP_DIR/storage-$ts.tgz"
-  docker run --rm -v "$(dir_do_supabase)/volumes/storage:/data:ro" -v "$BACKUP_DIR:/out" alpine:3.20 \
-    tar czf "/out/storage-$ts.tgz" -C /data . \
-    || die "Não consegui salvar os arquivos anexados: este backup NÃO está completo."
-  chmod 600 "$BACKUP_DIR/storage-$ts.tgz" || true
+  parcial_st="$BACKUP_DIR/.storage-$ts.tgz.parcial"
+  if ! docker run --rm -v "$(dir_do_supabase)/volumes/storage:/data:ro" alpine:3.20 \
+       tar czf - -C /data . > "$parcial_st"; then
+    rm -f "$parcial_st"
+    die "Não consegui salvar os arquivos anexados: este backup NÃO está completo."
+  fi
+  mv "$parcial_st" "$BACKUP_DIR/storage-$ts.tgz"
   c_grn "✓ anexos: $(du -h "$BACKUP_DIR/storage-$ts.tgz" | awk '{print $1}')"
 fi
 

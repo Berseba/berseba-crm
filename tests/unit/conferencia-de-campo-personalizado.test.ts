@@ -295,7 +295,14 @@ describe("fail-open — tarefa desligada, sem credencial ou provedor fora grava 
     // Sem conferência não há campo removido: a escrita recebe o pedido intacto.
     expect(resultado.custom_fields).toBeUndefined();
     expect(resultado.estado).toBe("desligada");
-    expect(f.lidas).toEqual(["organizations"]);
+    // O DEGRAU 0 (o `padrao` do campo, #2730) lê o funil ANTES de saber que a
+    // tarefa está desligada — é de propósito: o padrão é determinístico e vale
+    // no estado PADRÃO do produto, onde a conferência está desligada. O que este
+    // teste quer provar continua provado: a conversa não é lida e o Jev não é
+    // chamado.
+    expect(f.lidas).toEqual(["organizations", "crm_leads", "crm_pipelines"]);
+    expect(f.lidas).not.toContain("conversations");
+    expect(f.lidas).not.toContain("messages");
     expect(r.chamadas).toHaveLength(0);
   });
 
@@ -424,6 +431,20 @@ describe("as mensagens do turno — o Conversador antes da resposta, o Operador 
   it("Operador, com a resposta deste turno já enviada: o MESMO bloco, não lista vazia", async () => {
     const depois = [...historico, msg("outbound", "anotado!", 4), msg("outbound", "vou ver opções", 5)];
     expect(await pendentes(depois)).toEqual(["procuro algo pequeno", "pra mim e meu cachorro"]);
+  });
+
+  // A pergunta ao Jev leva o valor CRU ("CEP é 01310-100?"). Se a mensagem
+  // chegasse com `[CEP]` — a máscara de telemetria do #2418 —, a conferência
+  // recusaria o CEP que o cliente acabou de digitar. CPF segue mascarado.
+  it("CEP e telefone com hífen chegam como o cliente digitou; CPF segue mascarado", async () => {
+    expect(
+      await pendentes([
+        msg("outbound", "qual o seu cep?", 0),
+        msg("inbound", "meu cep é 01310-100", 1),
+        msg("inbound", "zap +55-11-98765-4321", 2),
+        msg("inbound", "cpf 123.456.789-09", 3),
+      ]),
+    ).toEqual(["meu cep é 01310-100", "zap +55-11-98765-4321", "cpf [CPF]"]);
   });
 
   it("conversa longa (mais que as 1000 linhas do PostgREST): lê as mais recentes, nunca as do começo", async () => {

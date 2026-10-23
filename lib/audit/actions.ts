@@ -45,6 +45,7 @@ export const AUDIT_ACTIONS = [
   // `email_not_confirmed` (`app/actions/auth/resendConfirmation.ts`).
   "auth.signup_confirmation_resent",
   // ── end of the Berseba block ─────────────────────────────────────────────
+  "settings.agenda_presentation_updated",
   "ad_tracking_link.saved",
   "auth.login_success",
   "auth.login_failed",
@@ -73,6 +74,9 @@ export const AUDIT_ACTIONS = [
   "lead.imported",
   "contact.created",
   "contact.updated",
+  // A varredura que copia o nome salvo na agenda do celular para a ficha.
+  // Uma linha por empresa, em cada rodada que preencheu alguém dela — não uma por contato.
+  "contact.address_book_name_filled",
   "contacts.imported",
   "contact.anonymized",
   "contact.merge_pending",
@@ -179,6 +183,7 @@ export const AUDIT_ACTIONS = [
   "lgpd.redact_failed",
   "lgpd.tenant_redacted",
   "lgpd.consent_changed",
+  "lgpd.art12_notice_sent",
   "lgpd.manually_approved",
   "webhook.hmac_invalid",
   // Uma rodada do cron `webhook-replay` que reprocessou ou desistiu de algum
@@ -220,6 +225,10 @@ export const AUDIT_ACTIONS = [
   "ai_agent.duplicated",
   "ai_agent.paused",
   "ai_agent.published",
+  // A chave por ASSUNTO JURÍDICO por agente mudou de valor numa publicação
+  // (#2156). À parte de `ai_agent.published`: este só emite quando o VALOR
+  // mudou, então dá para perguntar "quando esta empresa desligou a chave?".
+  "ai_agent.legal_handoff_changed",
   "ai_agent.version_created",
   "ai_agent.version_updated",
   "ai_agent.tested",
@@ -253,10 +262,32 @@ export const AUDIT_ACTIONS = [
   // Emitida pelo worker quando houve EFEITO (tentativa de envio), nunca em
   // rodada de cron vazia.
   "prospecting.approach_sent",
+  // A BUSCA que FECHOU (spec 24). Responde "onde foram parar os resultados":
+  // total, inseridos, duplicados (já na base) e inválidos — mais a distribuição
+  // das classes do enriquecimento quando houve. Uma vez por busca, na transição
+  // para `succeeded`.
+  "prospecting.search_completed",
+  // O ENRIQUECIMENTO que RODOU (spec 24). Só quando ≥1 candidato ganhou
+  // `data.site` na rodada; metadata conta por classe, sem PII e sem URL.
+  "prospecting.site_enriched",
+  // A PERSONALIZAÇÃO que MUDOU (spec 24): voz do vendedor e vocabulário por
+  // nicho em `organizations.settings.prospeccao`. Sem segredo no metadata.
+  "prospecting.settings_updated",
+  // A SAÍDA ("responda PARAR") oferecida numa mensagem automática da prospecção
+  // (modo da 2ª mensagem). Sem texto, sem telefone — só os ponteiros.
+  // Emitida por inbound-turn e followup-turn quando o envio é aceito.
+  "prospecting.exit_offered",
+  // A compensação da anterior: a mensagem que levava a saída virou `failed`
+  // depois de aceita (watchdog, handler, webhook de status), e a reserva voltou.
+  // Gravada pelo gatilho `fn_prospeccao_saida_volta_com_a_mensagem` (0705).
+  "prospecting.exit_offer_withdrawn",
   "channel.pairing_code_requested",
   "channel.social_configured",
   "channel.social_disconnected",
   "channel.social_desvinculado",
+  // Reescreve a URL da assinatura de webhook do canal social pela origem atual
+  // (#2863): não arquiva a linha nem cria canal — só reconcilia o endereço.
+  "channel.social_webhook_ressincronizado",
   "channel.ai_access_updated",
   "channel.acervo_updated",
   "channel.reconnected",
@@ -276,6 +307,15 @@ export const AUDIT_ACTIONS = [
   // trilha dizer nos dois sentidos, como `archived`/`reactivated`.
   "channel.disabled",
   "channel.enabled",
+  // Rótulo interno do canal (channel_sessions.display_name); nada vai ao
+  // provedor. Emitida por app/api/v1/channel-sessions/[id]/name.
+  "channel.renamed",
+  // A janela de manutenção (#2388): criar, editar e cancelar são mutações da
+  // tela e auditam como toda mutação. A pausa e a retomada que a janela aplica
+  // saem como `channel.disabled`/`channel.enabled`, com `origem: schedule`.
+  "channel.schedule_created",
+  "channel.schedule_updated",
+  "channel.schedule_cancelled",
   // Chamada de voz WhatsApp (WaCalls, spec 18) — pareamento do segundo
   // dispositivo vinculado, opt-in por org. Admin only.
   //
@@ -349,6 +389,7 @@ export const AUDIT_ACTIONS = [
   "followup_flow.disabled",
   "followup_flow.deleted",
   "followup_flow.duplicated",
+  "followup_flow.imported",
   "followup_flow.rolled_back",
   "followup.worker_run",
   "followup.silence_sweep_run",
@@ -524,6 +565,13 @@ export const AUDIT_ACTIONS = [
   // "quem mexeu no cadastro dela?". Fundir as duas obrigaria a ler o metadata
   // para saber qual das duas coisas aconteceu.
   "org.branding_updated",
+  // As ALÍNEAS a), c) e d) do art. 15.º preenchidas pelo controlador
+  // (`organizations.settings.art15`, issue #2356) — mutação de TENANT com a
+  // mesma forma da anterior: `organization_id` + `resource_id` = uuid da org.
+  // Outra ação, e não `org.updated`, porque a pergunta da trilha é "quem
+  // declarou as alíneas que o relatório de acesso imprimiu?" — e o metadata
+  // guarda a declaração como ela foi gravada, que é o que a CNPD pode pedir.
+  "org.art15_updated",
 
   // ── Vindos da `main` durante a continuação do épico ──────────────────
   // Chegaram pelo painel (`action-codes.ts`) no mesmo intervalo em que este
@@ -615,6 +663,10 @@ export const AUDIT_ACTIONS = [
   // negativa de um colega não teria explicação na trilha — nem como responder
   // "quando foi que desligaram isso?".
   "agenda.colegas_podem_mexer_alterado",
+  // A opção que faz o Meet da reunião nascer JÁ ABERTO (issue #2063, migration
+  // 0648). Risco é parte do desenho — quem tiver o link entra sem pedir —, então
+  // "quando foi que ligaram isso?" é a primeira pergunta depois de um incidente.
+  "agenda.meet_acesso_aberto_alterado",
   // A rodada que AVISOU alguém do próprio compromisso. Mensagem que saiu para o
   // telefone de um cliente é efeito, e efeito audita — mas só a rodada que
   // enviou: a que varreu e não achou ninguém a avisar não é mutação.
@@ -998,6 +1050,11 @@ export const AUDIT_ACTIONS = [
   // PATCH com `tarefa`; metadata.tarefa diz qual, e estado_anterior o de antes.
   "ai.jev.tarefa_alterada",
   "ai.jev.modo_roteador_alterado",
+  // DE ONDE o Jev responde mudou (PATCH com `origem`): TypeSafe direto ou via
+  // OpenRouter. Muda o fornecedor que recebe a mensagem do cliente, então é a
+  // mesma pergunta de LGPD do ligado — metadata.origem diz para qual, e
+  // origem_anterior de onde saiu.
+  "ai.jev.origem_alterada",
   // O pedido de descadastro é do cliente e o padrão é irreversível — mas a
   // regra W-02 do catálogo de negócio prevê o override: admin desbloqueia à
   // mão. Sem esta linha, a ação existiria sem rastro de QUEM a desfez, que é
@@ -1041,6 +1098,47 @@ export const AUDIT_ACTIONS = [
   // (#2098): gravada pela tela de Conversões, em `organizations.settings.conversions`.
   "conversions.meta_identity_updated",
 
+  // O operador baixou o histórico de UMA conversa em PDF (issue #1982): o gesto
+  // auditável é a saída de dados — QUANTAS linhas saíram, não o que elas dizem
+  // (o corpo da mensagem não vai para log nem para metadata, LGPD).
+  "conversation.exported",
+  // ── Cobrança do revendedor — rotas do dono (spec 2026-09-29, PR 2) ───────
+  // Plano criado/editado e arquivado; plano atribuído ou trocado numa empresa
+  // (`metadata.quando`: atribuido | imediato); prazo dado e isenção
+  // (`metadata.reativada` diz se a suspensão por cobrança saiu junto); a chave
+  // desligada em /admin/sistema, com quantas suspensas foram liberadas.
+  "cobranca.plano_salvo",
+  "cobranca.plano_arquivado",
+  "cobranca.plano_trocado",
+  "cobranca.prazo_concedido",
+  "cobranca.isencao_definida",
+  "cobranca.modulo_desligado",
+  // ── Cobrança do revendedor — provedor e régua (PR 3a, spec §13) ──────────
+  // Conexão e publicação da chave (metadata só com last4, NUNCA a chave);
+  // checkout iniciado; estado traduzido da releitura (com statusBruto, só
+  // quando mudou); cancelamento no fim; suspensão e reativação por cobrança;
+  // rodada do cron com efeito; tolerância da régua salva.
+  "cobranca.provedor_conectado",
+  "cobranca.modo_publicado",
+  "cobranca.checkout_iniciado",
+  "cobranca.estado_mudou",
+  "cobranca.assinatura_cancelada",
+  "cobranca.org_suspensa",
+  "cobranca.org_reativada",
+  "cobranca.rodada",
+  "cobranca.regua_salva",
+  // #2609, a conferência da releitura: o preço da assinatura NO PROVEDOR
+  // divergiu do preço do PLANO gravado (metadata com os DOIS números, o plano e
+  // a assinatura). Detecção, não correção — o preço de quem já assinou é
+  // decisão de quem administra, e o audit é o lugar de vê-la.
+  "cobranca.preco_divergente",
+  // O servidor MCP externo registrado pela instalação (#2147): gravado (ou
+  // apagado, com `registrado: false` no metadata) em
+  // `organizations.settings.mcp_externo`. É mutação de TENANT — o endereço que
+  // o agente passa a consultar vem de uma pessoa com poder para instalar —, e
+  // por isso vai com `organization_id` e `resource_id` = uuid da org. A CHAVE
+  // do servidor nunca entra aqui: o metadata traz endpoint e forma.
+  "org.mcp_externo_registrado",
   // #1639, fatia do login: o código colado em /admin/sistema virou tokens e foi
   // guardado cifrado. Sem esta linha, "quem conectou a assinatura, e quando"
   // ficaria sem rastro — e é a conta que passa a pagar as chamadas.
@@ -1054,6 +1152,115 @@ export const AUDIT_ACTIONS = [
   // titular), não decisão operacional de esconder da operação.
   "contact.marked_personal",
   "contact.unmarked_personal",
+
+  // O interruptor POR EMPRESA do passo `ai_decide` das automações (#2367):
+  // gravado em `organizations.settings.automacoes.ai_decide` pela tela
+  // Configurações → Automações. Sem esta linha, desligar o freio de toda a
+  // empresa (e religá-lo) ficaria sem rastro — e é ele que decide se alguma
+  // regra consulta o modelo.
+  "settings.automation_ai_decide_updated",
+
+  // Planos de tarefa (#1752): a lista `settings.task_plans` mudou pela rota
+  // `settings/task-plans` — mesma família de `campaign.settings_updated`.
+  "task_plans.settings_updated",
+
+  // Fontes liberadas do banco externo (Spec 23): o administrador trocou o modo
+  // (`all`/`list`) e a lista do que o assistente pode ler. O metadata carrega só
+  // CONTAGENS (modo e número de fontes), nunca nomes de tabela ou de coluna.
+  "external_db_sources.updated",
+  // Instâncias de receita do banco externo (Spec 25 R1): o administrador trocou a
+  // lista de receitas da conexão (PUT .../recipes). O metadata carrega só
+  // CONTAGENS (quantas instâncias, quantas ativas) — nunca os parâmetros de fixos.
+  "external_db_recipes.updated",
+  // Pré-visualização de uma instância de receita (POST .../recipes/preview):
+  // só contagens (linhas, colunas, truncado), nunca valores lidos do banco de
+  // origem.
+  "external_db_recipes.previewed",
+
+  // Gestão de tenants pelo admin da plataforma (migration 0614).
+  // A LÁPIDE, gravada pelo banco dentro de `fn_excluir_organizacao`, com
+  // `organization_id` nulo e `resource_id` = a organização excluída.
+  "organization.deleted",
+  // O fecho da exclusão (Storage, logins, canais externos), gravado pela
+  // aplicação depois do commit — `lib/tenants/exclusao.ts`.
+  "organization.deletion_completed",
+  // Leitura da lista de membros com e-mail de login (dado pessoal) de um tenant.
+  "platform_admin.tenant_members_viewed",
+  // O admin da plataforma corrigiu o e-mail de login de um membro (só hashes).
+  "member.email_changed",
+
+  // #2593: o TELEFONE de uma ficha SEM número foi GRAVADO na hora, sem decisão
+  // humana, quando o agente ouviu o número na conversa — `proporDadoDoContato`
+  // só toma este caminho com `phone_number` vazio e valor em E.164, e a trava
+  // é o `phone_number is null` no UPDATE. Distinguir de `field_proposed` é o
+  // que permite responder "quantos números entraram sozinhos, e de quem".
+  "contact.field_auto_applied",
+  // O gestor mudou a carteira do cliente (põe/tira o dono) pela porta
+  // dedicada `PATCH /contacts/[id]/carteira` (#2591) — a escrita é do servidor,
+  // então o audit é a única trilha de quem mudou o dono.
+  "contact.carteira_changed",
+
+  // #2593, item 1 do CR: um administrador ligou ou desligou a escrita
+  // automática do telefone de ficha vazia (`organizations.settings.crm
+  // .telefone_de_ficha_vazia`). Precisa de código próprio porque é a DECISÃO
+  // que passa a permitir escrita sem decisão humana: quem auditar a ficha de um
+  // cliente precisa encontrar o ato administrativo que abriu a porta, e não só
+  // as gravações que ela deixou passar.
+  "crm.telefone_de_ficha_vazia_alterado",
+  // O admin da plataforma exportou o INVENTÁRIO das instalações em CSV (#2777).
+  // É leitura, mas é leitura EM ESCALA DE PLATAFORMA: grava quem, quando, QUANTO
+  // saiu, se o teto cortou e QUE filtros valiam — nunca o texto da busca, que é
+  // dado de quem foi buscado.
+  "platform.tenants_exported",
+  // Marca permanente "sempre atendimento humano" (issue 2379): `ai_opt_out`
+  // ligado na ficha do contato — a devolução (manual ou automática) não a desfaz.
+  "contacts.always_human_marked",
+  // A marca foi removida: só limpa `ai_opt_out`; a conversa segue com a trava
+  // de handoff de quem a pôs.
+  "contacts.always_human_unmarked",
+  // B1 (spec 24): a prévia da abordagem de prospecção foi GRAVADA no candidato
+  // (`data.previa`) para o tick reusar — deixou de ser somente leitura, logo
+  // tem trilha. `resource_id` = o candidato; o TEXTO não entra no metadata.
+  "prospecting.preview_saved",
+  // B2 (spec 24): o PREPARO AUTOMÁTICO gerou prévias sozinho (tick, sem clique).
+  // UMA linha por rodada e só quando ≥1 prévia foi gravada — rodada que não gerou
+  // nada não é mutação. Metadata: contagens e ids de campanha; o TEXTO nunca entra.
+  // Consome crédito de IA por prévia, daí a trilha: responde "por que o gasto subiu".
+  "prospecting.previews_generated",
+  // A tela de Contatos devolvendo a base em CSV/vCard (#2759) — portabilidade,
+  // LGPD art. 18, V. Audita o GESTO com o total de linhas e os filtros que
+  // valiam, nunca o termo de busca.
+  "contacts.exported",
+  // O operador carregou a imagem que a Resposta rápida passa a enviar junto
+  // com o texto — `POST /message-templates/:id/midias` (#2526). A REMOÇÃO não
+  // tem código próprio: ela acontece dentro do `template.updated` (campo
+  // `removidas` no metadata) ou dentro do `template.deleted`, que são os atos
+  // em que a imagem sai de fato.
+  "template.media_added",
+  // O cron de lembrete de tarefa (#2529) avisou RESPONSÁVEIS nesta rodada —
+  // só quando houve efeito, como manda a lei do §Audit log. O metadata traz
+  // quantas tarefas, quantas puladas e por quê; nunca o número de WhatsApp de
+  // ninguém.
+  "task.reminder_batch",
+  // A pessoa gravou a própria preferência de lembrete de tarefa (os dois
+  // interruptores, a antecedência e o opt-in de WhatsApp). O número NÃO entra:
+  // é dado de contato, e o audit é trilha legível por quem administra.
+  "user.task_reminder_prefs_updated",
+  // "Sincronizar agenda do celular" (#2736): o gesto de IMPORTAR em bloco a
+  // agenda do aparelho pareado — mesmo porquê do `contacts.imported` de planilha
+  // ("quem trouxe esta base, e quando"), agora com o número de qual conexão veio.
+  "contacts.synced_from_phone",
+  // O admin mudou o que os avisos do celular mostram com a tela bloqueada
+  // (`settings.notificacoes`); metadata com o valor anterior e o novo.
+  "notificacoes.tela_bloqueada_alterada",
+  // Inscrição de push removida no servidor: desligar os alertas, sair, ou
+  // "sair de todos os dispositivos" (metadata.escopo diz qual).
+  "notification_prefs.push_subscription_removed",
+  "agenda.service_block",
+  "agenda.service_configure",
+  "agenda.service_refresh",
+  "agenda.service_resource",
+  "agenda.service_unblock",
 ] as const;
 
 /** Um código de auditoria. Derivado de `AUDIT_ACTIONS` — não redigite a lista. */

@@ -25,7 +25,7 @@
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText, stepCountIs, type LanguageModel, type StopCondition, type ToolSet } from "ai";
+import { generateText, stepCountIs, streamText, type LanguageModel, type StopCondition, type ToolSet } from "ai";
 
 // Fonte única do endpoint — a mesma constante que o registry de produção usa.
 // Repetir a URL aqui criaria dois lugares para consertar quando ela mudar.
@@ -56,6 +56,7 @@ import { sendFinalResponse } from "./finalize";
 import { finalizeHandoff } from "./handoff";
 import { loadHistoryWithBudget } from "./history";
 import { mintEphemeralToken, revokeEphemeralToken } from "./mcp_token";
+import { carregarServidorMcpExternoDoTurno } from "@/lib/mcp/servidor-externo/carregar";
 import { pickToolsFromMcp, type RuntimeHandoffSignal } from "./tools";
 import { modulosLigados } from "@/lib/instalacao/modulos";
 import { capacidadesDaOrganizacao } from "@/lib/organizacao/capacidades";
@@ -130,6 +131,7 @@ interface AgentRow {
   id: string;
   organization_id: string;
   created_by: string | null;
+  config?: { mcp_externo_no_atendimento?: unknown } | null;
 }
 
 function buildSentinelRegex(keywords: string[]): RegExp | null {
@@ -195,11 +197,13 @@ export function buildModel(
       return createAnthropic({ apiKey })(modelId);
     case "openai":
       return createOpenAI({ apiKey })(modelId);
-    // A ASSINATURA (#1639): mesma fábrica da OpenAI, endpoint do Codex. O
+    // A ASSINATURA (#1639): mesma fábrica da OpenAI, API pública de Responses. O
     // `apiKey` que chega por aqui é o `access_token` do login por PKCE — quem
     // o monta é o leitor próprio (`lerLoginCodexRenovandoSeProxima`), nunca a
     // tela de chave. Sem este caso o ensaio responderia `unsupported_provider`
     // enquanto o worker atenderia a mensagem real.
+    // A lista da conta vem de GET /v1/models, conforme o contrato oficial
+    // Sign in with ChatGPT; a inferência usa a API pública de Responses abaixo.
     case PROVEDOR_POR_ASSINATURA:
       return createOpenAI({ apiKey, baseURL: OPENAI_CODEX_ENDPOINT })(modelId);
     case "google":
@@ -338,7 +342,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
 
     const { data: agentRaw } = await admin
       .from("ai_agents")
-      .select("id, organization_id, created_by")
+      .select("id, organization_id, created_by, config")
       .eq("id", run.agent_id)
       .eq("organization_id", run.organization_id)
       .maybeSingle();
@@ -417,7 +421,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
           return await failRun(
             run,
             "credential_invalid",
-            `sem linha de login nem chave de reserva para ${version.provider}: conecte o Codex em IA › Credenciais`,
+            `sem linha de login nem chave de reserva para ${version.provider}: conecte a assinatura do ChatGPT em IA › Credenciais`,
             startedAt,
           );
         }
@@ -612,6 +616,30 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       supabase: admin,
     };
     const handoffSignal: RuntimeHandoffSignal = { triggered: false };
+    // #2147 — servidor MCP externo que o dono da instalação registrou. `null`
+    // SEM REDE quando a versão não escolheu nenhuma remota (item 7) ou o TURNO
+    // TEM CONTATO sem a opção `mcp_externo_no_atendimento` do agente (item 8,
+    // escolha (b)). Ligada, o servidor recebe a identidade do contato em
+    // cabeçalho (ver `carregar.ts`). `null` também sem registro ou com o
+    // servidor calado.
+    const servidorExterno = await carregarServidorMcpExternoDoTurno(
+      admin,
+      run.organization_id,
+      version.tool_ids ?? [],
+      {
+        ...(contatoDoTurno
+          ? {
+              contatoDoTurno,
+              ...(agent?.config?.mcp_externo_no_atendimento === true
+                ? {
+                    noAtendimento: true,
+                    ...(run.conversation_id ? { conversaDoTurno: run.conversation_id } : {}),
+                  }
+                : {}),
+            }
+          : {}),
+      },
+    );
     const tools = pickToolsFromMcp({
       supabase: admin,
       ctx,
@@ -624,6 +652,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       modulosLigados: await modulosLigados(admin),
       capacidadesLigadas: await capacidadesDaOrganizacao(admin, run.organization_id),
       handoffSignal,
+      ...(servidorExterno ? { servidorMcpExterno: servidorExterno } : {}),
       ...(contatoDoTurno ? { contatoDoTurno } : {}),
     });
 
@@ -677,13 +706,32 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
       { role: "user" as const, content: inboundBody },
     ];
 
-    const result = await generateText({
-      model,
-      system: version.system_prompt,
-      messages,
-      tools,
-      stopWhen: [stepCountIs(version.max_steps), budgetGuard],
-    });
+    const result =
+      providerDoTurno === PROVEDOR_POR_ASSINATURA
+        ? await (async () => {
+            const streamed = streamText({
+              model,
+              system: version.system_prompt,
+              messages,
+              tools,
+              stopWhen: [stepCountIs(version.max_steps), budgetGuard],
+              providerOptions: { openai: { store: false } },
+            });
+            const [text, steps, usage, finishReason] = await Promise.all([
+              streamed.text,
+              streamed.steps,
+              streamed.usage,
+              streamed.finishReason,
+            ]);
+            return { text, steps, usage, finishReason };
+          })()
+        : await generateText({
+            model,
+            system: version.system_prompt,
+            messages,
+            tools,
+            stopWhen: [stepCountIs(version.max_steps), budgetGuard],
+          });
 
     // 12) Aggregate metrics.
     const usage = totalUsage(result.steps as Array<{ usage?: { inputTokens?: number; outputTokens?: number } }>);
@@ -830,7 +878,7 @@ export async function runAgent(input: RunAgentInput): Promise<RunAgentResult> {
     return await failRun(run, "runtime_error", message, startedAt);
   } finally {
     if (ephemeralTokenId) {
-      await revokeEphemeralToken(ephemeralTokenId).catch(() => {
+      await revokeEphemeralToken(ephemeralTokenId, run.organization_id).catch(() => {
         // Token TTL=300s; lingering revoke failure is non-critical.
       });
     }

@@ -144,6 +144,16 @@ export type ActivityType =
   | "task_created"
   | "task_completed"
   /**
+   * O PLANO de tarefas (#1752) aplicado ao negócio — a sequência reutilizável
+   * (`organizations.settings.task_plans`) que virou N tarefas de uma vez.
+   *
+   * A linha é DUAS coisas: o "foi aplicado" que quem abre o card lê, e a MARCA
+   * de idempotência que `lib/tarefas/plano.ts` consulta antes de criar — sem
+   * coluna `plan_id` em `crm_tasks` (migration), esta é a única identidade
+   * exata de "este plano já rodou aqui" que o banco guarda.
+   */
+  | "task_plan_applied"
+  /**
    * DOIS CADASTROS DA MESMA PESSOA VIRARAM UM. Emitido por
    * `fn_mesclar_contatos` (migration 0215) em cada negócio que o contato
    * vencedor passou a ter — inclusive nos que ELE não tinha e herdou do
@@ -190,7 +200,23 @@ export type ActivityType =
    * possível (`lead_id` é NOT NULL), só auditoria (D6).
    */
   | "contact_marked_personal"
-  | "contact_unmarked_personal";
+  | "contact_unmarked_personal"
+  /**
+   * O TELEFONE ENTROU SOZINHO NA FICHA (#2593).
+   *
+   * A exceção da spec 17 §4b — o dado ouvido é proposto, não gravado — só vale
+   * para o telefone de um cadastro SEM número, e só com a opção da organização
+   * ligada (`organizations.settings.crm.telefone_de_ficha_vazia`). Sem esta
+   * linha, o número apareceria no cadastro e o ÚNICO registro seria a auditoria
+   * (`contact.field_auto_applied`), que não tem tela: quem opera lê a timeline,
+   * e "isso entrou sozinho" é exatamente o que ele precisa saber para não
+   * achar que alguém digitou.
+   *
+   * Emitida por `registrarTelefoneAplicadoNaTimeline` — junto e não dentro do
+   * UPDATE do telefone, porque a linha é rastro: falhar nela não pode desfazer
+   * a escrita que ela descreve.
+   */
+  | "contact_field_auto_applied";
 
 export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   lead_created: "Entrou no funil",
@@ -285,6 +311,7 @@ export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   voice_call_unanswered: "Chamada de voz sem resposta",
   task_created: "Tarefa combinada",
   task_completed: "Tarefa concluída",
+  task_plan_applied: "Plano de tarefas aplicado",
   // Rótulo com OBJETO e sem jargão de banco: "Mesclado" sozinho é palavra de
   // engenheiro. O que aconteceu, para quem lê a timeline do negócio, é que dois
   // cadastros da mesma pessoa viraram um — e é por isso que este negócio pode
@@ -302,6 +329,10 @@ export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   // que o contato saiu da operação (ou voltou), não o nome da coluna.
   contact_marked_personal: "Marcado como pessoal",
   contact_unmarked_personal: "Desmarcado como pessoal",
+  // Rótulo que diz DUAS coisas de uma vez: que entrou sozinho (e não por
+  // digitação de alguém) e de onde veio. Só assim quem lê a linha do tempo não
+  // vai procurar quem foi que digitou o número.
+  contact_field_auto_applied: "Telefone informado pelo cliente aplicado automaticamente",
 };
 
 /** Quando o tipo é legado/desconhecido, a linha ainda é honesta — sem jargão. */

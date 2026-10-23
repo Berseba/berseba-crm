@@ -7,6 +7,7 @@ import { forgotPasswordSchema, type ForgotPasswordInput } from "@/lib/auth/schem
 import { audit, hashEmail } from "@/lib/audit";
 import { authRateLimited, AUTH_LIMITS } from "@/lib/auth/rate-limit";
 import { env } from "@/lib/env";
+import { ipDoCliente } from "@/lib/http/ip-do-cliente";
 
 export type ResendConfirmationResult =
   | { ok: true }
@@ -36,7 +37,7 @@ export async function resendConfirmation(
   const hdrs = await headers();
   const origin = hdrs.get("origin") ?? env.NEXT_PUBLIC_APP_URL;
   const requestId = hdrs.get("x-request-id");
-  const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;
+  const ip = ipDoCliente(hdrs);
   const userAgent = hdrs.get("user-agent") ?? null;
 
   if (await authRateLimited("resend_confirmation", parsed.data.email, AUTH_LIMITS.reset)) {

@@ -18,7 +18,7 @@ import type { Idioma } from "@/lib/i18n/idiomas";
 import { roleAtLeast } from "@/lib/auth/types";
 import { canonicalPhoneBR, phoneLookupVariants } from "@/lib/channels/phone-variants";
 import { encontrarContatoPorTelefone } from "@/lib/channels/contato-por-telefone";
-import { hashCpf, encryptCpfSql } from "@/lib/contacts/cpf";
+import { camposCpfParaGravar, hashCpf } from "@/lib/contacts/cpf";
 import type { Contact } from "@/lib/types/contacts";
 import { ensureConversation, sessaoProntaParaEnvio } from "@/lib/automation/start-conversation";
 import type {
@@ -31,11 +31,18 @@ import { contactListQuerySchema } from "@/lib/schemas";
 import { arrayDeUmValorParaOr } from "@/lib/inbox/marcador-da-conversa";
 import { buscaValeConsulta } from "@/lib/inbox/termo-de-busca";
 import { padraoRegexDeBusca } from "@/lib/contacts/busca-regex";
+import {
+  camposQueMudaram,
+  defsDoPadraoDaOrg,
+  erroDePadrao,
+  recusasDePadrao,
+} from "@/lib/leads/padrao-do-campo";
+import { testaComPrazo } from "@/lib/leads/padrao-do-campo-no-servidor";
 
 type SB = SupabaseClient;
 
 const SELECT_COLS =
-  "id, organization_id, name, display_name, email, email_normalized, phone_number, cpf_hash, birthdate, is_blocked, blocked_reason, is_personal, is_anonymized, anonymized_at, is_merged_into, merged_at, consent, tags, source, source_metadata, custom_fields, created_at, updated_at, last_activity_at, first_service_at";
+  "id, organization_id, name, display_name, address_book_name, email, email_normalized, phone_number, cpf_hash, birthdate, is_blocked, blocked_reason, is_personal, ai_opt_out, is_anonymized, anonymized_at, is_merged_into, merged_at, consent, tags, source, source_metadata, custom_fields, created_at, updated_at, last_activity_at, first_service_at";
 
 interface CursorPayload {
   sort: string | null;
@@ -219,6 +226,12 @@ export async function listContactsHandler(
       // zero resultados para um contato que EXISTE, e desistiu — a demanda
       // morreria por uma coluna faltando no OR.
       `display_name.imatch.${s}`,
+      // O nome da agenda do celular (#2439) é o que a tela mostra quando não há
+      // nome escolhido no CRM — mesma razão do `display_name` acima. Mas ele é SÓ
+      // DA EQUIPE: com `soContato` (a busca do agente durante a conversa), casar
+      // nele faria a ferramenta responder ao modelo se o rótulo interno contém o
+      // termo digitado — o rótulo chegaria ao cliente aos pedaços.
+      ...(soContato ? [] : [`address_book_name.imatch.${s}`]),
       `email.imatch.${s}`,
       `phone_number.imatch.${s}`,
     ];
@@ -470,6 +483,26 @@ export async function createContactHandler(
   ctx: HandlerCtx,
   input: ContactCreate,
 ): Promise<CreateContactResult> {
+  // ── O PADRÃO (#2730) — a MESMA régua do formulário, aqui no SERVIDOR ──────
+  //
+  // O form é a primeira porta, não a garantia: dá para POSTar direto na API.
+  // As definições vêm de TODOS os funis da organização, porque o CONTATO não
+  // tem funil próprio — a tela lê o padrão (`useDefaultPipeline`) e o servidor,
+  // que não sabe qual é, pergunta a todos.
+  //
+  // Falha de leitura devolve lista vazia e a escrita segue: fail-open da casa
+  // (`settingsDoFunil` faz igual). Cair a rota por um `settings` torto seria
+  // trocar "grava torto" por "não grava nada" — e a régua só tem poder sobre
+  // o que ela consegue LER.
+  if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
+    // Escopo `contato` (#2852): a ficha do contato só recebe os campos do
+    // CONTATO, e são só esses que ela pode gravar. Sem o filtro, o padrão de um
+    // campo do NEGÓCIO — que o diálogo nem conhece — recusava a criação.
+    const defs = await defsDoPadraoDaOrg(supabase, ctx.organization_id, "contato");
+    const recusas = recusasDePadrao(defs, input.custom_fields, testaComPrazo);
+    if (recusas.length > 0) throw erroDePadrao(recusas, ctx.requestId, ctx.idioma);
+  }
+
   const a = actorAuditPayload(ctx.actor);
   const insertRow: Record<string, unknown> = {
     organization_id: ctx.organization_id,
@@ -487,9 +520,10 @@ export async function createContactHandler(
   };
 
   if (input.cpf) {
-    insertRow.cpf_hash = hashCpf(input.cpf);
-    const enc = await encryptCpfSql(supabase, input.cpf);
-    if (enc) insertRow.cpf_encrypted = enc;
+    // #2522: os DOIS campos ou NENHUM — o CHECK `contacts_cpf_consistency`
+    // recusa a linha inteira se só o hash for gravado. Sem cifra disponível
+    // (RPC ausente ou chave não semeada) o contato nasce SEM CPF.
+    Object.assign(insertRow, await camposCpfParaGravar(supabase, input.cpf));
   }
 
   const { data: created, error: insErr } = await supabase
@@ -617,6 +651,31 @@ export async function patchContactHandler(
     );
   }
 
+  // ── O PADRÃO (#2730) — DEPOIS do select, e só sobre o que MUDOU ──────────
+  //
+  // A MESMA régua da criação, com a MESMA leitura (todos os funis, escopo
+  // `contato`: o contato não tem funil próprio), mas agora JULGANDO O DIFF.
+  //
+  // Antes isto rodava no começo e julgava o `custom_fields` INTEIRO, na
+  // suposição de que "PATCH manda só o que mudou" — suposição falsa para este
+  // mapa: o `EditContactDialog` grava o objeto completo (o PATCH SUBSTITUI),
+  // e a edição pela lista de contatos manda o mapa que nem renderizou. Efeito
+  // medido no #2814: a pessoa troca só o nome e recebe 422 por um campo
+  // escondido (`mostrar_quando`) — ou por um campo de outro funil — que ela
+  // nem tocou. O estado anterior está aqui do lado (`existing.custom_fields`),
+  // então o que se julga é o valor que vai ser DIFERENTE do gravado.
+  if (input.custom_fields && Object.keys(input.custom_fields).length > 0) {
+    const alterados = camposQueMudaram(
+      input.custom_fields,
+      (existing as { custom_fields?: unknown }).custom_fields,
+    );
+    if (Object.keys(alterados).length > 0) {
+      const defs = await defsDoPadraoDaOrg(supabase, ctx.organization_id, "contato");
+      const recusas = recusasDePadrao(defs, alterados, testaComPrazo);
+      if (recusas.length > 0) throw erroDePadrao(recusas, ctx.requestId, ctx.idioma);
+    }
+  }
+
   const patch: Record<string, unknown> = {};
   if (input.name !== undefined) patch.name = input.name;
   if (input.display_name !== undefined) patch.display_name = input.display_name;
@@ -658,9 +717,11 @@ export async function patchContactHandler(
     patch.consent = { ...anterior, ...input.consent };
   }
   if (input.cpf !== undefined) {
-    patch.cpf_hash = hashCpf(input.cpf);
-    const enc = await encryptCpfSql(supabase, input.cpf);
-    if (enc) patch.cpf_encrypted = enc;
+    // Mesma regra do create (#2522): os DOIS campos ou NENHUM. Quando a cifra
+    // falha aqui, o par ANTIGO permanece intacto (hash e texto continuam do
+    // mesmo CPF) — apagar só um dos dois seria a corrupção silenciosa que o
+    // CHECK existe para impedir.
+    Object.assign(patch, await camposCpfParaGravar(supabase, input.cpf));
   }
 
   if (Object.keys(patch).length === 0) {
@@ -758,6 +819,42 @@ export async function patchContactHandler(
           if (error) console.error("[contacts.patch] emit_event failed", error.message);
         });
     }
+  }
+
+  /**
+   * #2812 (segunda metade) — O CONTATO GANHOU TELEFONE.
+   *
+   * O gatilho `contact.phone_added` é a transição que faltava no vocabulário de
+   * automação: a ficha que estava SEM número passa a ter um. Emitido AQUI, e só
+   * aqui, por dois motivos que são a metade do trabalho:
+   *
+   *  - DEPOIS do UPDATE acima — a regra que este evento dispara lê a ficha para
+   *    decidir, e a guarda `checarGuardasDeContato` (lib/automation/guarda-do-contato.ts)
+   *    mata com `no_phone` (sem nova tentativa) quem chega sem número. Emitir
+   *    antes da gravação entregaria à regra um contato ainda vazio, e o defeito
+   *    é MUDO: a regra some sem erro, sem log e sem run.
+   *  - SÓ na TRANSIÇÃO (antes vazio/nulo, depois preenchido) — quem já tinha
+   *    número não "ganhou" nenhum, e tirar o número não é ganhá-lo. Um evento a
+   *    cada edição de ficha encheria a fila de automação com o que não aconteceu.
+   *
+   * A grafia do par é a MESMA de `contact.tag_added`, logo acima — e o `contact.phone_added`
+   * está irmão dele no mapa de gatilhos (lib/schemas/webhooks.ts).
+   */
+  const telefoneAntes = ((antes as { phone_number?: string | null }).phone_number ?? "").trim();
+  const telefoneDepois = ((contact as { phone_number?: string | null }).phone_number ?? "").trim();
+  if (!telefoneAntes && telefoneDepois) {
+    await createAdminClient()
+      .rpc("emit_event", {
+        p_event_type: "contact.phone_added",
+        p_entity_kind: "contact",
+        p_entity_id: contact.id,
+        p_payload: { phone_number: telefoneDepois },
+        p_metadata: { request_id: ctx.requestId, ...a.metadataActor },
+        p_organization_id: contact.organization_id,
+      })
+      .then(({ error }) => {
+        if (error) console.error("[contacts.patch] emit_event failed", error.message);
+      });
   }
 
   await audit({

@@ -210,8 +210,11 @@ export interface FlywheelRunResult {
 export async function runFlywheelOnce(
   pool: pg.Pool,
   llmCfg: LlmEdgeConfig,
-  /** `limit` is PER ORGANIZATION (see collectPendingTurns). */
-  opts: { limit: number; log: Logger },
+  /**
+   * `limit` is PER ORGANIZATION (see collectPendingTurns). Berseba: `janelaMs`
+   * (upstream's window) is not applied: the per-org query keeps LOOKBACK_DAYS.
+   */
+  opts: { limit: number; log: Logger; janelaMs?: number },
 ): Promise<FlywheelRunResult> {
   const runId = crypto.randomUUID();
   const lockClient = await pool.connect();
@@ -406,7 +409,8 @@ export async function runFlywheelLoop(
 ): Promise<void> {
   while (!signal.aborted) {
     // dorme PRIMEIRO: no boot os turnos recentes já foram julgados pela rodada
-    // anterior (dedup pela unique), e subir o worker não deve custar LLM.
+    // anterior (o `not exists` de `collectRecentTurns`), e subir o worker não
+    // deve custar LLM.
     await new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, opts.intervalMs);
       signal.addEventListener('abort', () => {
@@ -416,7 +420,13 @@ export async function runFlywheelLoop(
     });
     if (signal.aborted) return;
     try {
-      const result = await runFlywheelOnce(pool, llmCfg, { limit: opts.limit, log: opts.log });
+      // 2× o intervalo: a rodada cobre o que entrou desde a anterior, com folga
+      // para um atraso ou um reinício do worker, e nunca o histórico inteiro.
+      const result = await runFlywheelOnce(pool, llmCfg, {
+        limit: opts.limit,
+        log: opts.log,
+        janelaMs: 2 * opts.intervalMs,
+      });
       opts.log.info('flywheel: rodada agendada concluída', result as unknown as Record<string, unknown>);
     } catch (err) {
       opts.log.error('flywheel: rodada agendada falhou', {

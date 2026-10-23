@@ -106,6 +106,19 @@ function world(w: World = {}) {
         ];
   tables.conversations = [{ id: CONVERSATION, organization_id: ORG_ID, contact_id: CONTACT, is_group: w.isGroup ?? false }];
   tables.automation_rule_runs = [...(w.runs ?? [])];
+  // Upstream v1.87.0 `add_tag` merges inside the database (`fn_lead_adicionar_etiquetas`,
+  // migration 0682); the double only records rpcs, so the merge is played here.
+  const recordRpc = db.client.rpc;
+  db.client.rpc = async (nome: string, args: unknown) => {
+    if (nome !== "fn_lead_adicionar_etiquetas") return recordRpc(nome, args);
+    const { p_lead, p_etiquetas } = args as { p_lead: string; p_etiquetas: string[] };
+    const lead = tables.crm_leads!.find((l) => l.id === p_lead);
+    if (!lead) return { data: null, error: null };
+    const before = (lead.tags as string[] | undefined) ?? [];
+    const adicionadas = p_etiquetas.filter((t) => !before.includes(t));
+    lead.tags = [...before, ...adicionadas];
+    return { data: { tags: lead.tags, adicionadas }, error: null };
+  };
   return { db, tables, admin: db.client as unknown as Parameters<typeof runAutomationForEvent>[0] };
 }
 

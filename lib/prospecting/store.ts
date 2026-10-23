@@ -22,6 +22,8 @@ import {
   type Prospect,
 } from "./schema";
 import { ProspectingError } from "./provider";
+import { audit } from "@/lib/audit";
+import { vereditoPuro } from "./site-classify";
 import {
   provedorDaOrganizacao,
   validarCredencialDaOrganizacao,
@@ -62,6 +64,10 @@ export async function withProspectingLock<T>(
   fn: (db: pg.PoolClient) => Promise<T>,
 ): Promise<T> {
   const db = await pool.connect();
+  // #2624: um cliente que falhou aqui NÃO pode voltar ao pool — sem erro, o
+  // pg-pool o reempresta com o pg_advisory_unlock pendente e o lock fica preso
+  // na conexão reaproveitada (o problema apontado na issue).
+  let erroNaTransacao: Error | undefined;
   let locked = false;
   try {
     locked =
@@ -77,13 +83,21 @@ export async function withProspectingLock<T>(
         409,
       );
     return await fn(db);
+  } catch (err) {
+    erroNaTransacao = err instanceof Error ? err : new Error(String(err));
+    throw err;
   } finally {
+    let erroNoUnlock: Error | undefined;
     try {
       if (locked)
         await db.query("select pg_advisory_unlock(hashtextextended($1,0))", [`prospecting:${org}`]);
-    } finally {
-      db.release();
+    } catch (unlockErr) {
+      // #2624: o unlock falhou. O lock de sessão só morre junto com a conexão,
+      // então o cliente é liberado COM erro — o pg-pool chama _remove e o
+      // client.end() derruba a conexão (e o lock) em vez de reemprestá-la.
+      erroNoUnlock = unlockErr instanceof Error ? unlockErr : new Error(String(unlockErr));
     }
+    db.release(erroNaTransacao ?? erroNoUnlock);
   }
 }
 export async function credential(db: pg.Pool | pg.PoolClient, admin: SupabaseClient, org: string) {
@@ -191,16 +205,31 @@ export async function synchronizeSearch(db: pg.PoolClient, admin: SupabaseClient
   if (!dataset) throw new ProspectingError("Busca concluída sem resultado disponível.");
   const items = await provedor.readResults(key, dataset, c.search.limit);
   let inserted = 0;
+  let invalidos = 0;
+  const classesPuras: Record<string, number> = {};
+  const agoraIso = new Date().toISOString();
   await db.query("begin");
   try {
     for (const item of items) {
       const p = normalizeProspect(item);
-      if (!p) continue;
+      if (!p) {
+        invalidos++;
+        continue;
+      }
+      // Fase pura do enriquecimento (spec 24, sem rede): agregador e sem-site
+      // já nascem resolvidos em `data.site`. O `website` cru é preservado —
+      // é a URL que a fase de rede vai buscar.
+      const puro = vereditoPuro(p.website, agoraIso);
+      const data = puro ? { ...p, site: puro } : p;
       const result = await db.query(
         "insert into prospecting_candidates(organization_id,campaign_id,place_id,phone,data) values($1,$2,$3,$4,$5) on conflict do nothing",
-        [c.organization_id, c.id, p.key, p.phone, p],
+        [c.organization_id, c.id, p.key, p.phone, data],
       );
-      inserted += result.rowCount ?? 0;
+      const gravou = result.rowCount ?? 0;
+      inserted += gravou;
+      if (gravou > 0 && puro) {
+        classesPuras[puro.classe] = (classesPuras[puro.classe] ?? 0) + 1;
+      }
     }
     await db.query(
       "update prospecting_campaigns set search_status='succeeded',dataset_id=$3,cost_usd=$4,result_count=$5,skipped_count=$6,error=null,updated_at=now() where organization_id=$1 and id=$2",
@@ -217,6 +246,27 @@ export async function synchronizeSearch(db: pg.PoolClient, admin: SupabaseClient
   } catch (error) {
     await db.query("rollback");
     throw error;
+  }
+  // Funil de descarte (spec 24): inválidos + duplicados (já na base) + classes
+  // puras do enriquecimento. Uma vez por busca, no fechamento — a transição
+  // para `succeeded` acima é o efeito que autoriza o audit.
+  if (items.length > 0) {
+    void audit({
+      action: "prospecting.search_completed",
+      organizationId: c.organization_id,
+      bypassedRls: true,
+      resourceType: "prospecting",
+      resourceId: c.id,
+      metadata: {
+        campaign_id: c.id,
+        total: items.length,
+        inseridos: inserted,
+        duplicados: items.length - invalidos - inserted,
+        invalidos,
+        classes_puras: classesPuras,
+      },
+      requestId: `prospecting:search:${c.id}`,
+    });
   }
 }
 export async function validateConfig(db: pg.PoolClient, org: string, input: CampaignConfig) {
@@ -538,11 +588,17 @@ export async function activateCampaign(
       ).rows.length
     )
       throw new ProspectingError("Pause a campanha atual antes de iniciar outra.", 409);
-    if (c.config && JSON.stringify(campaignConfigSchema.parse(c.config)) !== JSON.stringify(config))
-      throw new ProspectingError(
-        "A preparação já começou. Retome com a mesma configuração da campanha.",
-        409,
-      );
+    if (c.config) {
+      // Config PARCIAL salva pelo meio (sem `agent_id`) não pode ser comparada:
+      // o `parse` cru estourava ZodError antes de qualquer comparação e a
+      // campanha ficava sem como ser iniciada (medido na VPS: 3 rascunhos).
+      const salva = campaignConfigSchema.safeParse(c.config);
+      if (salva.success && JSON.stringify(salva.data) !== JSON.stringify(config))
+        throw new ProspectingError(
+          "A preparação já começou. Retome com a mesma configuração da campanha.",
+          409,
+        );
+    }
     await db.query(
       "update prospecting_campaigns set config=$3 where organization_id=$1 and id=$2",
       [org, id, config],

@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { useT } from "@/hooks/i18n/useT";
 import { CaretDown, CaretUp } from "@/lib/ui/icons";
-import { sugestaoParaMostrar } from "@/lib/agent-engine/agent/sugestao-de-resposta";
+import { motivoDoVeto, sugestaoParaMostrar } from "@/lib/agent-engine/agent/sugestao-de-resposta";
 // Berseba: the attendant's choice to collapse the panel, remembered per browser.
 // An external store (not a `useState` initializer) so the server snapshot is
 // always "expanded" and hydration never compares against localStorage; see
@@ -118,6 +118,9 @@ export function ReplyReviewPanel({
   const productWithoutPhoto = productInfo !== null && productInfo.name !== null && !productInfo.has_photo;
   const sendsPhoto = productCode !== null && !productGone && !productWithoutPhoto;
   const captionTooLong = productCode !== null && body.trim().length > CAPTION_LIMIT;
+  // A causa do veto, em linguagem de quem opera (issue #2975): sem código
+  // conhecido, a frase genérica de sempre continua sendo a verdade.
+  const motivo = draft ? motivoDoVeto(draft.error_code) : null;
   async function generate() {
     setNotice(null);
     setBusy(true);
@@ -327,7 +330,9 @@ export function ReplyReviewPanel({
                     ? t(
                         "Não foi possível preparar a foto do produto. Nada foi enviado; gere a sugestão de novo.",
                       )
-                    : t("Confira a configuração do agente e tente gerar novamente.")}
+                    : motivo
+                      ? t(motivo.texto)
+                      : t("Confira a configuração do agente e tente gerar novamente.")}
             </p>
           )}
         </>

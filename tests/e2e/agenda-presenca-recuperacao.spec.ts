@@ -57,6 +57,20 @@ async function fixture() {
     status: "WORKING",
     webhook_secret_encrypted: "\\x00",
   });
+  // #2658 — o atalho inline de texto fixo obedece à janela de disparo do canal.
+  // Sem linha em `channel_knobs` vale o padrão (7h–22h de America/Sao_Paulo) e
+  // este fixture passaria a ser dependente do relógio: rodando de madrugada o
+  // envio seria ADIADO e os `expect(...).toBe(1)` deste arquivo cairiam. O
+  // fixture declara o que ele é — um número de teste que dispara a qualquer
+  // hora — e a suíte mede o que veio medir.
+  const knobs = await db.from("channel_knobs").insert({
+    organization_id: org,
+    channel_session_id: session,
+    window_start_hour: 0,
+    window_end_hour: 24,
+    allow_sunday: true,
+  });
+  if (knobs.error) throw knobs.error;
   const type = await insert("calendar_event_types", {
     organization_id: org,
     name: "Consulta de presença",
@@ -519,6 +533,7 @@ test("gestão configura prazos e gatilho; falta inicia uma vez e resposta interr
   await inbound(f, p, "Quero uma consulta");
   await login(page, f.email);
   await page.goto("/app/settings/tenant/agenda");
+  await page.getByText("Regras gerais da agenda", { exact: true }).click();
   await page.getByLabel("Pedir confirmação após o fim (minutos)").fill("15");
   await page.getByLabel("Proteger de cobranças por silêncio após o fim (minutos)").fill("120");
   await page.getByRole("button", { name: "Salvar prazos" }).click();

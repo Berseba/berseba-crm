@@ -114,12 +114,6 @@ const FORA_DO_PRODUTO: Record<string, string> = {
  */
 const EM_PORTUGUES_DE_PROPOSITO: { arquivo: string; texto: string; motivo: string }[] = [
   {
-    arquivo: "app/global-error.tsx",
-    texto: "Tente novamente em instantes. Se persistir, contate o suporte com o ID abaixo.",
-    motivo:
-      "é o error boundary da RAIZ: renderiza fora de qualquer provider, quando o app já falhou. Chamar um hook de contexto ali é justamente o que não pode falhar de novo",
-  },
-  {
     arquivo: "app/app/settings/tenant/pipelines/_stages.tsx",
     texto: "nenhum",
     motivo: "valor de wire do papel da etapa; o rótulo visível já sai por t(ROTULO_DO_PAPEL[p])",
@@ -1027,13 +1021,6 @@ const DADO_DO_OPERADOR_CONGELADO: { arquivo: string; expressao: string; motivo: 
     motivo:
       "prop motivo do estado de erro da agenda: mensagem vinda da camada de dados, exibida como texto de tela " +
       "(linha 107)",
-  },
-  {
-    arquivo: "components/agenda/PainelDeMarcacao.tsx",
-    expressao: "tipo",
-    motivo:
-      "tipo do compromisso cadastrado pelo operador — é EXATAMENTE o defeito do #600 (08257eed, " +
-      '"Retorno" virando "Seguimiento"); o conserto por literal em cada ramo segue pendente',
   },
   {
     arquivo: "components/ai/ChaveDeConhecimento.tsx",

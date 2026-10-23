@@ -91,6 +91,8 @@ const STATUS: Record<string, { rotulo: string; tom: TomDoStatus }> = {
   agendada: { rotulo: "Agendada", tom: "info" },
   "concluída": { rotulo: "Concluída", tom: "neutral" },
   cancelada: { rotulo: "Cancelada", tom: "neutral" },
+  // Desligada porque a empresa estava parada (scheduler: last_error=org_nao_operante).
+  "não disparada": { rotulo: "Não disparada", tom: "warning" },
 };
 
 export function rotuloDoStatus(status: string, t: (texto: string) => string = (texto) => texto): string {
@@ -428,6 +430,19 @@ export function descreveEvento(
         ...motor,
       };
     }
+    case "condition_revalidated": {
+      // O operador tem de ler ISTO e não "o fluxo parou": o envio não saiu
+      // porque a condição que ele desenhou deixou de valer enquanto a espera
+      // corria. Sem a linha, o passo lê como defeito onde houve obediência.
+      return {
+        titulo: "Não enviou: a condição deixou de valer na hora do envio",
+        detalhe:
+          p.esperado === true
+            ? "o caminho tinha sido o «Sim» e a regra agora responde «Não»"
+            : "o caminho tinha sido o «Não» e a regra agora responde «Sim»",
+        ...motor,
+      };
+    }
     case "turn_discarded": {
       // Duas origens, um event_type: a suspensão da CONTA (migration 0501) e o
       // descarte durante a PAUSA da INSCRIÇÃO (#2262). O motivo decide a frase
@@ -481,6 +496,15 @@ export function descreveEvento(
       return { titulo: "O fluxo parou de tentar", detalhe: texto(p.reason), ...motor };
     case "node_failed":
       return { titulo: "Falhou neste passo", detalhe: texto(p.error), ...motor };
+    case "move_lead_failed":
+      // O card NÃO andou: o motor foi recusado ao mover (ex.: etapa de perda
+      // sem motivo) e o fluxo seguiu. Sem esta linha a trilha mostrava só o
+      // avanço e quem montou o fluxo lia "concluído" com o negócio aberto.
+      return {
+        titulo: "Não conseguiu mover o card para a etapa escolhida",
+        detalhe: texto(p.error) ?? texto(p.codigo),
+        ...motor,
+      };
     case "inbound_woke":
       return { titulo: "O cliente respondeu — o fluxo acordou na hora", detalhe: null, ...cliente };
     case "reactivity_replied":
