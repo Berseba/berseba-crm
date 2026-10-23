@@ -3,6 +3,8 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import type * as Ofertas from "@/lib/integrations/avec/ofertas";
+
 const ORG = "11111111-1111-4111-8111-111111111111";
 const OTHER_ORG = "99999999-9999-4999-8999-999999999999";
 const CONTACT = "22222222-2222-4222-8222-222222222222";
@@ -21,6 +23,11 @@ vi.mock("@/lib/integrations/avec/config", () => {
     isAvecToolHiddenFor: (name: string, org: string) => name.startsWith("avec_") && org !== ORG,
   };
 });
+vi.mock("@/lib/integrations/avec/ofertas", async (importOriginal) => {
+  const actual = await importOriginal<typeof Ofertas>();
+  const mayara = actual.salaoDa("e054ee97-00a7-42fd-9701-279afc04a74c");
+  return { ...actual, salaoDa: (org: string) => (org === ORG ? mayara : null) };
+});
 vi.mock("@/lib/mcp/audit", () => ({ auditMcpToolCall: vi.fn().mockResolvedValue(undefined) }));
 
 const tools = await import("./avec");
@@ -33,20 +40,56 @@ const { pickToolsFromMcp } = await import("@/lib/ai/runtime/tools");
 type Args = Record<string, unknown>;
 type Call = { url: URL; method: string; headers: Record<string, string>; body: unknown };
 
+// A design de sobrancelha with Rebeca: one service that day, so the agent may change it alone.
 const APPOINTMENT = {
-  id: "88123-901-430008-2026-10-23",
+  id: "88123-2129417-447142-2026-10-23",
   client_name: "Ana Teste",
   client_phone: "(14) 99999-0001",
-  service_id: "901",
-  service: "Corte",
-  professional_id: "430008",
-  professional: "Beca",
+  service_id: "2129417",
+  service: "Sobrancelha",
+  professional_id: "447142",
+  professional: "Rebeca Cardoso",
   date: "2026-10-23",
   start_time: "10:00",
-  end_time: "11:00",
+  end_time: "10:30",
   starts_at: "2026-10-23T10:00:00-03:00",
   status: "1",
 };
+
+/** A free slot as `GET /v1/availability` answers it. */
+function slot(
+  prof: string,
+  service: string,
+  date: string,
+  start: string,
+  minutes = 30,
+  facts = {},
+) {
+  const [h, m] = start.split(":").map(Number) as [number, number];
+  const end = h * 60 + m + minutes;
+  const hhmm = `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`;
+  return {
+    id: `${prof}-${service}-${date}-${start.replace(":", "")}`,
+    professional_id: prof,
+    service_id: service,
+    date,
+    start_time: start,
+    end_time: hhmm,
+    starts_at: `${date}T${start}:00-03:00`,
+    bookings_that_day: 3,
+    gap_before_minutes: 0,
+    gap_after_minutes: null,
+    ...facts,
+  };
+}
+
+/** The two reads every change of an appointment starts with: the appointment, then its day. */
+function sameDay(...extra: Array<typeof APPOINTMENT>) {
+  answer(200, APPOINTMENT);
+  answer(200, { data: [APPOINTMENT, ...extra] });
+}
+
+const SOBRANCELHA_OPCAO = "sobrancelha_design:-:447142-2129417-2026-10-27-1000";
 
 let calls: Call[] = [];
 let answers: Array<{ status: number; body: unknown } | Error> = [];
@@ -62,7 +105,6 @@ beforeEach(() => {
   calls = [];
   answers = [];
   tools.resetAvecSlotTakenForTests();
-  tools.resetAvecProfessionalsCacheForTests();
   vi.stubGlobal(
     "fetch",
     vi.fn(async (input: URL, init: RequestInit) => {
@@ -82,7 +124,10 @@ beforeEach(() => {
     }),
   );
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 
 /** A contacts table with one row; records the filters it was asked for. */
 function fakeDb(phone: string | null = CONTACT_PHONE) {
@@ -184,82 +229,200 @@ describe("request shape", () => {
     expect(JSON.stringify(r)).not.toMatch(/Ana Teste|99999-0001|client_/);
   });
 
-  it("avec_find_services matches name without case or accent, and caps the list", async () => {
-    answer(200, {
-      data: [
-        {
-          id: "430008",
-          name: "Beca",
-          services: [
-            { id: "901", name: "Corte Feminino", duration_minutes: 60, price: "120,00" },
-            { id: "902", name: "Sobrancelha", duration_minutes: 30, price: "40,00" },
-          ],
-        },
-        {
-          id: "430009",
-          name: "Mayara",
-          services: Array.from({ length: 20 }, (_, i) => ({
-            id: `9${i}`,
-            name: `CORTE Ãpice ${i}`,
-            duration_minutes: 45,
-            price: "0,00",
-          })),
-        },
-      ],
-    });
-    const r = await run(tools.avecFindServices, { search: "corte" });
-    expect(calls[0]!.url.pathname).toBe("/v1/professionals");
-    expect(r.total_encontrado).toBe(21);
-    expect((r.servicos as unknown[]).length).toBe(15);
-    expect(JSON.stringify(r)).not.toContain("price");
-
-    const accent = await run(tools.avecFindServices, { search: "apice 13" });
-    expect(accent.servicos).toEqual([
-      {
-        service_id: "913",
-        service: "CORTE Ãpice 13",
-        professional_id: "430009",
-        professional: "Mayara",
-        duration_minutes: 45,
-      },
+  it("avec_find_services lists the salon's ofertas, who does each, and what stays with the team", async () => {
+    const r = await run(tools.avecFindServices, {});
+    expect(calls).toHaveLength(0); // the menu is the salon's, not avec's catalog
+    const servicos = r.servicos as Array<{ servico: string; profissionais: string[] }>;
+    expect(servicos.find((o) => o.servico === "sobrancelha_design")?.profissionais).toEqual([
+      "Rebeca",
     ]);
-    expect(calls).toHaveLength(1); // the catalog is cached
-    expect(tools.avecFindServices.motivoDoVazio!({ ok: true, total_encontrado: 0 })).toBe(
-      "servico_nao_encontrado",
+    expect(servicos.find((o) => o.servico === "tintura_raiz")?.profissionais).not.toContain(
+      "Júlia",
     );
+    expect(servicos.some((o) => /mecha/i.test(o.servico))).toBe(false);
+    expect(r.com_a_equipe).toEqual(expect.arrayContaining(["mechas", "maquiagem"]));
   });
 
-  it("avec_free_slots sorts earliest first and caps at 12", async () => {
-    const slot = (day: number, hour: number) => ({
-      id: `430008-901-2026-10-${day}-${hour}00`,
-      professional_id: "430008",
-      service_id: "901",
-      date: `2026-10-${day}`,
-      start_time: `${hour}:00`,
-      end_time: `${hour + 1}:00`,
-      starts_at: `2026-10-${day}T${hour}:00:00-03:00`,
+  it("avec_free_slots joins the recipe's steps and offers up to 2 options with day, time and professional", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-23T15:00:00Z"));
+    // Corte feminino com secagem, cabelo médio, with Mayara: corte + lavagem (helper) at +0,
+    // secagem with the SAME helper at +30. Júlia is free for the lavagem but not the secagem
+    // at 14:00, so Júnior takes that visit.
+    answer(200, {
+      data: [
+        slot("430008", "2128712", "2026-10-27", "09:00", 30, {
+          gap_before_minutes: null,
+          gap_after_minutes: 120,
+          bookings_that_day: 1,
+        }),
+        slot("430008", "2128712", "2026-10-27", "14:00"),
+        slot("430008", "2128712", "2026-10-30", "10:00"),
+      ],
     });
     answer(200, {
-      data: [slot(24, 10), ...Array.from({ length: 13 }, (_, i) => slot(23, 9 + (i % 9)))],
+      data: [
+        slot("797917", "2128749", "2026-10-27", "09:00"),
+        slot("797917", "2128749", "2026-10-27", "14:00"),
+        slot("444091", "2128749", "2026-10-27", "14:00"),
+        slot("797917", "2128749", "2026-10-30", "10:00"),
+      ],
     });
-    const r = await run(tools.avecFreeSlots, { service_id: "901", professional_id: "430008" });
-    expect(Object.fromEntries(calls[0]!.url.searchParams)).toEqual({
-      service_id: "901",
-      professional_id: "430008",
+    answer(200, {
+      data: [
+        slot("797917", "2129312", "2026-10-27", "09:30"),
+        slot("444091", "2129312", "2026-10-27", "14:30"),
+        slot("797917", "2129312", "2026-10-30", "10:30"),
+      ],
     });
-    const slots = r.horarios as Array<{ slot_id: string; date: string }>;
-    expect(slots).toHaveLength(12);
-    expect(slots.every((s) => s.date === "2026-10-23")).toBe(true);
-    expect(r.total_encontrado).toBe(14);
+    const r = await run(tools.avecFreeSlots, {
+      servico: "corte_feminino_com_secagem",
+      comprimento: "medio",
+      profissional: "Mayara",
+    });
+    expect(calls.map((c) => c.url.searchParams.get("service_id"))).toEqual([
+      "2128712",
+      "2128749",
+      "2129312",
+    ]);
+    expect(calls[0]!.url.searchParams.get("professional_id")).toBe("430008");
+    expect(calls[1]!.url.searchParams.get("professional_id")).toBeNull();
+    expect(calls[0]!.url.searchParams.get("from")).toBe("2026-10-23");
+    expect(calls[0]!.url.searchParams.get("to")).toBe("2026-11-05");
+    const opcoes = r.opcoes as Array<Record<string, unknown>>;
+    // At most 2. This week first: 27/10 14:00 is next to her clients, 27/10 09:00 is a day she
+    // works but far from them (gap 120); 30/10 is next week (today is 23/10), so it is left out.
+    expect(opcoes.map((o) => [o.data_br, o.inicio, o.agrupado])).toEqual([
+      ["27/10", "14:00", true],
+      ["27/10", "09:00", false],
+    ]);
+    expect(opcoes[0]).toMatchObject({
+      dia_semana: "terça-feira",
+      profissional: "Mayara Morales",
+      tambem: "lavagem às 14:00 e secagem às 14:30",
+      tambem_com: "Júnior",
+      termina_por_volta_de: "15:00",
+      agrupado: true,
+      opcao_id:
+        "corte_feminino_com_secagem:medio:430008-2128712-2026-10-27-1400+444091-2128749-2026-10-27-1400+444091-2129312-2026-10-27-1430",
+    });
+  });
+
+  it("avec_free_slots keeps to the helper the client asked for", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-23T15:00:00Z"));
+    answer(200, { data: [slot("430008", "2128712", "2026-10-27", "14:00")] });
+    answer(200, {
+      data: [
+        slot("797917", "2128749", "2026-10-27", "14:00"),
+        slot("444099", "2128749", "2026-10-27", "14:00"),
+      ],
+    });
+    answer(200, {
+      data: [
+        slot("797917", "2129312", "2026-10-27", "14:30"),
+        slot("444099", "2129312", "2026-10-27", "14:30"),
+      ],
+    });
+    const r = await run(tools.avecFreeSlots, {
+      servico: "corte_feminino_com_secagem",
+      comprimento: "medio",
+      profissional: "Mayara",
+      auxiliar: "simone",
+    });
+    expect(calls[1]!.url.searchParams.get("professional_id")).toBe("444099");
+    expect((r.opcoes as Array<{ tambem_com: string }>)[0]!.tambem_com).toBe("Simone");
+    const ninguem = await run(tools.avecFreeSlots, {
+      servico: "corte_feminino_com_secagem",
+      comprimento: "medio",
+      auxiliar: "Rebeca",
+    });
+    expect(String(ninguem.mensagem)).toMatch(/Júlia, Júnior, Simone, Giovanna, Suellen/);
+  });
+
+  it("progressiva on a Saturday goes to the team, and Saturdays are never offered for it", async () => {
+    const sabado = await run(tools.avecFreeSlots, {
+      servico: "progressiva",
+      comprimento: "medio",
+      dias_semana: ["sabado"],
+    });
+    expect(sabado).toMatchObject({ ok: false, handoff: true, motivo: "sabado_com_a_equipe" });
+    expect(String(sabado.mensagem)).toMatch(/nunca diga que não há horário/);
+    expect(calls).toHaveLength(0);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-23T15:00:00Z"));
+    answer(200, {
+      data: [
+        slot("444091", "2128737", "2026-10-24", "09:00", 120),
+        slot("444091", "2128737", "2026-10-27", "09:00", 120),
+      ],
+    });
+    const r = await run(tools.avecFreeSlots, { servico: "progressiva", comprimento: "medio" });
+    expect((r.opcoes as Array<{ data: string }>).map((o) => o.data)).toEqual(["2026-10-27"]);
+  });
+
+  it("no slot the salon would offer hands off to a person, never 'no slots'", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-23T15:00:00Z"));
+    answer(200, { data: [] });
+    const r = await run(tools.avecFreeSlots, {
+      servico: "sobrancelha_design",
+      dias_semana: ["sexta"],
+      periodo: "tarde",
+    });
+    expect(r).toMatchObject({ ok: false, handoff: true, motivo: "sem_horario" });
+    expect(String(r.mensagem)).toMatch(/Não diga que não há horário/);
+    expect(String(r.todo)).toMatch(/Design de sobrancelha .*\(sexta, tarde\)/);
+  });
+
+  it("avec_free_slots asks for the hair length, and refuses an unknown service", async () => {
+    const semComprimento = await run(tools.avecFreeSlots, { servico: "escova" });
+    expect(semComprimento).toMatchObject({ ok: false, handoff: false });
+    expect(String(semComprimento.mensagem)).toMatch(/comprimento/);
+    const mechas = await run(tools.avecFreeSlots, { servico: "mechas" });
+    expect(mechas).toMatchObject({ ok: false, handoff: false });
+    const outra = await run(tools.avecFreeSlots, {
+      servico: "sobrancelha_design",
+      profissional: "Mayara",
+    });
+    expect(String(outra.mensagem)).toMatch(/Rebeca/);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("avec_free_slots for a reschedule: same professional and service, one service that day only", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-22T15:00:00Z"));
+    sameDay();
+    answer(200, { data: [slot("447142", "2129417", "2026-10-24", "11:00")] });
+    const r = await run(tools.avecFreeSlots, { remarcar_appointment_id: APPOINTMENT.id });
+    expect(calls[2]!.url.searchParams.get("service_id")).toBe("2129417");
+    expect(calls[2]!.url.searchParams.get("professional_id")).toBe("447142");
+    expect(r.opcoes).toEqual([
+      expect.objectContaining({
+        opcao_id: "remarcar:-:447142-2129417-2026-10-24-1100",
+        dia_semana: "sábado",
+        profissional: "Rebeca",
+      }),
+    ]);
+  });
+
+  it("a visit of several services that day stays with the team", async () => {
+    sameDay({ ...APPOINTMENT, id: "88123-2129318-447142-2026-10-23", service_id: "2129318" });
+    const r = await run(tools.avecCancel, { appointment_id: APPOINTMENT.id });
+    expect(r).toMatchObject({ ok: false, motivo: "visita_com_varios_servicos", handoff: true });
+    expect(String(r.todo)).toMatch(/2 serviços/);
+    expect(calls.every((c) => c.method === "GET")).toBe(true);
   });
 
   it("avec_cancel", async () => {
+    sameDay();
     answer(200, { id: APPOINTMENT.id, status: "cancelled" });
     const r = await run(tools.avecCancel, {
       appointment_id: APPOINTMENT.id,
       reason: "Ficou doente",
     });
-    const call = calls[0]!;
+    const call = calls[2]!;
     expect(call.method).toBe("POST");
     expect(call.url.pathname).toBe(`/v1/appointments/${APPOINTMENT.id}/cancel`);
     expect(call.body).toEqual({ phone: "+5514999990001", reason: "Ficou doente" });
@@ -268,32 +431,104 @@ describe("request shape", () => {
   });
 
   it("avec_reschedule returns the new appointment id", async () => {
-    answer(200, { ...APPOINTMENT, id: "88123-901-430008-2026-10-24", date: "2026-10-24" });
+    sameDay();
+    answer(200, { ...APPOINTMENT, id: "88123-2129417-447142-2026-10-24", date: "2026-10-24" });
     const r = await run(tools.avecReschedule, {
       appointment_id: APPOINTMENT.id,
-      slot_id: "430008-901-2026-10-24-1000",
+      opcao_id: "remarcar:-:447142-2129417-2026-10-24-1000",
     });
-    expect(calls[0]!.url.pathname).toBe(`/v1/appointments/${APPOINTMENT.id}/reschedule`);
-    expect(calls[0]!.body).toEqual({
+    expect(calls[2]!.url.pathname).toBe(`/v1/appointments/${APPOINTMENT.id}/reschedule`);
+    expect(calls[2]!.body).toEqual({
       phone: "+5514999990001",
-      slot_id: "430008-901-2026-10-24-1000",
+      slot_id: "447142-2129417-2026-10-24-1000",
     });
     expect(r).toMatchObject({
       ok: true,
-      agendamento: { appointment_id: "88123-901-430008-2026-10-24" },
+      agendamento: { appointment_id: "88123-2129417-447142-2026-10-24", data_br: "24/10" },
     });
   });
 
-  it("avec_book", async () => {
-    answer(201, APPOINTMENT);
-    const r = await run(tools.avecBook, { slot_id: "430008-901-2026-10-23-1000" });
-    expect(calls[0]!.method).toBe("POST");
-    expect(calls[0]!.url.pathname).toBe("/v1/appointments");
-    expect(calls[0]!.body).toEqual({
-      phone: "+5514999990001",
-      slot_id: "430008-901-2026-10-23-1000",
+  it("avec_reschedule refuses a slot of another service or professional", async () => {
+    sameDay();
+    const r = await run(tools.avecReschedule, {
+      appointment_id: APPOINTMENT.id,
+      opcao_id: "remarcar:-:430008-2128712-2026-10-24-1000",
     });
-    expect(r).toMatchObject({ ok: true, agendamento: { appointment_id: APPOINTMENT.id } });
+    expect(r).toMatchObject({ ok: false, handoff: false });
+    expect(calls.some((c) => c.method === "POST")).toBe(false);
+  });
+
+  it("avec_book books every step of the visit in the recipe's order, one key per step", async () => {
+    const opcao =
+      "corte_feminino_com_secagem:medio:430008-2128712-2026-10-27-1400+444091-2128749-2026-10-27-1400+444091-2129312-2026-10-27-1430";
+    answer(201, {
+      ...APPOINTMENT,
+      service: "Corte Feminino",
+      date: "2026-10-27",
+      start_time: "14:00",
+      end_time: "14:30",
+    });
+    answer(201, {
+      ...APPOINTMENT,
+      service: "Lavagem Para Corte",
+      date: "2026-10-27",
+      start_time: "14:00",
+      end_time: "14:30",
+    });
+    answer(201, {
+      ...APPOINTMENT,
+      service: "Secagem Media",
+      date: "2026-10-27",
+      start_time: "14:30",
+      end_time: "15:00",
+    });
+    const r = await run(tools.avecBook, { opcao_id: opcao, note: "Primeira vez" });
+    expect(calls.map((c) => (c.body as { slot_id: string }).slot_id)).toEqual([
+      "430008-2128712-2026-10-27-1400",
+      "444091-2128749-2026-10-27-1400",
+      "444091-2129312-2026-10-27-1430",
+    ]);
+    expect((calls[0]!.body as { note?: string }).note).toBe("Primeira vez");
+    expect((calls[1]!.body as { note?: string }).note).toBeUndefined();
+    expect(new Set(calls.map((c) => c.headers["Idempotency-Key"])).size).toBe(3);
+    expect(r).toMatchObject({
+      ok: true,
+      agendamento: {
+        dia_semana: "terça-feira",
+        data_br: "27/10",
+        inicio: "14:00",
+        termina_por_volta_de: "15:00",
+        profissional: "Mayara Morales",
+      },
+    });
+  });
+
+  it("avec_book refuses an option the salon did not declare, before any call", async () => {
+    for (const opcao_id of [
+      "corte_feminino_com_secagem:medio:430008-2128712-2026-10-27-1400", // steps missing
+      "corte_feminino_com_secagem:medio:430008-2128712-2026-10-27-1400+444091-2128749-2026-10-27-1400+797917-2129312-2026-10-27-1430", // two helpers
+      "corte_feminino_com_secagem:medio:430008-2128712-2026-10-27-1400+444091-2128749-2026-10-27-1400+444091-2129312-2026-10-27-1500", // wrong offset
+      "sobrancelha_design:-:430008-2129417-2026-10-27-1000", // not Rebeca
+      "mechas:-:430008-2129430-2026-10-27-1000", // not an oferta
+      "escova:-:444099-2128718-2026-10-27-1000", // length missing
+    ]) {
+      expect(await run(tools.avecBook, { opcao_id }), opcao_id).toMatchObject({
+        ok: false,
+        handoff: false,
+      });
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("avec_book hands off when a later step fails, saying what was booked and what is missing", async () => {
+    const opcao =
+      "sobrancelha_com_henna:-:447142-2129417-2026-10-27-1000+447142-2129318-2026-10-27-1030";
+    answer(201, { ...APPOINTMENT, date: "2026-10-27" });
+    problem(409, "slot_unavailable");
+    const r = await run(tools.avecBook, { opcao_id: opcao });
+    expect(r).toMatchObject({ ok: false, handoff: true, parcial: true });
+    expect(String(r.todo)).toMatch(/Ficou marcado no avec: Sobrancelha 27\/10 10:00/);
+    expect(String(r.todo)).toMatch(/Falta marcar a etapa 2 .* às 10:30 \(Rebeca\)/);
   });
 });
 
@@ -318,7 +553,7 @@ describe("errors → handoff", () => {
   ];
   it.each(cases)("%i %s → handoff %s", async (status, code, handoff) => {
     problem(status, code);
-    const r = await run(tools.avecReschedule, { appointment_id: APPOINTMENT.id, slot_id: "s-1" });
+    const r = await run(tools.avecBook, { opcao_id: SOBRANCELHA_OPCAO });
     expect(r).toMatchObject({ ok: false, code, handoff });
     if (handoff) expect(r.todo).toEqual(expect.any(String));
   });
@@ -335,6 +570,7 @@ describe("errors → handoff", () => {
   it("a write without an HTTP answer is unconfirmed: never retried, hand off", async () => {
     const err = new Error("aborted");
     err.name = "TimeoutError";
+    sameDay();
     answers.push(err);
     const r = await run(tools.avecCancel, { appointment_id: APPOINTMENT.id });
     expect(r).toMatchObject({ ok: false, code: "timeout", handoff: true });
@@ -344,13 +580,9 @@ describe("errors → handoff", () => {
   it("the first slot_unavailable asks for new slots, the second hands off", async () => {
     problem(409, "slot_unavailable");
     problem(409, "slot_unavailable");
-    const first = await run(tools.avecReschedule, {
-      appointment_id: APPOINTMENT.id,
-      slot_id: "s-1",
-    });
-    const second = await run(tools.avecReschedule, {
-      appointment_id: APPOINTMENT.id,
-      slot_id: "s-2",
+    const first = await run(tools.avecBook, { opcao_id: SOBRANCELHA_OPCAO });
+    const second = await run(tools.avecBook, {
+      opcao_id: "sobrancelha_design:-:447142-2129417-2026-10-27-1030",
     });
     expect(first).toMatchObject({ code: "slot_unavailable", handoff: false });
     expect(second).toMatchObject({ code: "slot_unavailable", handoff: true });
@@ -428,8 +660,8 @@ describe("audit", () => {
       appointment_id: "a",
       reason: "[redacted]",
     });
-    expect(tools.avecBook.redigirParaAuditoria!({ slot_id: "s", note: "alergia" })).toEqual({
-      slot_id: "s",
+    expect(tools.avecBook.redigirParaAuditoria!({ opcao_id: "s", note: "alergia" })).toEqual({
+      opcao_id: "s",
       note: "[redacted]",
     });
   });

@@ -23,21 +23,33 @@ import {
   AvecApiError,
   cancelAppointment,
   createAppointment,
+  getAppointment,
   listAppointments,
   listAvailability,
-  listProfessionals,
   rescheduleAppointment,
   type AvecAppointment,
-  type AvecProfessional,
 } from "@/lib/integrations/avec/client";
 import { avecConfigFor, type AvecConfig } from "@/lib/integrations/avec/config";
+import {
+  COMPRIMENTOS,
+  MAX_OPCOES,
+  OPCAO_REMARCAR,
+  consultasPara,
+  escolherOpcoes,
+  etapasDe,
+  montarOpcoes,
+  ofertaPorId,
+  parseSlotId,
+  salaoDa,
+  servicosAvulsos,
+  validarOpcao,
+  type Opcao,
+  type Salao,
+} from "@/lib/integrations/avec/ofertas";
 import { logger } from "@/lib/logger";
 
 import type { McpContext, McpToolDefinition } from "../types";
 
-const MAX_SERVICES = 15;
-const MAX_SLOTS = 12;
-const PROFESSIONALS_TTL_MS = 5 * 60_000;
 const SLOT_TAKEN_TTL_MS = 30 * 60_000;
 
 // Same wording as "Quando passa para a Ruth" in the avec API's docs/integracao-crm.md.
@@ -329,20 +341,6 @@ export const avecMyAppointments: McpToolDefinition<typeof myAppointmentsShape> =
   },
 };
 
-const professionalsCache = new Map<string, { at: number; data: AvecProfessional[] }>();
-
-async function professionals(config: AvecConfig): Promise<AvecProfessional[]> {
-  const hit = professionalsCache.get(config.baseUrl);
-  if (hit && Date.now() - hit.at < PROFESSIONALS_TTL_MS) return hit.data;
-  const data = await listProfessionals(config);
-  professionalsCache.set(config.baseUrl, { at: Date.now(), data });
-  return data;
-}
-
-export function resetAvecProfessionalsCacheForTests(): void {
-  professionalsCache.clear();
-}
-
 const fold = (s: string) =>
   s
     .normalize("NFD")
@@ -351,98 +349,207 @@ const fold = (s: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+const SEM_OFERTAS = refusal(
+  "sem_ofertas",
+  true,
+  "este salão não tem serviços liberados para a Maya marcar sozinha. " + HANDOFF_INSTRUCTION,
+);
+
+/** Today in Brasília, `YYYY-MM-DD`. */
+export function hojeEmBrasilia(now = new Date()): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);
+}
+
+function addDays(date: string, days: number): string {
+  const d = new Date(`${date}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** `27/10`: the agent repeats this, never computes it. */
+const dataBr = (date: string) => `${date.slice(8, 10)}/${date.slice(5, 7)}`;
+
+const nomeDe = (salao: Salao, id: string | undefined) =>
+  id ? (salao.profissionais[id]?.nome ?? null) : null;
+
 const findServicesShape = {
   search: z
     .string()
     .trim()
-    .min(2)
     .max(80)
-    .describe(
-      'O serviço que a cliente pediu, como ela disse (ex.: "corte", "escova", "sobrancelha").',
-    ),
+    .optional()
+    .describe("Opcional: o serviço como a cliente disse. A lista volta inteira de qualquer forma."),
 };
 
 export const avecFindServices: McpToolDefinition<typeof findServicesShape> = {
   name: "avec_find_services",
   description:
-    "Procura um serviço do salão no avec pelo nome e diz quais profissionais o fazem, com " +
-    `service_id, professional_id e duração. Devolve no máximo ${MAX_SERVICES} linhas. Use antes ` +
-    "de avec_free_slots. Se vier mais de um serviço parecido, pergunte à cliente qual é. Não " +
-    "informe preço por aqui: siga o material do salão.",
+    "Lista os serviços que você pode marcar sozinha na agenda do salão (avec), com o código " +
+    "(servico) para usar em avec_free_slots, quem faz e o que perguntar antes (comprimento do " +
+    "cabelo, preferência de profissional). Também lista o que é sempre da equipe: para esses, " +
+    "não busque horário, passe para a equipe. Se o pedido da cliente não for exatamente um dos " +
+    "serviços da lista, passe para a equipe.",
   inputSchema: findServicesShape,
   category: "read",
   requiresRole: "agent",
   requiresScope: "mcp:read",
-  motivoDoVazio: (result) =>
-    (result as { ok?: boolean; total_encontrado?: number })?.ok === true &&
-    (result as { total_encontrado: number }).total_encontrado === 0
-      ? "servico_nao_encontrado"
-      : null,
-  handler: async (input, ctx) => {
+  handler: async (_input, ctx) => {
     const ready = await prepare(ctx);
     if ("ok" in ready) return ready;
-    try {
-      const terms = fold(input.search).split(" ");
-      const matches = (await professionals(ready.config))
-        .flatMap((p) =>
-          p.services.map((s) => ({
-            service_id: s.id,
-            service: s.name,
-            professional_id: p.id,
-            professional: p.name,
-            duration_minutes: s.duration_minutes,
-          })),
-        )
-        .filter((row) => {
-          const name = fold(row.service ?? "");
-          return terms.every((t) => name.includes(t));
-        })
-        .sort(
-          (a, b) =>
-            (a.service ?? "").localeCompare(b.service ?? "", "pt-BR") ||
-            (a.professional ?? "").localeCompare(b.professional ?? "", "pt-BR"),
-        );
-      return {
-        ok: true,
-        servicos: matches.slice(0, MAX_SERVICES),
-        total_encontrado: matches.length,
-        ...(matches.length > MAX_SERVICES
-          ? { aviso: "há mais resultados: pergunte à cliente o serviço exato ou a profissional." }
-          : {}),
-      };
-    } catch (err) {
-      return failure(err);
-    }
+    const salao = salaoDa(ctx.organizationId);
+    if (!salao) return SEM_OFERTAS;
+    return {
+      ok: true,
+      servicos: salao.ofertas.map((o) => ({
+        servico: o.id,
+        nome: o.rotulo,
+        profissionais: o.porProfissional.map((p) => nomeDe(salao, p.profissional)),
+        precisa_comprimento: o.comprimento,
+        ...(o.perguntar ? { perguntar_antes: o.perguntar } : {}),
+      })),
+      comprimentos: COMPRIMENTOS,
+      com_a_equipe: salao.comAEquipe,
+    };
   },
 };
 
+/** The professionals of an oferta the client accepts: all, or the one she named. */
+function principaisPara(
+  salao: Salao,
+  oferta: NonNullable<ReturnType<typeof ofertaPorId>>,
+  profissional: string | undefined,
+): string[] | null {
+  const todas = oferta.porProfissional.map((p) => p.profissional);
+  if (!profissional) return todas;
+  const alvo = fold(profissional);
+  const achadas = todas.filter((id) => {
+    const nome = fold(salao.profissionais[id]?.nome ?? "");
+    return id === profissional.trim() || nome === alvo || nome.split(" ")[0] === alvo;
+  });
+  return achadas.length ? achadas : null;
+}
+
+function opcaoView(salao: Salao, o: Opcao) {
+  return {
+    opcao_id: o.opcao_id,
+    dia_semana: weekdayOf(o.data),
+    data: o.data,
+    data_br: dataBr(o.data),
+    inicio: o.inicio,
+    termina_por_volta_de: o.fim,
+    profissional: nomeDe(salao, o.profissional),
+    ...(o.auxiliar && o.etapasDaAuxiliar
+      ? {
+          // "lavagem às 14:00 e secagem às 14:30 com a Júlia": the client chooses her too.
+          tambem: o.etapasDaAuxiliar.map((e) => `${e.servico} às ${e.inicio}`).join(" e "),
+          tambem_com: nomeDe(salao, o.auxiliar),
+        }
+      : {}),
+    agrupado: o.agrupamento === 0,
+  };
+}
+
+const DIAS = ["terca", "quarta", "quinta", "sexta", "sabado"] as const;
+
 const freeSlotsShape = {
-  service_id: z
+  servico: z
     .string()
     .trim()
-    .min(1)
-    .max(40)
-    .describe("O service_id que veio de avec_find_services."),
-  professional_id: z
-    .string()
-    .trim()
-    .min(1)
     .max(40)
     .optional()
+    .describe("O código do serviço (campo servico de avec_find_services). Não use ao remarcar."),
+  comprimento: z
+    .enum(["curto", "medio", "longo", "extra_longo"])
+    .optional()
+    .describe("Comprimento do cabelo que a cliente disse, quando o serviço precisa."),
+  profissional: z
+    .string()
+    .trim()
+    .max(60)
+    .optional()
+    .describe("Nome da profissional, só se a cliente pediu uma. Sem preferência: deixe vazio."),
+  auxiliar: z
+    .string()
+    .trim()
+    .max(60)
+    .optional()
     .describe(
-      "Só esta profissional (professional_id de avec_find_services). Sem ele, todas que fazem o serviço.",
+      "Quem faz a lavagem/secagem, só se a cliente pediu uma pessoa (ou recusou a que veio e escolheu outra).",
     ),
-  from: date,
-  to: date,
+  data: date.describe("Um dia exato que a cliente pediu (AAAA-MM-DD)."),
+  dias_semana: z
+    .array(z.enum(DIAS))
+    .max(5)
+    .optional()
+    .describe('Dias da semana que a cliente pediu (ex.: "sexta" → ["sexta"]).'),
+  periodo: z.enum(["manha", "tarde"]).optional().describe("Manhã (antes das 12h) ou tarde."),
+  horario: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/, "use HH:MM")
+    .optional()
+    .describe("Horário que a cliente pediu (HH:MM): os mais próximos vêm primeiro."),
+  remarcar_appointment_id: z
+    .string()
+    .trim()
+    .max(80)
+    .optional()
+    .describe(
+      "Para remarcar: o appointment_id de avec_my_appointments. Traz horários da mesma profissional e do mesmo serviço.",
+    ),
 };
+
+/**
+ * A visit the agent may change alone: one service that day, of a one-step oferta, still
+ * Agendado/Confirmado. A visit of several bookings (corte with lavagem and secagem) moves as a
+ * whole, so it stays with the team for now.
+ */
+async function visitaAvulsa(
+  ctx: McpContext,
+  config: AvecConfig,
+  phone: string,
+  salao: Salao,
+  appointmentId: string,
+): Promise<{ appointment: AvecAppointment } | Refusal> {
+  const appointment = await getAppointment(config, { id: appointmentId, phone });
+  const sameDay = await listAppointments(config, {
+    phone,
+    from: appointment.date,
+    to: appointment.date,
+  });
+  const motivo =
+    appointment.status === null || !CHANGEABLE_STATUS.has(appointment.status)
+      ? "not_allowed"
+      : sameDay.length > 1
+        ? "visita_com_varios_servicos"
+        : !servicosAvulsos(salao).has(appointment.service_id)
+          ? "servico_com_a_equipe"
+          : null;
+  if (!motivo) return { appointment };
+  logger.info("avec: change kept for the team", { motivo, org: ctx.organizationId });
+  return {
+    ...refusal(motivo, true, HANDOFF_INSTRUCTION),
+    todo:
+      motivo === "visita_com_varios_servicos"
+        ? `A cliente tem ${sameDay.length} serviços no avec em ${dataBr(appointment.date)}: remarcar ou cancelar a visita inteira com ela.`
+        : motivo === "not_allowed"
+          ? TODO_BY_CODE.not_allowed!
+          : `Remarcar ou cancelar ${appointment.service ?? "o serviço"} de ${dataBr(appointment.date)} às ${appointment.start_time} no avec.`,
+  };
+}
 
 export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
   name: "avec_free_slots",
   description:
-    "Mostra os horários livres de um serviço no avec, os mais cedo primeiro, no máximo " +
-    `${MAX_SLOTS}. Sem datas, olha os próximos 7 dias. Cada horário tem um slot_id: use só ` +
-    "slot_id que veio daqui, nunca monte um. Ofereça poucas opções à cliente e confirme a " +
-    "escolhida antes de marcar ou remarcar.",
+    `Busca até ${MAX_OPCOES} opções de horário na agenda do salão (avec), já escolhidas pela ` +
+    "regra do salão: primeiro o que a cliente pediu, depois horários colados em clientes que a " +
+    "profissional já tem no dia. Cada opção traz dia da semana, data, hora, profissional, as " +
+    "etapas com outra pessoa (tambem, tambem_com: lavagem e secagem) e um opcao_id. Pergunte a " +
+    "preferência de profissional ANTES de buscar. Ofereça com dia, data, hora e profissional " +
+    '(ex.: "sexta, 30/10, às 15h com a Giovanna, e a secagem às 16h30 com a Júlia"). Se a ' +
+    "cliente recusar a pessoa da secagem, busque de novo com auxiliar. Use só opcao_id que " +
+    "veio daqui. Para marcar: servico (+ comprimento " +
+    "quando precisa). Para remarcar: remarcar_appointment_id. Sem preferência de dia, olha as " +
+    "próximas 2 semanas.",
   inputSchema: freeSlotsShape,
   category: "read",
   requiresRole: "agent",
@@ -450,27 +557,164 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
   handler: async (input, ctx) => {
     const ready = await prepare(ctx);
     if ("ok" in ready) return ready;
+    const salao = salaoDa(ctx.organizationId);
+    if (!salao) return SEM_OFERTAS;
+    const hoje = hojeEmBrasilia();
+    const from = input.data ?? hoje;
+    const to = input.data ?? addDays(hoje, 13);
+    if (input.data && input.data < hoje) {
+      return { ok: false, handoff: false, mensagem: "essa data já passou: confira com a cliente." };
+    }
+    const pref = {
+      data: input.data,
+      dias_semana: input.dias_semana,
+      periodo: input.periodo,
+      horario: input.horario,
+    };
     try {
-      const slots = (
-        await listAvailability(ready.config, {
-          service_id: input.service_id,
-          professional_id: input.professional_id,
-          from: input.from,
-          to: input.to,
-        })
-      ).sort((a, b) => a.starts_at.localeCompare(b.starts_at));
-      return {
-        ok: true,
-        horarios: slots.slice(0, MAX_SLOTS).map((s) => ({
-          slot_id: s.id,
-          professional_id: s.professional_id,
-          weekday: weekdayOf(s.date),
-          date: s.date,
-          start_time: s.start_time,
-          end_time: s.end_time,
-        })),
-        total_encontrado: slots.length,
-      };
+      let opcoes: Opcao[];
+      let pedido = "o serviço que a cliente pediu";
+      if (input.remarcar_appointment_id) {
+        const avulsa = await visitaAvulsa(
+          ctx,
+          ready.config,
+          ready.phone,
+          salao,
+          input.remarcar_appointment_id,
+        );
+        if ("ok" in avulsa) return avulsa;
+        const a = avulsa.appointment;
+        pedido = `remarcar ${a.service ?? "o serviço"} de ${dataBr(a.date)} às ${a.start_time}`;
+        const slots = await listAvailability(ready.config, {
+          service_id: a.service_id,
+          professional_id: a.professional_id,
+          from,
+          to,
+        });
+        opcoes = slots.map((s) => ({
+          opcao_id: `${OPCAO_REMARCAR}:-:${s.id}`,
+          data: s.date,
+          inicio: s.start_time,
+          fim: s.end_time,
+          profissional: s.professional_id,
+          agrupamento:
+            (s.gap_before_minutes ?? 99) <= 30 || (s.gap_after_minutes ?? 99) <= 30
+              ? 0
+              : (s.bookings_that_day ?? 0) > 0
+                ? 1
+                : 2,
+        }));
+      } else {
+        const oferta = input.servico ? ofertaPorId(salao, input.servico) : null;
+        if (!oferta) {
+          return {
+            ok: false,
+            handoff: false,
+            mensagem:
+              "serviço desconhecido: use o campo servico de avec_find_services. Se o pedido " +
+              "não está na lista, passe para a equipe.",
+          };
+        }
+        if (oferta.semSabado) {
+          const sabado = (d: string) => new Date(`${d}T12:00:00Z`).getUTCDay() === 6;
+          const soSabado =
+            (input.data && sabado(input.data)) ||
+            (input.dias_semana?.length && input.dias_semana.every((d) => d === "sabado"));
+          if (soSabado) {
+            return {
+              ...refusal(
+                "sabado_com_a_equipe",
+                true,
+                "nunca diga que não há horário no sábado. " + HANDOFF_INSTRUCTION,
+              ),
+              todo: `A cliente quer ${oferta.rotulo} no sábado: ver com ela.`,
+            };
+          }
+        }
+        pedido = `${oferta.rotulo}${input.profissional ? ` com ${input.profissional}` : ""}`;
+        const comprimento = oferta.comprimento ? (input.comprimento ?? null) : null;
+        if (oferta.comprimento && !comprimento) {
+          return {
+            ok: false,
+            handoff: false,
+            mensagem:
+              "este serviço depende do comprimento do cabelo: pergunte à cliente se é curto, " +
+              "médio, longo ou extra longo e chame de novo com comprimento.",
+          };
+        }
+        const principais = principaisPara(salao, oferta, input.profissional);
+        if (!principais) {
+          return {
+            ok: false,
+            handoff: false,
+            mensagem: `essa profissional não faz este serviço aqui. Quem faz: ${oferta.porProfissional
+              .map((p) => nomeDe(salao, p.profissional))
+              .join(", ")}. Pergunte à cliente.`,
+          };
+        }
+        if (principais.every((p) => etapasDe(oferta, p, comprimento) === null)) {
+          return {
+            ...refusal("comprimento_com_a_equipe", true, HANDOFF_INSTRUCTION),
+            todo: `Marcar ${oferta.rotulo} (cabelo ${comprimento}) no avec.`,
+          };
+        }
+        let auxiliares = salao.auxiliares;
+        if (input.auxiliar) {
+          const alvo = fold(input.auxiliar);
+          auxiliares = salao.auxiliares.filter((id) => {
+            const nome = fold(salao.profissionais[id]?.nome ?? "");
+            return nome === alvo || nome.split(" ")[0] === alvo;
+          });
+          if (!auxiliares.length) {
+            return {
+              ok: false,
+              handoff: false,
+              mensagem: `quem faz lavagem e secagem aqui: ${salao.auxiliares
+                .map((id) => nomeDe(salao, id))
+                .join(", ")}. Pergunte à cliente.`,
+            };
+          }
+        }
+        const consultas = consultasPara(salao, oferta, principais, comprimento, auxiliares);
+        const slots = (
+          await Promise.all(
+            consultas.map((c) =>
+              listAvailability(ready.config, {
+                service_id: c.servico,
+                professional_id: c.profissional,
+                from,
+                to,
+              }),
+            ),
+          )
+        ).flat();
+        opcoes = montarOpcoes(salao, oferta, principais, comprimento, slots, auxiliares).filter(
+          (o) => !oferta.semSabado || new Date(`${o.data}T12:00:00Z`).getUTCDay() !== 6,
+        );
+      }
+      const escolhidas = escolherOpcoes(opcoes, pref, hoje);
+      if (escolhidas.length === 0) {
+        // No slot the salon would offer: a person finds a fit (Matheus, 2026-10-23).
+        const quando = [
+          input.data ? dataBr(input.data) : null,
+          input.dias_semana?.join(", "),
+          input.periodo === "manha" ? "manhã" : input.periodo,
+          input.horario,
+        ]
+          .filter(Boolean)
+          .join(", ");
+        return {
+          ...refusal(
+            "sem_horario",
+            true,
+            "não encontrei horário para esse pedido. Não diga que não há horário: diga à " +
+              "cliente, com carinho, que a Ruth da recepção vai ver o melhor horário para ela e " +
+              "já responde por aqui. Depois chame crm_request_human_handoff com o pedido e o todo.",
+          ),
+          todo: `Sem horário na agenda pelo sistema para ${pedido}${quando ? ` (${quando})` : ""}: ver um encaixe com a cliente.`,
+        };
+      }
+      return { ok: true, opcoes: escolhidas.map((o) => opcaoView(salao, o)) };
     } catch (err) {
       return failure(err);
     }
@@ -505,7 +749,7 @@ export const avecCancel: McpToolDefinition<typeof cancelShape> = {
     "Cancela um agendamento da cliente DESTA conversa no avec. Antes: ofereça remarcar; só " +
     "cancele se ela preferir cancelar, e confirme com ela o serviço, o dia e o horário que vão " +
     "ser cancelados. Use o appointment_id de avec_my_appointments. Se ela tiver mais de um " +
-    "agendamento, pergunte qual.",
+    "agendamento, pergunte qual. Visita com vários serviços no dia vai para a equipe.",
   inputSchema: cancelShape,
   category: "write",
   requiresRole: "ai_operator",
@@ -514,8 +758,22 @@ export const avecCancel: McpToolDefinition<typeof cancelShape> = {
   handler: async (input, ctx) => {
     const ready = await prepare(ctx);
     if ("ok" in ready) return ready;
+    const salao = salaoDa(ctx.organizationId);
+    if (!salao) return SEM_OFERTAS;
     const key = avecIdempotencyKey(ctx, "avec_cancel", input);
     if (!key) return NO_JOB;
+    try {
+      const avulsa = await visitaAvulsa(
+        ctx,
+        ready.config,
+        ready.phone,
+        salao,
+        input.appointment_id,
+      );
+      if ("ok" in avulsa) return avulsa;
+    } catch (err) {
+      return failure(err);
+    }
     return write(ctx, async () => {
       const result = await cancelAppointment(ready.config, {
         appointmentId: input.appointment_id,
@@ -535,16 +793,21 @@ const rescheduleShape = {
     .min(1)
     .max(80)
     .describe("O appointment_id que veio de avec_my_appointments."),
-  slot_id: z.string().trim().min(1).max(80).describe("O slot_id que veio de avec_free_slots."),
+  opcao_id: z
+    .string()
+    .trim()
+    .min(1)
+    .max(120)
+    .describe("O opcao_id que veio de avec_free_slots com remarcar_appointment_id."),
 };
 
 export const avecReschedule: McpToolDefinition<typeof rescheduleShape> = {
   name: "avec_reschedule",
   description:
     "Remarca um agendamento da cliente DESTA conversa no avec para outro horário, com a mesma " +
-    "profissional e o mesmo serviço. Antes: confirme com ela o novo dia e horário. Use o " +
-    "appointment_id de avec_my_appointments e um slot_id de avec_free_slots da MESMA " +
-    "profissional e do MESMO serviço. Depois de remarcar, o appointment_id muda: use o novo.",
+    "profissional e o mesmo serviço. Antes: busque opções com avec_free_slots " +
+    "(remarcar_appointment_id) e confirme com ela o novo dia, hora e profissional. Depois de " +
+    "remarcar, o appointment_id muda: use o novo.",
   inputSchema: rescheduleShape,
   category: "write",
   requiresRole: "ai_operator",
@@ -552,18 +815,51 @@ export const avecReschedule: McpToolDefinition<typeof rescheduleShape> = {
   handler: async (input, ctx) => {
     const ready = await prepare(ctx);
     if ("ok" in ready) return ready;
+    const salao = salaoDa(ctx.organizationId);
+    if (!salao) return SEM_OFERTAS;
+    const [kind, , slotId, ...rest] = input.opcao_id.split(":");
+    const slot = slotId ? parseSlotId(slotId) : null;
+    if (kind !== OPCAO_REMARCAR || !slot || rest.length) {
+      return {
+        ok: false,
+        handoff: false,
+        mensagem:
+          "opcao_id inválido: busque com avec_free_slots usando remarcar_appointment_id e use o opcao_id que vier.",
+      };
+    }
     const key = avecIdempotencyKey(ctx, "avec_reschedule", input);
     if (!key) return NO_JOB;
+    try {
+      const avulsa = await visitaAvulsa(
+        ctx,
+        ready.config,
+        ready.phone,
+        salao,
+        input.appointment_id,
+      );
+      if ("ok" in avulsa) return avulsa;
+      const a = avulsa.appointment;
+      if (a.service_id !== slot.servico || a.professional_id !== slot.profissional) {
+        return {
+          ok: false,
+          handoff: false,
+          mensagem:
+            "esse horário é de outro serviço ou profissional: busque de novo com remarcar_appointment_id.",
+        };
+      }
+    } catch (err) {
+      return failure(err);
+    }
     return write(ctx, async () => {
       const moved = await rescheduleAppointment(ready.config, {
         appointmentId: input.appointment_id,
         phone: ready.phone,
-        slotId: input.slot_id,
+        slotId: slotId!,
         idempotencyKey: key,
       });
       return {
         ok: true,
-        agendamento: appointmentView(moved),
+        agendamento: { ...appointmentView(moved), data_br: dataBr(moved.date) },
         aviso: "o appointment_id pode ter mudado: use o deste resultado daqui em diante.",
       };
     });
@@ -571,7 +867,12 @@ export const avecReschedule: McpToolDefinition<typeof rescheduleShape> = {
 };
 
 const bookShape = {
-  slot_id: z.string().trim().min(1).max(80).describe("O slot_id que veio de avec_free_slots."),
+  opcao_id: z
+    .string()
+    .trim()
+    .min(1)
+    .max(400)
+    .describe("O opcao_id que veio de avec_free_slots (com servico), exatamente como veio."),
   note: freeText(
     "Observação curta para o salão, se a cliente pediu algo (vai para o agendamento).",
   ),
@@ -580,10 +881,10 @@ const bookShape = {
 export const avecBook: McpToolDefinition<typeof bookShape> = {
   name: "avec_book",
   description:
-    "Marca um horário novo no avec para a cliente DESTA conversa, pelo telefone dela. Antes: " +
-    "confirme com ela o serviço, a profissional, o dia e o horário. Use só um slot_id de " +
-    "avec_free_slots. Se o avec não conhecer a cliente, a resposta pede para passar para a " +
-    "equipe cadastrá-la.",
+    "Marca no avec a visita de uma opção de avec_free_slots para a cliente DESTA conversa, pelo " +
+    "telefone dela, com todas as etapas (ex.: corte, lavagem e secagem). Antes: confirme com " +
+    "ela o serviço, o dia, a hora e a profissional, e espere o sim. Se o avec não conhecer a " +
+    "cliente, a resposta pede para passar para a equipe cadastrá-la.",
   inputSchema: bookShape,
   category: "write",
   requiresRole: "ai_operator",
@@ -592,16 +893,73 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
   handler: async (input, ctx) => {
     const ready = await prepare(ctx);
     if ("ok" in ready) return ready;
-    const key = avecIdempotencyKey(ctx, "avec_book", input);
-    if (!key) return NO_JOB;
-    return write(ctx, async () => {
-      const booked = await createAppointment(ready.config, {
-        phone: ready.phone,
-        slotId: input.slot_id,
-        note: input.note,
-        idempotencyKey: key,
-      });
-      return { ok: true, agendamento: appointmentView(booked) };
-    });
+    const salao = salaoDa(ctx.organizationId);
+    if (!salao) return SEM_OFERTAS;
+    const opcao = validarOpcao(salao, input.opcao_id);
+    if (!opcao) {
+      return {
+        ok: false,
+        handoff: false,
+        mensagem:
+          "opcao_id inválido: use exatamente um opcao_id que veio de avec_free_slots, sem mudar nada.",
+      };
+    }
+    if (!avecIdempotencyKey(ctx, "avec_book", input)) return NO_JOB;
+    const feitos: AvecAppointment[] = [];
+    for (const [i, slot] of opcao.slots.entries()) {
+      const key = avecIdempotencyKey(ctx, "avec_book", { opcao_id: input.opcao_id, etapa: i })!;
+      try {
+        feitos.push(
+          await createAppointment(ready.config, {
+            phone: ready.phone,
+            slotId: slot.slotId,
+            note: i === 0 ? input.note : undefined,
+            idempotencyKey: key,
+          }),
+        );
+      } catch (err) {
+        if (i === 0) {
+          const twice =
+            err instanceof AvecApiError && err.code === "slot_unavailable" && slotTakenBefore(ctx);
+          return failure(err, { slotTakenTwice: twice, isWrite: true });
+        }
+        logger.warn("avec: visit booked in part", {
+          step: i,
+          code: err instanceof AvecApiError ? err.code : "unexpected",
+        });
+        const hhmm = `${String(Math.floor(slot.inicio / 60)).padStart(2, "0")}:${String(slot.inicio % 60).padStart(2, "0")}`;
+        return {
+          ok: false,
+          code: err instanceof AvecApiError ? err.code : "internal_error",
+          handoff: true,
+          parcial: true,
+          mensagem:
+            "a visita ficou marcada só em parte. Não confirme o horário à cliente: diga que a " +
+            "Ruth da recepção finaliza o agendamento e já responde por aqui. " +
+            HANDOFF_INSTRUCTION,
+          todo:
+            `Ficou marcado no avec: ${feitos.map((f) => `${f.service ?? "serviço"} ${dataBr(f.date)} ${f.start_time} (${f.professional ?? ""})`).join("; ")}. ` +
+            `Falta marcar a etapa ${i + 1} de ${opcao.oferta.rotulo} às ${hhmm} (${nomeDe(salao, slot.profissional) ?? "auxiliar"}): conferir e completar no avec, depois confirmar com a cliente.`,
+        };
+      }
+    }
+    const first = feitos[0]!;
+    return {
+      ok: true,
+      agendamento: {
+        servico: opcao.oferta.rotulo,
+        dia_semana: weekdayOf(first.date),
+        data: first.date,
+        data_br: dataBr(first.date),
+        inicio: first.start_time,
+        termina_por_volta_de: feitos
+          .map((f) => f.end_time)
+          .sort()
+          .at(-1),
+        profissional: nomeDe(salao, opcao.principal) ?? first.professional,
+        status: first.status_name ?? first.status,
+      },
+      etapas: feitos.map(appointmentView),
+    };
   },
 };

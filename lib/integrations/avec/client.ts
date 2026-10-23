@@ -54,6 +54,10 @@ const slotSchema = z.object({
   start_time: z.string(),
   end_time: z.string(),
   starts_at: z.string(),
+  // How the slot sits among the professional's bookings that day (Berseba/berseba-mayara-morales#27).
+  bookings_that_day: z.number().int().optional(),
+  gap_before_minutes: z.number().int().nullable().optional(),
+  gap_after_minutes: z.number().int().nullable().optional(),
 });
 export type AvecSlot = z.infer<typeof slotSchema>;
 
@@ -149,6 +153,19 @@ export async function listAppointments(
   return (
     await request(config, "GET", "/v1/appointments", list(appointmentSchema), { query: params })
   ).data;
+}
+
+export async function getAppointment(
+  config: AvecConfig,
+  params: { id: string; phone: string },
+): Promise<AvecAppointment> {
+  return request(
+    config,
+    "GET",
+    `/v1/appointments/${encodeURIComponent(params.id)}`,
+    appointmentSchema,
+    { query: { phone: params.phone } },
+  );
 }
 
 export async function listAvailability(
