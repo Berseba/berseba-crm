@@ -185,13 +185,12 @@ describe("montarOpcoes", () => {
 describe("escolherOpcoes", () => {
   const hoje = "2026-10-23"; // a Friday
 
-  it("next to her clients first, then a day she works, at most 3 and 2 a day", () => {
+  it("next to her clients first, then a day she works, at most 2", () => {
     const r = escolherOpcoes(
       [
         opcao("2026-10-27", "09:00", 1),
         opcao("2026-10-27", "14:00", 0),
         opcao("2026-10-27", "15:00", 0),
-        opcao("2026-10-27", "16:00", 0),
         opcao("2026-10-28", "10:00", 1),
       ],
       {},
@@ -200,8 +199,8 @@ describe("escolherOpcoes", () => {
     expect(r.map((o) => [o.data, o.inicio])).toEqual([
       ["2026-10-27", "14:00"],
       ["2026-10-27", "15:00"],
-      ["2026-10-28", "10:00"],
     ]);
+    expect(escolherOpcoes([opcao("2026-10-28", "10:00", 1)], {}, hoje)).toHaveLength(1);
   });
 
   it("an empty day only when the client asked for that day", () => {

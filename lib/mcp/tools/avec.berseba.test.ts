@@ -243,7 +243,7 @@ describe("request shape", () => {
     expect(r.com_a_equipe).toEqual(expect.arrayContaining(["mechas", "maquiagem"]));
   });
 
-  it("avec_free_slots joins the recipe's steps and offers 2-3 options with day, time and professional", async () => {
+  it("avec_free_slots joins the recipe's steps and offers up to 2 options with day, time and professional", async () => {
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-10-23T15:00:00Z"));
     // Corte feminino com secagem, cabelo médio, with Mayara: corte + lavagem (helper) at +0,
@@ -290,12 +290,11 @@ describe("request shape", () => {
     expect(calls[0]!.url.searchParams.get("from")).toBe("2026-10-23");
     expect(calls[0]!.url.searchParams.get("to")).toBe("2026-11-05");
     const opcoes = r.opcoes as Array<Record<string, unknown>>;
-    // This week first: 27/10 14:00 is next to her clients, 27/10 09:00 is a day she works but
-    // far from them (gap 120); 30/10 is next week (today is 23/10), so it comes last.
+    // At most 2. This week first: 27/10 14:00 is next to her clients, 27/10 09:00 is a day she
+    // works but far from them (gap 120); 30/10 is next week (today is 23/10), so it is left out.
     expect(opcoes.map((o) => [o.data_br, o.inicio, o.agrupado])).toEqual([
       ["27/10", "14:00", true],
       ["27/10", "09:00", false],
-      ["30/10", "10:00", true],
     ]);
     expect(opcoes[0]).toMatchObject({
       dia_semana: "terça-feira",
@@ -361,6 +360,20 @@ describe("request shape", () => {
     });
     const r = await run(tools.avecFreeSlots, { servico: "progressiva", comprimento: "medio" });
     expect((r.opcoes as Array<{ data: string }>).map((o) => o.data)).toEqual(["2026-10-27"]);
+  });
+
+  it("no slot the salon would offer hands off to a person, never 'no slots'", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-23T15:00:00Z"));
+    answer(200, { data: [] });
+    const r = await run(tools.avecFreeSlots, {
+      servico: "sobrancelha_design",
+      dias_semana: ["sexta"],
+      periodo: "tarde",
+    });
+    expect(r).toMatchObject({ ok: false, handoff: true, motivo: "sem_horario" });
+    expect(String(r.mensagem)).toMatch(/Não diga que não há horário/);
+    expect(String(r.todo)).toMatch(/Design de sobrancelha .*\(sexta, tarde\)/);
   });
 
   it("avec_free_slots asks for the hair length, and refuses an unknown service", async () => {

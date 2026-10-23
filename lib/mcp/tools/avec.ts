@@ -554,11 +554,6 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
   category: "read",
   requiresRole: "agent",
   requiresScope: "mcp:read",
-  motivoDoVazio: (result) =>
-    (result as { ok?: boolean; opcoes?: unknown[] })?.ok === true &&
-    (result as { opcoes: unknown[] }).opcoes.length === 0
-      ? "sem_horario"
-      : null,
   handler: async (input, ctx) => {
     const ready = await prepare(ctx);
     if ("ok" in ready) return ready;
@@ -578,6 +573,7 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
     };
     try {
       let opcoes: Opcao[];
+      let pedido = "o serviço que a cliente pediu";
       if (input.remarcar_appointment_id) {
         const avulsa = await visitaAvulsa(
           ctx,
@@ -588,6 +584,7 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
         );
         if ("ok" in avulsa) return avulsa;
         const a = avulsa.appointment;
+        pedido = `remarcar ${a.service ?? "o serviço"} de ${dataBr(a.date)} às ${a.start_time}`;
         const slots = await listAvailability(ready.config, {
           service_id: a.service_id,
           professional_id: a.professional_id,
@@ -634,6 +631,7 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
             };
           }
         }
+        pedido = `${oferta.rotulo}${input.profissional ? ` com ${input.profissional}` : ""}`;
         const comprimento = oferta.comprimento ? (input.comprimento ?? null) : null;
         if (oferta.comprimento && !comprimento) {
           return {
@@ -695,20 +693,28 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
         );
       }
       const escolhidas = escolherOpcoes(opcoes, pref, hoje);
-      return {
-        ok: true,
-        opcoes: escolhidas.map((o) => opcaoView(salao, o)),
-        ...(escolhidas.length === 0
-          ? {
-              mensagem:
-                opcoes.length > 0
-                  ? "não há horário agrupado nesse período. Pergunte à cliente outro dia ou " +
-                    "período; se ela só puder nesse, passe para a equipe."
-                  : "não há horário livre nesse período. Pergunte à cliente outro dia ou " +
-                    "período; se não houver, passe para a equipe.",
-            }
-          : {}),
-      };
+      if (escolhidas.length === 0) {
+        // No slot the salon would offer: a person finds a fit (Matheus, 2026-10-23).
+        const quando = [
+          input.data ? dataBr(input.data) : null,
+          input.dias_semana?.join(", "),
+          input.periodo === "manha" ? "manhã" : input.periodo,
+          input.horario,
+        ]
+          .filter(Boolean)
+          .join(", ");
+        return {
+          ...refusal(
+            "sem_horario",
+            true,
+            "não encontrei horário para esse pedido. Não diga que não há horário: diga à " +
+              "cliente, com carinho, que a Ruth da recepção vai ver o melhor horário para ela e " +
+              "já responde por aqui. Depois chame crm_request_human_handoff com o pedido e o todo.",
+          ),
+          todo: `Sem horário na agenda pelo sistema para ${pedido}${quando ? ` (${quando})` : ""}: ver um encaixe com a cliente.`,
+        };
+      }
+      return { ok: true, opcoes: escolhidas.map((o) => opcaoView(salao, o)) };
     } catch (err) {
       return failure(err);
     }

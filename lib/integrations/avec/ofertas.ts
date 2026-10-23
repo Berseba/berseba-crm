@@ -630,15 +630,15 @@ export interface Preferencia {
   horario?: string;
 }
 
-export const MAX_OPCOES = 3;
+export const MAX_OPCOES = 2; // Matheus, 2026-10-23: at most two, one if that is all there is
 const MAX_POR_DIA = 2;
 
 /**
- * The 2–3 options to offer, the salon's convention first:
+ * The (at most 2) options to offer, the salon's convention first:
  *  1. what the client asked (day, weekday, period; the closest to the time she said);
  *  2. next to a client the professional already has that day (≤ 30 min), then a day she
  *     already works with clients; an empty day only when the client asked for that day;
- *  3. this week before next week, then the earliest; at most 2 options on the same day.
+ *  3. this week before next week, then the earliest.
  */
 export function escolherOpcoes(opcoes: Opcao[], pref: Preferencia, hoje: string): Opcao[] {
   const pediuDia = Boolean(pref.data || pref.dias_semana?.length);
