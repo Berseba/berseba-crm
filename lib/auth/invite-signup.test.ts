@@ -18,27 +18,32 @@ const admin = vi.hoisted(() => ({
   deleteUser: vi.fn(),
   listUsers: vi.fn(),
   updateUserById: vi.fn(),
-  inviteRow: { data: null as { revoked_at: string | null } | null },
+  /** What each table answers. `team_invites`/`platform_admins` via maybeSingle, `user_organizations` as a list. */
+  tables: {} as Record<string, { data: unknown; error: { message: string } | null }>,
 }));
 vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: vi.fn(() => {
-    const chain = {
-      select: () => chain,
-      eq: () => chain,
-      maybeSingle: async () => ({ data: admin.inviteRow.data, error: null }),
-    };
-    return {
-      from: vi.fn(() => chain),
-      auth: {
-        admin: {
-          createUser: admin.createUser,
-          deleteUser: admin.deleteUser,
-          listUsers: admin.listUsers,
-          updateUserById: admin.updateUserById,
-        },
+  createAdminClient: vi.fn(() => ({
+    from: vi.fn((table: string) => {
+      const answer = () => admin.tables[table] ?? { data: null, error: null };
+      const chain = {
+        select: () => chain,
+        eq: () => chain,
+        is: () => chain,
+        maybeSingle: async () => answer(),
+        then: (resolve: (v: unknown) => unknown, reject?: (e: unknown) => unknown) =>
+          Promise.resolve(answer()).then(resolve, reject),
+      };
+      return chain;
+    }),
+    auth: {
+      admin: {
+        createUser: admin.createUser,
+        deleteUser: admin.deleteUser,
+        listUsers: admin.listUsers,
+        updateUserById: admin.updateUserById,
       },
-    };
-  }),
+    },
+  })),
 }));
 
 const applyInvite = vi.hoisted(() => vi.fn());
@@ -75,7 +80,7 @@ beforeEach(() => {
   for (const f of [admin.createUser, admin.deleteUser, admin.listUsers, admin.updateUserById, applyInvite]) {
     f.mockReset();
   }
-  admin.inviteRow.data = null;
+  admin.tables = {};
   applyInvite.mockResolvedValue({ ok: true, membershipId: "m-1", mudou: true });
   admin.deleteUser.mockResolvedValue({ error: null });
   admin.updateUserById.mockResolvedValue({ data: { user: {} }, error: null });
@@ -170,7 +175,7 @@ describe("completeInviteSignup — spoofing never yields a confirmed account", (
   });
 
   it("an invite revoked on the Team screen: refused BEFORE creating the account", async () => {
-    admin.inviteRow.data = { revoked_at: "2026-10-09T10:00:00Z" };
+    admin.tables["team_invites"] = { data: { revoked_at: "2026-10-09T10:00:00Z" }, error: null };
 
     const result = await run(EMAIL, inviteFor(EMAIL));
 
@@ -282,5 +287,113 @@ describe("completeInviteSignup — the email already has an account", () => {
 
     expect(await run(EMAIL, inviteFor(EMAIL))).toEqual({ ok: false, reason: "account_exists" });
     expect(admin.updateUserById).not.toHaveBeenCalled();
+  });
+});
+
+describe("completeInviteSignup — review hardening", () => {
+  const exists = { data: null, error: { message: "already been registered", code: "email_exists", status: 422 } };
+  const unconfirmed = (id = "u-old") => ({
+    data: { users: [{ id, email: EMAIL, email_confirmed_at: null, user_metadata: {} }] },
+    error: null,
+  });
+
+  it("the invite row cannot be read: fails CLOSED, nothing created", async () => {
+    admin.tables["team_invites"] = { data: null, error: { message: "pooler timeout" } };
+
+    const result = await run(EMAIL, inviteFor(EMAIL));
+
+    expect(result).toMatchObject({ ok: false, reason: "create_failed" });
+    expectNothingWritten();
+  });
+
+  it("an aplicarConvite THROW takes the rollback path too", async () => {
+    admin.createUser.mockResolvedValue({ data: { user: { id: "u-throw" } }, error: null });
+    applyInvite.mockRejectedValue(new Error("cookies() outside a request"));
+
+    const result = await run(EMAIL, inviteFor(EMAIL));
+
+    expect(result).toMatchObject({ ok: false, reason: "accept_failed" });
+    expect(admin.deleteUser).toHaveBeenCalledWith("u-throw");
+  });
+
+  describe("a spent invite (already accepted)", () => {
+    it("never creates a new account, even when the old one is gone", async () => {
+      // Accepted, then the account was deleted: a forwarded link must not bring
+      // it back without the mailbox.
+      admin.tables["team_invites"] = {
+        data: { revoked_at: null, accepted_at: "2026-10-09T20:00:00Z", accepted_by: "u-gone" },
+        error: null,
+      };
+      admin.listUsers.mockResolvedValue({ data: { users: [] }, error: null });
+
+      expect(await run(EMAIL, inviteFor(EMAIL))).toEqual({ ok: false, reason: "invalid_invite" });
+      expectNothingWritten();
+    });
+
+    it("does not let ANOTHER unconfirmed account use it", async () => {
+      admin.tables["team_invites"] = {
+        data: { revoked_at: null, accepted_at: "2026-10-09T20:00:00Z", accepted_by: "u-someone-else" },
+        error: null,
+      };
+      admin.listUsers.mockResolvedValueOnce(unconfirmed("u-old"));
+
+      expect(await run(EMAIL, inviteFor(EMAIL))).toEqual({ ok: false, reason: "invalid_invite" });
+      expectNothingWritten();
+    });
+
+    it("finishes the half-done attempt of the account that accepted it", async () => {
+      // Previous attempt: invite applied, then the confirmation failed.
+      admin.tables["team_invites"] = {
+        data: { revoked_at: null, accepted_at: "2026-10-09T20:00:00Z", accepted_by: "u-old" },
+        error: null,
+      };
+      admin.tables["user_organizations"] = { data: [{ organization_id: ORG }], error: null };
+      admin.listUsers.mockResolvedValueOnce(unconfirmed("u-old"));
+
+      expect(await run(EMAIL, inviteFor(EMAIL))).toEqual({ ok: true, userId: "u-old", created: false });
+      expect(admin.createUser).not.toHaveBeenCalled();
+      expect(admin.updateUserById).toHaveBeenCalledWith("u-old", expect.objectContaining({ email_confirm: true }));
+    });
+  });
+
+  describe("an unconfirmed account that already carries authority is never taken over", () => {
+    beforeEach(() => {
+      admin.createUser.mockResolvedValue(exists);
+      admin.listUsers.mockResolvedValueOnce(unconfirmed("u-old"));
+    });
+
+    it("platform admin", async () => {
+      admin.tables["platform_admins"] = { data: { user_id: "u-old" }, error: null };
+
+      expect(await run(EMAIL, inviteFor(EMAIL))).toEqual({ ok: false, reason: "account_exists" });
+      expect(applyInvite).not.toHaveBeenCalled();
+      expect(admin.updateUserById).not.toHaveBeenCalled();
+    });
+
+    it("a membership in another organization (linked by hand)", async () => {
+      admin.tables["user_organizations"] = {
+        data: [{ organization_id: "33333333-3333-4333-8333-333333333333" }],
+        error: null,
+      };
+
+      expect(await run(EMAIL, inviteFor(EMAIL))).toEqual({ ok: false, reason: "account_exists" });
+      expect(applyInvite).not.toHaveBeenCalled();
+      expect(admin.updateUserById).not.toHaveBeenCalled();
+    });
+
+    it("a membership in THIS organization that this invite did not create", async () => {
+      // e.g. admin role inserted by SQL; a viewer invite must not hand it over.
+      admin.tables["user_organizations"] = { data: [{ organization_id: ORG }], error: null };
+
+      expect(await run(EMAIL, inviteFor(EMAIL))).toEqual({ ok: false, reason: "account_exists" });
+      expect(admin.updateUserById).not.toHaveBeenCalled();
+    });
+
+    it("the authority lookup fails: fails CLOSED", async () => {
+      admin.tables["user_organizations"] = { data: null, error: { message: "boom" } };
+
+      expect(await run(EMAIL, inviteFor(EMAIL))).toMatchObject({ ok: false, reason: "create_failed" });
+      expect(admin.updateUserById).not.toHaveBeenCalled();
+    });
   });
 });

@@ -394,6 +394,98 @@ test.describe("ciclo de vida do convite (ponta a ponta + adversarial)", () => {
     await expect(page.getByLabel("Nome da empresa")).toBeVisible();
   });
 
+  // ── Berseba: invite signup without a confirmation email ──────────────────
+  //
+  // 2026-10-09: two invitees signed up from their links, the Supabase Auth
+  // confirmation email never arrived, and every login answered
+  // `email_not_confirmed` as "Email ou senha incorretos". These two cases run
+  // against the real GoTrue of the CI stack, with email confirmation ON
+  // (`supabase/config.toml`), so they prove no email is needed any more.
+
+  async function signUpFromInvite(page: Page, email: string): Promise<void> {
+    const token = signInviteToken({
+      invite_id: randomUUID(),
+      email,
+      organization_id: inv.org_id,
+      role: "agent",
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+    await page.goto(`/signup?invite=${encodeURIComponent(token)}`);
+    await page.locator("#full_name").fill("Convidada Sem E-mail");
+    await page.locator("#password").fill(base.password);
+    await page.locator("#password_confirm").fill(base.password);
+    await page.getByRole("button", { name: /criar conta/i }).click();
+  }
+
+  async function accountOf(email: string): Promise<{ id: string; email_confirmed_at?: string | null }> {
+    const { data } = await svc.auth.admin.listUsers({ page: 1, perPage: 1000 });
+    const user = data.users.find((u) => u.email === email);
+    if (!user) throw new Error(`no account for ${email}`);
+    return user;
+  }
+
+  async function roleIn(userId: string): Promise<string | null> {
+    const { data } = await svc
+      .from("user_organizations")
+      .select("role")
+      .eq("user_id", userId)
+      .eq("organization_id", inv.org_id)
+      .is("revoked_at", null)
+      .maybeSingle();
+    return (data as { role: string } | null)?.role ?? null;
+  }
+
+  test("12b. (Berseba) no account: signing up from the invite lands inside the org, no email", async ({
+    page,
+  }) => {
+    const email = `convite.sem.email.${randomUUID().slice(0, 8)}@deskcomm.test`;
+
+    await signUpFromInvite(page, email);
+
+    await page.waitForURL(/\/app(\/|$)/, { timeout: 60_000 });
+    await expect(page.getByText(/Confirme seu e-mail/i)).toHaveCount(0);
+    const account = await accountOf(email);
+    expect(account.email_confirmed_at, "the invite confirmed the account").toBeTruthy();
+    expect(await roleIn(account.id)).toBe("agent");
+    await svc.auth.admin.deleteUser(account.id);
+  });
+
+  test("12c. (Berseba) never-confirmed account: login says so, and the invite unlocks it", async ({
+    page,
+  }) => {
+    // The exact state of the 2026-10-09 invitees: account created, never confirmed.
+    const email = `convite.pendente.login.${randomUUID().slice(0, 8)}@deskcomm.test`;
+    const { data: made, error } = await svc.auth.admin.createUser({
+      email,
+      password: "SenhaAntiga!2026#Pendente",
+      email_confirm: false,
+    });
+    if (error || !made.user) throw error ?? new Error("could not seed the unconfirmed account");
+
+    await page.goto("/login");
+    await page.locator("#email").fill(email);
+    await page.locator("#password").fill("SenhaAntiga!2026#Pendente");
+    await page.getByRole("button", { name: "Entrar", exact: true }).click();
+    await expect(page.getByText(/ainda não foi confirmado/i)).toBeVisible();
+    await expect(page.getByText(/Email ou senha incorretos/i)).toHaveCount(0);
+    await page.getByRole("button", { name: /Reenviar confirmação/i }).click();
+    // Either outcome proves the button reaches GoTrue and the screen answers:
+    // the local stack caps emails per hour, and other specs in this job may
+    // have spent the quota.
+    await expect(
+      page.getByText(/Enviamos um novo link de confirmação|Muitas tentativas/i),
+    ).toBeVisible();
+
+    await signUpFromInvite(page, email);
+
+    await page.waitForURL(/\/app(\/|$)/, { timeout: 60_000 });
+    const account = await accountOf(email);
+    expect(account.id).toBe(made.user.id);
+    expect(account.email_confirmed_at, "the invite confirmed the existing account").toBeTruthy();
+    expect(await roleIn(account.id)).toBe("agent");
+    await svc.auth.admin.deleteUser(account.id);
+  });
+
   /**
    * ─── A LISTA DE CONVITES na aba Membros (migration 0238) ──────────────────
    *

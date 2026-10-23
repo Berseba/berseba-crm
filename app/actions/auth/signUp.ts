@@ -15,6 +15,7 @@ import { modoDeCadastro } from "@/lib/auth/politica-de-cadastro";
 import { audit, hashEmail } from "@/lib/audit";
 import { authRateLimited, AUTH_LIMITS } from "@/lib/auth/rate-limit";
 import { env } from "@/lib/env";
+import { logger } from "@/lib/logger";
 
 export type SignUpResult =
   | {
@@ -194,11 +195,15 @@ export async function signUp(
     // instead of on a login screen. If this fails the account and the
     // membership are already in place: the login screen finishes the job.
     const supabase = await createClient();
-    const { data: signedIn } = await supabase.auth.signInWithPassword({
+    const { data: signedIn, error: signInError } = await supabase.auth.signInWithPassword({
       email: parsed.data.email,
       password: parsed.data.password,
     });
     if (signedIn?.session) return { ok: true, sessao_ativa: true, destino: "/app" };
+    logger.warn("invite signup: account ready but the session could not be opened", {
+      user_id: result.userId,
+      detail: signInError?.message ?? "no session returned",
+    });
     return { ok: true, sessao_ativa: false, destino: "/login" };
   }
 

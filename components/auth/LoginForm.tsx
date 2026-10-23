@@ -28,7 +28,6 @@ export function LoginForm({ next }: { next?: string }) {
   const {
     register,
     handleSubmit,
-    getValues,
     formState: { errors },
   } = useForm<LoginInput>({
     resolver: zodResolver(loginSchema),
@@ -71,12 +70,17 @@ export function LoginForm({ next }: { next?: string }) {
     });
   };
 
-  const onResend = async () => {
-    const email = unconfirmedEmail ?? getValues("email");
+  const onResend = async (email: string) => {
     setResendState("sending");
-    const res = await resendConfirmation({ email });
-    if (res.ok) setResendState("sent");
-    else setResendState(res.error === "rate_limited" ? "rate_limited" : "failed");
+    try {
+      const res = await resendConfirmation({ email });
+      if (res.ok) setResendState("sent");
+      else setResendState(res.error === "rate_limited" ? "rate_limited" : "failed");
+    } catch {
+      // The action call itself failed (network, a deploy in the middle): the
+      // button must come back instead of staying on "Reenviando..." forever.
+      setResendState("failed");
+    }
   };
 
   return (
@@ -139,7 +143,7 @@ export function LoginForm({ next }: { next?: string }) {
               variant="outline"
               size="sm"
               disabled={resendState === "sending"}
-              onClick={onResend}
+              onClick={() => onResend(unconfirmedEmail)}
             >
               {resendState === "sending" ? t("Reenviando...") : t("Reenviar confirmação")}
             </Button>

@@ -171,10 +171,21 @@ test("⭐ quem se cadastra POR UM CONVITE vai aceitá-lo, não abrir empresa pr�
   });
 
   await page.goto(`/signup?invite=${encodeURIComponent(token)}`);
+  await page.locator("#full_name").fill("Convidado Sem Confirmar");
   await page.locator("#password").fill(SENHA);
   await page.locator("#password_confirm").fill(SENHA);
   await page.getByRole("button", { name: /criar conta/i }).click();
 
-  await expect(page).toHaveURL(/\/team\/accept-invite\//, { timeout: 30_000 });
-  await idDoUsuario(email);
+  // Berseba: invite signup confirms the account and applies the invite in the
+  // same request (`lib/auth/invite-signup.ts`), so it lands inside the
+  // organization that invited, with or without autoconfirm. The CI proof of
+  // this, with confirmation ON, is case 12b of `invite-lifecycle.spec.ts`.
+  await expect(page).toHaveURL(/\/app(\/|$)/, { timeout: 30_000 });
+  const idConvidado = await idDoUsuario(email);
+  const { data: vinculoDoConvidado } = await svc
+    .from("user_organizations")
+    .select("organization_id, role")
+    .eq("user_id", idConvidado)
+    .is("revoked_at", null);
+  expect(vinculoDoConvidado).toEqual([{ organization_id: org.id, role: "agent" }]);
 });

@@ -138,3 +138,29 @@ describe("signInWithPassword — email_not_confirmed (Berseba)", () => {
     expect(res.error).toBe("invalid_credentials");
   });
 });
+
+describe("signInWithPassword — email_not_confirmed without an error code (Berseba)", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    signIn.mockClear();
+    vi.mocked(headers).mockResolvedValue({
+      get: (k: string) => (k === "x-forwarded-for" ? "203.0.113.79" : null),
+    } as never);
+    // GoTrue builds that send no `error_code`: auth-js leaves `code` undefined.
+    signIn.mockResolvedValue({
+      data: { user: null, session: null },
+      error: { message: "Email not confirmed", status: 400 },
+    } as never);
+    vi.mocked(createClient).mockResolvedValue({
+      auth: { signInWithPassword: signIn, mfa: { listFactors: vi.fn() } },
+    } as never);
+  });
+
+  it("still recognized by the message", async () => {
+    const { signInWithPassword } = await import("./signInWithPassword");
+
+    const res = await signInWithPassword({ email: "antigo@example.com", password: "senha-certa-123" });
+
+    expect(res).toEqual({ ok: false, error: "email_not_confirmed" });
+  });
+});
