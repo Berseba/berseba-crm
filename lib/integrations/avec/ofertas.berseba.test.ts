@@ -64,6 +64,31 @@ describe("salon", () => {
     }
   });
 
+  it("every corte has its wash by a helper; the men's corte never has a drying", () => {
+    for (const id of ["corte_feminino", "corte_masculino", "corte_infantil"]) {
+      for (const p of oferta(id).porProfissional) {
+        expect(
+          etapasDe(oferta(id), p.profissional, null),
+          `${id} ${p.profissional}`,
+        ).toContainEqual({
+          servico: "2128749",
+          inicio: 0,
+          papel: "auxiliar",
+        });
+      }
+    }
+    expect(ofertaPorId(salao, "corte_masculino_com_secagem")).toBeNull();
+    expect(ofertaPorId(salao, "corte_infantil_com_secagem")).not.toBeNull();
+  });
+
+  it("nutrição and reconstrução: everyone but Mayara Morales", () => {
+    for (const id of ["nutricao", "reconstrucao"]) {
+      const quem = oferta(id).porProfissional.map((p) => p.profissional);
+      expect(quem, id).not.toContain("430008");
+      expect(quem, id).toEqual(expect.arrayContaining(["444099", "797917"]));
+    }
+  });
+
   it("every step starts on the salon's 30-minute grid", () => {
     for (const o of salao.ofertas) {
       for (const p of o.porProfissional) {

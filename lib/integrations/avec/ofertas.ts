@@ -71,7 +71,16 @@ const LAVAGEM_PARA_CORTE = "2128749";
 // with the four who did them in the agenda until Johnny confirms (Eliton, Suellen?).
 const COR = [MAYARA, GIOVANNA, JUNIOR, SIMONE];
 
+// Nutrição and reconstrução: everyone but Mayara Morales (Matheus, 2026-10-23); the ones who did
+// them in the agenda until Johnny confirms Eliton and Suellen.
+const TRATAMENTO = [SIMONE, GIOVANNA, JUNIOR, JULIA];
+
 const so = (servico: ServicoRef): Etapa[] => [{ servico, inicio: 0, papel: "principal" }];
+/** Every corte has its wash, by a helper at the same time (Matheus, 2026-10-23). */
+const comLavagem = (servico: string): Etapa[] => [
+  { servico, inicio: 0, papel: "principal" },
+  { servico: LAVAGEM_PARA_CORTE, inicio: 0, papel: "auxiliar" },
+];
 const cada = (profissionais: string[], etapas: Etapa[]) =>
   profissionais.map((profissional) => ({ profissional, etapas }));
 
@@ -105,7 +114,7 @@ const SALAO_MAYARA: Salao = {
             { servico: LAVAGEM_PARA_CORTE, inicio: 0, papel: "auxiliar" },
           ],
         },
-        { profissional: ELITON, etapas: so("3238931") },
+        { profissional: ELITON, etapas: comLavagem("3238931") },
       ],
     },
     {
@@ -123,30 +132,58 @@ const SALAO_MAYARA: Salao = {
           ],
         },
         {
+          // Eliton dries his own client (agenda); the wash is a helper's, as for every corte.
           profissional: ELITON,
           etapas: [
             { servico: "3238931", inicio: 0, papel: "principal" },
+            { servico: LAVAGEM_PARA_CORTE, inicio: 0, papel: "auxiliar" },
             { servico: SECAGEM, inicio: 30, papel: "principal" },
           ],
         },
       ],
     },
     {
+      // Never with secagem (Matheus, 2026-10-23): the agent does not even ask.
       id: "corte_masculino",
-      rotulo: "Corte masculino",
+      rotulo: "Corte masculino (inclui a lavagem)",
       comprimento: false,
       porProfissional: [
-        { profissional: MAYARA, etapas: so("2128714") },
-        { profissional: ELITON, etapas: so("3238946") },
+        { profissional: MAYARA, etapas: comLavagem("2128714") },
+        { profissional: ELITON, etapas: comLavagem("3238946") },
       ],
     },
     {
       id: "corte_infantil",
-      rotulo: "Corte infantil",
+      rotulo: "Corte infantil, sem secagem (inclui a lavagem)",
+      perguntar: "se quer finalizar com secagem e se tem preferência de profissional",
       comprimento: false,
       porProfissional: [
-        { profissional: MAYARA, etapas: so("2128713") },
-        { profissional: ELITON, etapas: so("3238948") },
+        { profissional: MAYARA, etapas: comLavagem("2128713") },
+        { profissional: ELITON, etapas: comLavagem("3238948") },
+      ],
+    },
+    {
+      id: "corte_infantil_com_secagem",
+      rotulo: "Corte infantil com secagem (lavagem, corte e secagem)",
+      perguntar: "o comprimento do cabelo e se tem preferência de profissional",
+      comprimento: true,
+      porProfissional: [
+        {
+          profissional: MAYARA,
+          etapas: [
+            { servico: "2128713", inicio: 0, papel: "principal" },
+            { servico: LAVAGEM_PARA_CORTE, inicio: 0, papel: "auxiliar" },
+            { servico: SECAGEM, inicio: 30, papel: "auxiliar" },
+          ],
+        },
+        {
+          profissional: ELITON,
+          etapas: [
+            { servico: "3238948", inicio: 0, papel: "principal" },
+            { servico: LAVAGEM_PARA_CORTE, inicio: 0, papel: "auxiliar" },
+            { servico: SECAGEM, inicio: 30, papel: "principal" },
+          ],
+        },
       ],
     },
     {
@@ -250,7 +287,7 @@ const SALAO_MAYARA: Salao = {
       perguntar: "o comprimento do cabelo",
       comprimento: true,
       porProfissional: cada(
-        [SIMONE],
+        TRATAMENTO,
         so({ curto: "2153527", medio: "2153526", longo: "2128717", extra_longo: "3239159" }),
       ),
     },
@@ -259,7 +296,10 @@ const SALAO_MAYARA: Salao = {
       rotulo: "Reconstrução capilar",
       perguntar: "o comprimento do cabelo",
       comprimento: true,
-      porProfissional: cada([SIMONE], so({ curto: "2129187", medio: "2153545", longo: "2129179" })),
+      porProfissional: cada(
+        TRATAMENTO,
+        so({ curto: "2129187", medio: "2153545", longo: "2129179" }),
+      ),
     },
     {
       id: "progressiva",
