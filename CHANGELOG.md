@@ -8,6 +8,18 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.8.0] — 2026-10-23
+
+### Adicionado
+
+- **No modo Assistido, a sugestão de resposta pode levar a foto do produto** Quando o agente sugere uma resposta apresentando um produto do catálogo, a sugestão mostra a miniatura da foto do produto. Ao clicar em "Aprovar e enviar", o cliente recebe a foto com o texto aprovado (inclusive o editado) como legenda — o mesmo envio que o modo autônomo já fazia. Se o produto foi desativado ou removido do catálogo, nada é enviado e a sugestão fica marcada como falha. A legenda aceita até 1.024 caracteres; acima disso, o botão de aprovar fica bloqueado até o texto ser encurtado. A atualização acrescenta uma coluna ao banco e é aplicada sozinha pelo `update.sh`.
+
+### Corrigido
+
+- **A devolução automática à IA respeita quem deve a resposta** Com o prazo de devolução automática ligado (Configurações › Distribuição de atendimento), a conversa em que o cliente está esperando a equipe não volta mais para a IA: fica com a pessoa até ela responder ou encerrar. Quando a equipe respondeu por último, ou encerrou a conversa, e o prazo passou, a próxima mensagem do cliente vai direto para a IA, que atende na hora. Antes, a conversa podia voltar para a IA com uma mensagem do cliente sem resposta, ou reabrir sem dono e com a IA calada. Só contam como resposta da equipe as mensagens enviadas pelo CRM e o encerramento da conversa. Isso substitui a mudança da versão 2.7.0, em que a IA respondia a mensagem pendente quando a conversa voltava: agora essa mensagem fica com a equipe. Sem o prazo ligado, nada muda.
+
+- **Quem cria a conta pelo convite entra direto, sem esperar e-mail de confirmação** Quem abria o link de convite e criava a conta com e-mail e senha precisava ainda confirmar o e-mail por um segundo link. Quando esse e-mail não chegava, a pessoa ficava trancada do lado de fora, e a tela de entrar dizia "Email ou senha incorretos" mesmo com a senha certa. Agora o próprio convite confirma o e-mail: a conta nasce confirmada e a pessoa já entra na empresa que a convidou. O cadastro sem convite continua pedindo a confirmação por e-mail. Na tela de entrar, e-mail não confirmado ganhou aviso próprio, com o botão "Reenviar confirmação". Ao criar uma organização para outra pessoa, a tela agora avisa que o seu acesso termina quando o responsável aceitar o convite.
+
 ## [2.7.0] — 2026-10-22
 
 ### Adicionado
@@ -9407,7 +9419,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.7.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.8.0...HEAD
+[2.8.0]: https://github.com/berseba/berseba-crm/compare/v2.7.0...v2.8.0
 [2.7.0]: https://github.com/berseba/berseba-crm/compare/v2.6.0...v2.7.0
 [2.6.0]: https://github.com/berseba/berseba-crm/compare/v2.5.0...v2.6.0
 [2.5.0]: https://github.com/berseba/berseba-crm/compare/v2.4.0...v2.5.0
