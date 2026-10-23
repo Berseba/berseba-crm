@@ -52,11 +52,12 @@ import type { McpContext, McpToolDefinition } from "../types";
 
 const SLOT_TAKEN_TTL_MS = 30 * 60_000;
 
-// Same wording as "Quando passa para a Ruth" in the avec API's docs/integracao-crm.md.
+// The client never hears the receptionist's name (Matheus, 2026-10-23): "nossa equipe de atendimento".
 const HANDOFF_INSTRUCTION =
-  "Não tente de novo. Diga à cliente, sem falar de erro nem de sistema, que a Ruth da recepção " +
-  "vai finalizar e já responde por aqui. Depois chame crm_request_human_handoff com um resumo: " +
-  "o pedido (serviço, dia, hora, profissional) e o que a Ruth precisa fazer no avec (o campo todo).";
+  "Não tente de novo. Diga à cliente, sem falar de erro nem de sistema, que a nossa equipe de " +
+  "atendimento vai finalizar e já responde por aqui (nunca diga o nome de quem atende). Depois " +
+  "chame crm_request_human_handoff com um resumo: o pedido (serviço, dia, hora, profissional) e o " +
+  "que a equipe precisa fazer no avec (o campo todo).";
 
 /** What Ruth must do in avec, per code; the agent puts it in the handoff summary. */
 const TODO_BY_CODE: Record<string, string> = {
@@ -716,7 +717,7 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
             "sem_horario",
             true,
             "não encontrei horário para esse pedido. Não diga que não há horário: diga à " +
-              "cliente, com carinho, que a Ruth da recepção vai ver o melhor horário para ela e " +
+              "cliente, com carinho, que a nossa equipe de atendimento vai ver o melhor horário e " +
               "já responde por aqui. Depois chame crm_request_human_handoff com o pedido e o todo.",
           ),
           todo: `Sem horário na agenda pelo sistema para ${pedido}${quando ? ` (${quando})` : ""}: ver um encaixe com a cliente.`,
@@ -978,7 +979,7 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
           parcial: true,
           mensagem:
             "a visita ficou marcada só em parte. Não confirme o horário à cliente: diga que a " +
-            "Ruth da recepção finaliza o agendamento e já responde por aqui. " +
+            "nossa equipe de atendimento finaliza o agendamento e já responde por aqui. " +
             HANDOFF_INSTRUCTION,
           todo:
             `Ficou marcado no avec: ${feitos.map((f) => `${f.service ?? "serviço"} ${dataBr(f.date)} ${f.start_time} (${f.professional ?? ""})`).join("; ")}. ` +

@@ -581,6 +581,8 @@ describe("errors → handoff", () => {
     const r = await run(tools.avecBook, { opcao_id: SOBRANCELHA_OPCAO });
     expect(r).toMatchObject({ ok: false, code, handoff });
     if (handoff) expect(r.todo).toEqual(expect.any(String));
+    // The client never hears the receptionist's name, only "nossa equipe de atendimento".
+    expect(String(r.mensagem ?? "")).not.toMatch(/Ruth/);
   });
 
   it("a body without a Problem code still hands off", async () => {
