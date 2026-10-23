@@ -507,6 +507,27 @@ describe("request shape", () => {
     });
   });
 
+  it("two avec records on the phone: ask the full name, then book with it", async () => {
+    problem(409, "ambiguous_client");
+    const first = await run(tools.avecBook, { opcao_id: SOBRANCELHA_OPCAO });
+    expect(first).toMatchObject({ ok: false, handoff: false, code: "ambiguous_client" });
+    expect(String(first.mensagem)).toMatch(/nome completo/);
+
+    answer(201, { ...APPOINTMENT, date: "2026-10-27" });
+    const second = await run(tools.avecBook, {
+      opcao_id: SOBRANCELHA_OPCAO,
+      nome_completo: "Laura Teste",
+    });
+    expect(second).toMatchObject({ ok: true });
+    expect(calls[1]!.body).toMatchObject({ client_name: "Laura Teste", name_must_match: true });
+    expect(calls[1]!.headers["Idempotency-Key"]).not.toBe(calls[0]!.headers["Idempotency-Key"]);
+    expect((calls[0]!.body as Record<string, unknown>).name_must_match).toBeUndefined();
+
+    problem(409, "ambiguous_client");
+    const third = await run(tools.avecBook, { opcao_id: SOBRANCELHA_OPCAO, nome_completo: "Ana" });
+    expect(third).toMatchObject({ ok: false, handoff: true, code: "ambiguous_client" });
+  });
+
   it("avec_book refuses an option the salon did not declare, before any call", async () => {
     for (const opcao_id of [
       "corte_feminino_com_secagem:medio:430008-2128712-2026-10-27-1400", // steps missing
@@ -541,7 +562,7 @@ describe("errors → handoff", () => {
     [401, "unauthorized", true],
     [404, "not_found", false],
     [409, "ambiguous_appointment", true],
-    [409, "ambiguous_client", true],
+    [409, "ambiguous_client", false], // asks the full name first; with it, hands off (below)
     [409, "idempotency_in_flight", false],
     [409, "already_booked", false],
     [422, "not_allowed", true],
@@ -664,8 +685,15 @@ describe("audit", () => {
       appointment_id: "a",
       reason: "[redacted]",
     });
-    expect(tools.avecBook.redigirParaAuditoria!({ opcao_id: "s", note: "alergia" })).toEqual({
+    expect(
+      tools.avecBook.redigirParaAuditoria!({
+        opcao_id: "s",
+        note: "alergia",
+        nome_completo: "Laura",
+      }),
+    ).toEqual({
       opcao_id: "s",
+      nome_completo: "[redacted]",
       note: "[redacted]",
     });
   });

@@ -200,6 +200,7 @@ export async function createAppointment(
     slotId: string;
     note?: string;
     clientName?: string;
+    nameMustMatch?: boolean;
     idempotencyKey: string;
   },
 ): Promise<AvecAppointment> {
@@ -208,6 +209,7 @@ export async function createAppointment(
       phone: params.phone,
       slot_id: params.slotId,
       ...(params.clientName ? { client_name: params.clientName } : {}),
+      ...(params.nameMustMatch ? { name_must_match: true } : {}),
       ...(params.note ? { note: params.note } : {}),
     },
     idempotencyKey: params.idempotencyKey,

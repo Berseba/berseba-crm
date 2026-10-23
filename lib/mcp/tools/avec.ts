@@ -884,6 +884,15 @@ const bookShape = {
   note: freeText(
     "Observação curta para o salão, se a cliente pediu algo (vai para o agendamento).",
   ),
+  nome_completo: z
+    .string()
+    .trim()
+    .min(3)
+    .max(120)
+    .optional()
+    .describe(
+      "Nome completo de quem vai ser atendida, só quando a cliente disse (ex.: é para a filha) ou quando esta ferramenta pediu.",
+    ),
 };
 
 export const avecBook: McpToolDefinition<typeof bookShape> = {
@@ -891,13 +900,14 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
   description:
     "Marca no avec a visita de uma opção de avec_free_slots para a cliente DESTA conversa, pelo " +
     "telefone dela, com todas as etapas (ex.: corte, lavagem e secagem). Antes: confirme com " +
-    "ela o serviço, o dia, a hora e a profissional, e espere o sim. Se o avec não conhecer a " +
+    "ela o serviço, o dia, a hora e a profissional, e espere o sim. Se o horário for para outra " +
+    "pessoa (filha, mãe), mande o nome completo dela em nome_completo. Se o avec não conhecer a " +
     "cliente, a resposta pede para passar para a equipe cadastrá-la.",
   inputSchema: bookShape,
   category: "write",
   requiresRole: "ai_operator",
   requiresScope: "mcp:write",
-  redigirParaAuditoria: redactFreeText("note"),
+  redigirParaAuditoria: (args) => redactFreeText("nome_completo")(redactFreeText("note")(args)),
   handler: async (input, ctx) => {
     const ready = await prepare(ctx);
     if ("ok" in ready) return ready;
@@ -915,12 +925,20 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
     if (!avecIdempotencyKey(ctx, "avec_book", input)) return NO_JOB;
     const feitos: AvecAppointment[] = [];
     for (const [i, slot] of opcao.slots.entries()) {
-      const key = avecIdempotencyKey(ctx, "avec_book", { opcao_id: input.opcao_id, etapa: i })!;
+      // The name is in the key: after "which of the two records?", the retry is another write.
+      const key = avecIdempotencyKey(ctx, "avec_book", {
+        opcao_id: input.opcao_id,
+        etapa: i,
+        nome: input.nome_completo ?? null,
+      })!;
       try {
         feitos.push(
           await createAppointment(ready.config, {
             phone: ready.phone,
-            clientName: ready.name ?? undefined,
+            // Who the client said will be served must match the record; the WhatsApp name only
+            // breaks a tie between records of the phone (Berseba/berseba-mayara-morales#28, #29).
+            clientName: input.nome_completo ?? ready.name ?? undefined,
+            nameMustMatch: Boolean(input.nome_completo),
             slotId: slot.slotId,
             note: i === 0 ? input.note : undefined,
             idempotencyKey: key,
@@ -928,6 +946,22 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
         );
       } catch (err) {
         if (i === 0) {
+          if (
+            err instanceof AvecApiError &&
+            err.code === "ambiguous_client" &&
+            !input.nome_completo
+          ) {
+            // Be proactive before handing off: the full name usually tells which record it is.
+            return {
+              ok: false,
+              code: err.code,
+              handoff: false,
+              mensagem:
+                'o salão tem mais de uma ficha com este telefone. Pergunte com naturalidade: "Pra ' +
+                'eu confirmar aqui, qual é o nome completo de quem vai ser atendida?" e chame ' +
+                "avec_book de novo com o mesmo opcao_id e nome_completo.",
+            };
+          }
           const twice =
             err instanceof AvecApiError && err.code === "slot_unavailable" && slotTakenBefore(ctx);
           return failure(err, { slotTakenTwice: twice, isWrite: true });
