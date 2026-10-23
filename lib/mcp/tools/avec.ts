@@ -618,6 +618,22 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
               "não está na lista, passe para a equipe.",
           };
         }
+        if (oferta.semSabado) {
+          const sabado = (d: string) => new Date(`${d}T12:00:00Z`).getUTCDay() === 6;
+          const soSabado =
+            (input.data && sabado(input.data)) ||
+            (input.dias_semana?.length && input.dias_semana.every((d) => d === "sabado"));
+          if (soSabado) {
+            return {
+              ...refusal(
+                "sabado_com_a_equipe",
+                true,
+                "nunca diga que não há horário no sábado. " + HANDOFF_INSTRUCTION,
+              ),
+              todo: `A cliente quer ${oferta.rotulo} no sábado: ver com ela.`,
+            };
+          }
+        }
         const comprimento = oferta.comprimento ? (input.comprimento ?? null) : null;
         if (oferta.comprimento && !comprimento) {
           return {
@@ -674,7 +690,9 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
             ),
           )
         ).flat();
-        opcoes = montarOpcoes(salao, oferta, principais, comprimento, slots, auxiliares);
+        opcoes = montarOpcoes(salao, oferta, principais, comprimento, slots, auxiliares).filter(
+          (o) => !oferta.semSabado || new Date(`${o.data}T12:00:00Z`).getUTCDay() !== 6,
+        );
       }
       const escolhidas = escolherOpcoes(opcoes, pref, hoje);
       return {

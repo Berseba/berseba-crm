@@ -32,6 +32,8 @@ interface Oferta {
   /** What the agent must know before searching, besides day and time. */
   perguntar?: string;
   comprimento: boolean;
+  /** Never offered on a Saturday; a client who insists goes to the team (never "no slots"). */
+  semSabado?: boolean;
   porProfissional: Array<{ profissional: string; etapas: Etapa[] }>;
 }
 
@@ -76,6 +78,39 @@ const COR = [MAYARA, GIOVANNA, JUNIOR, SIMONE];
 const TRATAMENTO = [SIMONE, GIOVANNA, JUNIOR, JULIA];
 
 const so = (servico: ServicoRef): Etapa[] => [{ servico, inicio: 0, papel: "principal" }];
+/**
+ * Progressiva and selamento, always with Júnior, and the same with the wash and drying after it
+ * (R$ 30 more, 30 min, by Júnior himself: Matheus, 2026-10-23). The service is ~2 h at any
+ * length; avec has the extra-long one at 2h30, so the drying starts after it there.
+ */
+function quimica(id: string, rotulo: string, servico: ServicoRef): Oferta[] {
+  const comprimento = typeof servico !== "string";
+  const fim = comprimento ? { curto: 120, medio: 120, longo: 120, extra_longo: 150 } : 120;
+  const base = { comprimento, semSabado: true };
+  return [
+    {
+      ...base,
+      id,
+      rotulo: `${rotulo}, sem lavar e secar depois`,
+      perguntar: `${comprimento ? "o comprimento do cabelo e " : ""}se quer lavar e secar o cabelo depois (adicional de R$ 30)`,
+      porProfissional: cada([JUNIOR], so(servico)),
+    },
+    {
+      ...base,
+      id: `${id}_com_lavar_e_secar`,
+      rotulo: `${rotulo}, com lavar e secar depois (30 min a mais, com o Júnior)`,
+      ...(comprimento ? { perguntar: "o comprimento do cabelo" } : {}),
+      porProfissional: cada(
+        [JUNIOR],
+        [
+          { servico, inicio: 0, papel: "principal" },
+          { servico: SECAGEM.medio, inicio: fim, papel: "principal" },
+        ],
+      ),
+    },
+  ];
+}
+
 /** Every corte has its wash, by a helper at the same time (Matheus, 2026-10-23). */
 const comLavagem = (servico: string): Etapa[] => [
   { servico, inicio: 0, papel: "principal" },
@@ -232,6 +267,27 @@ const SALAO_MAYARA: Salao = {
       ]),
     },
     {
+      id: "tintura",
+      rotulo: "Tintura no cabelo todo, na mesma cor (sem mudança de cor), com secagem",
+      perguntar:
+        "o comprimento do cabelo, se é a mesma cor de sempre (mudança de cor ou cabelo com química vai para a equipe) e se tem preferência de profissional",
+      comprimento: true,
+      // Same as the root: application, the dye acts 1 h, then the drying (+90; +120 from long,
+      // whose application takes 60 min in avec).
+      porProfissional: cada(COR, [
+        {
+          servico: { curto: "2181253", medio: "2181264", longo: "2181269", extra_longo: "2181278" },
+          inicio: 0,
+          papel: "principal",
+        },
+        {
+          servico: SECAGEM,
+          inicio: { curto: 90, medio: 90, longo: 120, extra_longo: 120 },
+          papel: "auxiliar",
+        },
+      ]),
+    },
+    {
       id: "tonalizante",
       rotulo: "Tonalizante (cabelo todo), com secagem",
       perguntar: "o comprimento do cabelo e se tem preferência de profissional",
@@ -301,38 +357,20 @@ const SALAO_MAYARA: Salao = {
         so({ curto: "2129187", medio: "2153545", longo: "2129179" }),
       ),
     },
-    {
-      id: "progressiva",
-      rotulo: "Progressiva (cabelo todo)",
-      perguntar: "o comprimento do cabelo",
-      comprimento: true,
-      porProfissional: cada(
-        [JUNIOR],
-        so({ curto: "2129167", medio: "2128737", longo: "2129174", extra_longo: "2129168" }),
-      ),
-    },
-    {
-      id: "progressiva_raiz",
-      rotulo: "Progressiva só na raiz (retoque)",
-      comprimento: false,
-      porProfissional: cada([JUNIOR], so("2128739")),
-    },
-    {
-      id: "selamento",
-      rotulo: "Selamento (cabelo todo)",
-      perguntar: "o comprimento do cabelo",
-      comprimento: true,
-      porProfissional: cada(
-        [JUNIOR],
-        so({ curto: "2129367", medio: "2229692", longo: "2229702", extra_longo: "2129401" }),
-      ),
-    },
-    {
-      id: "selamento_raiz",
-      rotulo: "Selamento só na raiz (retoque)",
-      comprimento: false,
-      porProfissional: cada([JUNIOR], so("2310921")),
-    },
+    ...quimica("progressiva", "Progressiva (cabelo todo)", {
+      curto: "2129167",
+      medio: "2128737",
+      longo: "2129174",
+      extra_longo: "2129168",
+    }),
+    ...quimica("progressiva_raiz", "Progressiva só na raiz (retoque)", "2128739"),
+    ...quimica("selamento", "Selamento (cabelo todo)", {
+      curto: "2129367",
+      medio: "2229692",
+      longo: "2229702",
+      extra_longo: "2129401",
+    }),
+    ...quimica("selamento_raiz", "Selamento só na raiz (retoque)", "2310921"),
   ],
   comAEquipe: [
     "mechas",
@@ -340,7 +378,7 @@ const SALAO_MAYARA: Salao = {
     "luzes",
     "teste de mechas",
     "avaliação",
-    "tintura no cabelo todo, mudança de cor, coloração em cabelo com química",
+    "mudança de cor, coloração em cabelo com química (regra da avaliação)",
     "dois serviços diferentes na mesma visita (ex.: corte + tintura)",
     "noiva, casamento, debutante",
     "penteado",

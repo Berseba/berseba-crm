@@ -341,6 +341,28 @@ describe("request shape", () => {
     expect(String(ninguem.mensagem)).toMatch(/Júlia, Júnior, Simone, Giovanna, Suellen/);
   });
 
+  it("progressiva on a Saturday goes to the team, and Saturdays are never offered for it", async () => {
+    const sabado = await run(tools.avecFreeSlots, {
+      servico: "progressiva",
+      comprimento: "medio",
+      dias_semana: ["sabado"],
+    });
+    expect(sabado).toMatchObject({ ok: false, handoff: true, motivo: "sabado_com_a_equipe" });
+    expect(String(sabado.mensagem)).toMatch(/nunca diga que não há horário/);
+    expect(calls).toHaveLength(0);
+
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-23T15:00:00Z"));
+    answer(200, {
+      data: [
+        slot("444091", "2128737", "2026-10-24", "09:00", 120),
+        slot("444091", "2128737", "2026-10-27", "09:00", 120),
+      ],
+    });
+    const r = await run(tools.avecFreeSlots, { servico: "progressiva", comprimento: "medio" });
+    expect((r.opcoes as Array<{ data: string }>).map((o) => o.data)).toEqual(["2026-10-27"]);
+  });
+
   it("avec_free_slots asks for the hair length, and refuses an unknown service", async () => {
     const semComprimento = await run(tools.avecFreeSlots, { servico: "escova" });
     expect(semComprimento).toMatchObject({ ok: false, handoff: false });

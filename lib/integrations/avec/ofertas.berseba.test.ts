@@ -89,6 +89,31 @@ describe("salon", () => {
     }
   });
 
+  it("progressiva and selamento: ~2 h with Júnior, and the wash-and-dry 30 min after with Júnior himself", () => {
+    expect(etapasDe(oferta("progressiva"), "444091", "medio")).toEqual([
+      { servico: "2128737", inicio: 0, papel: "principal" },
+    ]);
+    expect(etapasDe(oferta("progressiva_com_lavar_e_secar"), "444091", "medio")).toEqual([
+      { servico: "2128737", inicio: 0, papel: "principal" },
+      { servico: "2129312", inicio: 120, papel: "principal" },
+    ]);
+    // avec has the extra-long progressiva at 2h30: the drying waits for it.
+    expect(
+      etapasDe(oferta("selamento_com_lavar_e_secar"), "444091", "extra_longo")![1]!.inicio,
+    ).toBe(150);
+    expect(etapasDe(oferta("selamento_raiz_com_lavar_e_secar"), "444091", null)).toEqual([
+      { servico: "2310921", inicio: 0, papel: "principal" },
+      { servico: "2129312", inicio: 120, papel: "principal" },
+    ]);
+    for (const id of ["progressiva", "selamento_raiz_com_lavar_e_secar"]) {
+      expect(oferta(id).semSabado, id).toBe(true);
+      expect(
+        oferta(id).porProfissional.map((p) => p.profissional),
+        id,
+      ).toEqual(["444091"]);
+    }
+  });
+
   it("every step starts on the salon's 30-minute grid", () => {
     for (const o of salao.ofertas) {
       for (const p of o.porProfissional) {
