@@ -44,6 +44,8 @@ export interface Salao {
   profissionais: Record<string, Profissional>;
   /** Helpers for `auxiliar` steps, in the order the salon uses them most. */
   auxiliares: string[];
+  /** How the agent names a helper's step to the client ("secagem às 14h30 com a Júlia"). */
+  nomeDaEtapa: Record<string, string>;
   ofertas: Oferta[];
   /** Services the team keeps, told to the agent so it hands off without searching. */
   comAEquipe: string[];
@@ -85,6 +87,10 @@ const SALAO_MAYARA: Salao = {
     [JULIA]: { id: JULIA, nome: "Júlia" },
   },
   auxiliares: [JULIA, JUNIOR, SIMONE, GIOVANNA, SUELLEN],
+  nomeDaEtapa: {
+    [LAVAGEM_PARA_CORTE]: "lavagem",
+    ...Object.fromEntries(Object.values(SECAGEM).map((id) => [id, "secagem"])),
+  },
   ofertas: [
     {
       id: "corte_feminino",
@@ -389,6 +395,7 @@ export function consultasPara(
   oferta: Oferta,
   principais: string[],
   comprimento: Comprimento | null,
+  auxiliares: string[] = salao.auxiliares,
 ): Consulta[] {
   const porServico = new Map<string, Set<string>>();
   const add = (servico: string, prof: string) =>
@@ -396,7 +403,7 @@ export function consultasPara(
   for (const prof of principais) {
     for (const etapa of etapasDe(oferta, prof, comprimento) ?? []) {
       if (etapa.papel === "principal") add(etapa.servico, prof);
-      else for (const aux of salao.auxiliares) add(etapa.servico, aux);
+      else for (const aux of auxiliares) add(etapa.servico, aux);
     }
   }
   return [...porServico].map(([servico, profs]) =>
@@ -411,6 +418,8 @@ export interface Opcao {
   fim: string;
   profissional: string;
   auxiliar?: string;
+  /** The helper's steps, so the client hears them: `[{servico: "secagem", inicio: "14:30"}]`. */
+  etapasDaAuxiliar?: Array<{ servico: string; inicio: string }>;
   /** 0 = next to a booking of the professional; 1 = she has clients that day; 2 = empty day. */
   agrupamento: 0 | 1 | 2;
 }
@@ -434,6 +443,7 @@ export function montarOpcoes(
   principais: string[],
   comprimento: Comprimento | null,
   slots: AvecSlot[],
+  auxiliares: string[] = salao.auxiliares,
 ): Opcao[] {
   const livres = new Map<string, AvecSlot>();
   for (const s of slots) {
@@ -462,9 +472,10 @@ export function montarOpcoes(
       const deAux = etapas.filter((e) => e.papel === "auxiliar");
       let auxiliar: string | undefined;
       if (deAux.length > 0) {
-        const candidatas = salao.auxiliares.includes(prof)
-          ? [prof, ...salao.auxiliares.filter((a) => a !== prof)]
-          : salao.auxiliares;
+        // The colourist dries her own client when she can; a helper the client asked for only.
+        const candidatas = auxiliares.includes(prof)
+          ? [prof, ...auxiliares.filter((a) => a !== prof)]
+          : auxiliares;
         for (const aux of candidatas) {
           const achados = deAux.map((e) =>
             livres.get(slotKey(aux, e.servico, first.date, t0 + e.inicio)),
@@ -509,7 +520,15 @@ export function montarOpcoes(
         inicio: first.start_time,
         fim: toHhmm(Math.max(...ordered.map((s) => toMinutes(s.end_time)))),
         profissional: prof,
-        ...(auxiliar ? { auxiliar } : {}),
+        ...(auxiliar
+          ? {
+              auxiliar,
+              etapasDaAuxiliar: deAux.map((e) => ({
+                servico: salao.nomeDaEtapa[e.servico] ?? "etapa",
+                inicio: toHhmm(t0 + e.inicio),
+              })),
+            }
+          : {}),
         agrupamento,
       });
     }

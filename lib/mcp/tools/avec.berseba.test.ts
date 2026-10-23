@@ -300,12 +300,45 @@ describe("request shape", () => {
     expect(opcoes[0]).toMatchObject({
       dia_semana: "terça-feira",
       profissional: "Mayara Morales",
-      lavagem_ou_secagem_com: "Júnior",
+      tambem: "lavagem às 14:00 e secagem às 14:30",
+      tambem_com: "Júnior",
       termina_por_volta_de: "15:00",
       agrupado: true,
       opcao_id:
         "corte_feminino_com_secagem:medio:430008-2128712-2026-10-27-1400+444091-2128749-2026-10-27-1400+444091-2129312-2026-10-27-1430",
     });
+  });
+
+  it("avec_free_slots keeps to the helper the client asked for", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-23T15:00:00Z"));
+    answer(200, { data: [slot("430008", "2128712", "2026-10-27", "14:00")] });
+    answer(200, {
+      data: [
+        slot("797917", "2128749", "2026-10-27", "14:00"),
+        slot("444099", "2128749", "2026-10-27", "14:00"),
+      ],
+    });
+    answer(200, {
+      data: [
+        slot("797917", "2129312", "2026-10-27", "14:30"),
+        slot("444099", "2129312", "2026-10-27", "14:30"),
+      ],
+    });
+    const r = await run(tools.avecFreeSlots, {
+      servico: "corte_feminino_com_secagem",
+      comprimento: "medio",
+      profissional: "Mayara",
+      auxiliar: "simone",
+    });
+    expect(calls[1]!.url.searchParams.get("professional_id")).toBe("444099");
+    expect((r.opcoes as Array<{ tambem_com: string }>)[0]!.tambem_com).toBe("Simone");
+    const ninguem = await run(tools.avecFreeSlots, {
+      servico: "corte_feminino_com_secagem",
+      comprimento: "medio",
+      auxiliar: "Rebeca",
+    });
+    expect(String(ninguem.mensagem)).toMatch(/Júlia, Júnior, Simone, Giovanna, Suellen/);
   });
 
   it("avec_free_slots asks for the hair length, and refuses an unknown service", async () => {

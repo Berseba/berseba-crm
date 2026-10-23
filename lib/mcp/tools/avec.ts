@@ -438,7 +438,13 @@ function opcaoView(salao: Salao, o: Opcao) {
     inicio: o.inicio,
     termina_por_volta_de: o.fim,
     profissional: nomeDe(salao, o.profissional),
-    ...(o.auxiliar ? { lavagem_ou_secagem_com: nomeDe(salao, o.auxiliar) } : {}),
+    ...(o.auxiliar && o.etapasDaAuxiliar
+      ? {
+          // "lavagem às 14:00 e secagem às 14:30 com a Júlia": the client chooses her too.
+          tambem: o.etapasDaAuxiliar.map((e) => `${e.servico} às ${e.inicio}`).join(" e "),
+          tambem_com: nomeDe(salao, o.auxiliar),
+        }
+      : {}),
     agrupado: o.agrupamento === 0,
   };
 }
@@ -462,6 +468,14 @@ const freeSlotsShape = {
     .max(60)
     .optional()
     .describe("Nome da profissional, só se a cliente pediu uma. Sem preferência: deixe vazio."),
+  auxiliar: z
+    .string()
+    .trim()
+    .max(60)
+    .optional()
+    .describe(
+      "Quem faz a lavagem/secagem, só se a cliente pediu uma pessoa (ou recusou a que veio e escolheu outra).",
+    ),
   data: date.describe("Um dia exato que a cliente pediu (AAAA-MM-DD)."),
   dias_semana: z
     .array(z.enum(DIAS))
@@ -528,9 +542,12 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
   description:
     `Busca até ${MAX_OPCOES} opções de horário na agenda do salão (avec), já escolhidas pela ` +
     "regra do salão: primeiro o que a cliente pediu, depois horários colados em clientes que a " +
-    "profissional já tem no dia. Cada opção traz dia da semana, data, hora, profissional e um " +
-    'opcao_id. Ofereça à cliente com dia, data, hora e profissional (ex.: "sexta, 30/10, às ' +
-    '15h com a Giovanna"). Use só opcao_id que veio daqui. Para marcar: servico (+ comprimento ' +
+    "profissional já tem no dia. Cada opção traz dia da semana, data, hora, profissional, as " +
+    "etapas com outra pessoa (tambem, tambem_com: lavagem e secagem) e um opcao_id. Pergunte a " +
+    "preferência de profissional ANTES de buscar. Ofereça com dia, data, hora e profissional " +
+    '(ex.: "sexta, 30/10, às 15h com a Giovanna, e a secagem às 16h30 com a Júlia"). Se a ' +
+    "cliente recusar a pessoa da secagem, busque de novo com auxiliar. Use só opcao_id que " +
+    "veio daqui. Para marcar: servico (+ comprimento " +
     "quando precisa). Para remarcar: remarcar_appointment_id. Sem preferência de dia, olha as " +
     "próximas 2 semanas.",
   inputSchema: freeSlotsShape,
@@ -627,7 +644,24 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
             todo: `Marcar ${oferta.rotulo} (cabelo ${comprimento}) no avec.`,
           };
         }
-        const consultas = consultasPara(salao, oferta, principais, comprimento);
+        let auxiliares = salao.auxiliares;
+        if (input.auxiliar) {
+          const alvo = fold(input.auxiliar);
+          auxiliares = salao.auxiliares.filter((id) => {
+            const nome = fold(salao.profissionais[id]?.nome ?? "");
+            return nome === alvo || nome.split(" ")[0] === alvo;
+          });
+          if (!auxiliares.length) {
+            return {
+              ok: false,
+              handoff: false,
+              mensagem: `quem faz lavagem e secagem aqui: ${salao.auxiliares
+                .map((id) => nomeDe(salao, id))
+                .join(", ")}. Pergunte à cliente.`,
+            };
+          }
+        }
+        const consultas = consultasPara(salao, oferta, principais, comprimento, auxiliares);
         const slots = (
           await Promise.all(
             consultas.map((c) =>
@@ -640,7 +674,7 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
             ),
           )
         ).flat();
-        opcoes = montarOpcoes(salao, oferta, principais, comprimento, slots);
+        opcoes = montarOpcoes(salao, oferta, principais, comprimento, slots, auxiliares);
       }
       const escolhidas = escolherOpcoes(opcoes, pref, hoje);
       return {
