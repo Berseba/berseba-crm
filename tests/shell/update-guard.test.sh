@@ -225,17 +225,16 @@ INTERNAL_SECRET=segredo
 NUVEMSHOP_OAUTH_ENCRYPTION_KEY=chave
 ENV
 chmod 600 "$PROJ/.env"
-# update.sh holds `.update.lock` for its whole run, so the file exists in the
-# tree. The real repo ignores it (.gitignore); without the same line here the
-# fixture's `git add -A` commits it into a tag and the next checkout refuses.
-printf '.update.lock\n' > "$PROJ/.gitignore"
-
 cd "$PROJ" || exit 1
 # Como no repositório de verdade (`.gitignore`: `.env*`): o .env não é
 # versionado. Versionado, toda escrita do kit nele antes do checkout (o par
 # VAPID nasce antes da decisão de versão) virava "alteração local" e a
 # atualização recusava — um defeito do fixture, não do produto.
 printf '.env*\n' > .gitignore
+# Berseba: update.sh holds `.update.lock` for its whole run, so the file exists
+# in the tree. The real repo ignores it (.gitignore); without the same line here
+# the fixture's `git add -A` commits it into a tag and the next checkout refuses.
+printf '.update.lock\n' >> .gitignore
 git init --quiet
 git add -A
 git commit --quiet -m "v0.9.0"
