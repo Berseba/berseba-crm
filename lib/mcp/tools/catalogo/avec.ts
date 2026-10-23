@@ -22,9 +22,9 @@ export const TOOLS_AVEC = declararTools([
   {
     name: "avec_find_services",
     category: "read",
-    rotulo: "Procurar serviço e profissional no avec",
+    rotulo: "Ver os serviços que a atendente marca sozinha",
     explicacao:
-      "Procura na agenda do salão o serviço que a cliente pediu e mostra quais profissionais o fazem e quanto tempo leva.",
+      "Mostra a lista de serviços que o salão liberou para o assistente marcar sozinho, quem faz cada um e o que perguntar antes; o resto fica com a equipe.",
     oQueToca: "Agenda do salão (avec)",
     risco: "seguro",
     pacotes: ["atender"],
@@ -34,7 +34,7 @@ export const TOOLS_AVEC = declararTools([
     category: "read",
     rotulo: "Ver horários livres no avec",
     explicacao:
-      "Mostra os próximos horários livres de um serviço na agenda do salão, para o assistente oferecer opções reais à cliente.",
+      "Busca de 2 a 3 horários reais na agenda do salão, com dia, hora e profissional, preferindo os colados em clientes que a profissional já tem no dia.",
     oQueToca: "Agenda do salão (avec)",
     risco: "seguro",
     pacotes: ["atender"],
