@@ -57,6 +57,7 @@ function makeAdmin(updates: Array<Record<string, unknown>>, settings: unknown) {
       },
       eq: () => chain,
       in: () => chain,
+      neq: () => chain,
       limit: () => chain,
       is: () => chain,
       gte: () => chain,

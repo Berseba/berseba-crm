@@ -26,7 +26,12 @@ import ts from "typescript";
 
 import { describe, expect, it } from "vitest";
 
-import { CONFERENCIA_DE_CAMPO, PEDIDOS_DO_CLIENTE, rotuloDaChamadaDoJev } from "@/lib/ai/decisao/tarefas";
+import {
+  CONFERENCIA_DE_CAMPO,
+  PEDIDOS_DO_CLIENTE,
+  rotuloDaChamadaDoJev,
+  SINAL_DE_URGENCIA,
+} from "@/lib/ai/decisao/tarefas";
 import {
   PONTOS_DE_IA,
   pontosPorPapel,
@@ -55,7 +60,13 @@ function purposesDoTexto(texto: string, arquivo = "source.ts"): string[] {
       const enqueueResult = ts.isObjectLiteralExpression(object) && ts.isReturnStatement(object.parent) &&
         object.properties.some(p => ts.isPropertyAssignment(p) && p.name.getText(ast) === "kind" &&
           ts.isStringLiteralLike(p.initializer) && p.initializer.text === "enqueue_turn");
-      if (!enqueueResult) result.push(...literals(node.initializer));
+      // Ícone do manifest (`{ src, sizes, purpose: "maskable" }`, ImageResource
+      // da especificação do Web App Manifest) também não é chamada: mesma régua
+      // de forma, pelas propriedades irmãs.
+      const temIrma = (nome: string) => ts.isObjectLiteralExpression(object) &&
+        object.properties.some(p => ts.isPropertyAssignment(p) && p.name.getText(ast).replace(/["']/g, "") === nome);
+      const iconeDoManifest = temIrma("src") && temIrma("sizes");
+      if (!enqueueResult && !iconeDoManifest) result.push(...literals(node.initializer));
     }
     ts.forEachChild(node, visit);
   };
@@ -130,6 +141,9 @@ const CHAMADAS_DO_JEV_SEM_PONTO: ReadonlySet<string> = new Set([
   PEDIDOS_DO_CLIENTE.purpose,
   // A conferência de campo (#2234): as perguntas são por CAMPO, não por tarefa.
   CONFERENCIA_DE_CAMPO.purpose,
+  // O sinal de urgência da mensagem represada (#2232): a pergunta é do turno,
+  // e quem decide se ela vale é a regra léxica, sem modelo nenhum.
+  SINAL_DE_URGENCIA.purpose,
 ]);
 
 describe("registro de pontos de IA × código", () => {
@@ -144,6 +158,8 @@ describe("registro de pontos de IA × código", () => {
     expect(purposesDoTexto(`const a = { purpose: payload.purpose };`)).toEqual([]);
     expect(purposesDoTexto(`function queue() { return { kind: "enqueue_turn", purpose: "send_message" }; }`)).toEqual([]);
     expect(purposesDoTexto(`runModelCall(db, cfg, { purpose: "send_message" });`)).toEqual(["send_message"]);
+    expect(purposesDoTexto(`const icons = [{ src: "/i", sizes: "512x512", purpose: "maskable" }];`)).toEqual([]);
+    expect(purposesDoTexto(`runModelCall(db, cfg, { src: "x", purpose: "agent_turn" });`)).toEqual(["agent_turn"]);
   });
 
   it("a varredura enxerga o código (controle positivo)", () => {

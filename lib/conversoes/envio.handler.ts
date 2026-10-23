@@ -41,7 +41,7 @@
  * (invariante 4 — não-aplicação é auditável, não invisível).
  */
 import { canalQueReportaConversao } from "@/lib/channels/conversao-pelo-canal";
-import type { ChannelConversionResult } from "@/lib/channels/types";
+import type { ChannelConversionInput, ChannelConversionResult } from "@/lib/channels/types";
 import type { EventHandler, EventRow, HandlerResult } from "@/lib/event-log/dispatcher";
 import { lerCredencial } from "@/lib/plataformas-de-anuncio/credenciais";
 import { transporteDe, ehPlataformaConhecida } from "@/lib/plataformas-de-anuncio/registry";
@@ -55,7 +55,11 @@ import { lerAtribuicao } from "./leitura-da-atribuicao";
 import { lerValorDaConversa } from "./valor-da-conversa";
 import { lerVendaPeloCanal } from "./venda-pelo-canal";
 import { ehEventoDeEtapa } from "./regras-google";
-import { ehEventoDeEtapaMeta } from "./regras-meta";
+import {
+  EVENTOS_DE_ETAPA_NO_CANAL,
+  ehEventoDeEtapaMeta,
+  rotuloDoEventoDaMeta,
+} from "./regras-meta";
 import { lerRegistro, registraEnvio } from "./registro-de-envio";
 
 const CONSUMER_KEY = "conversoes.venda";
@@ -282,12 +286,18 @@ export async function processarConversao(
     // Protocolo pendente (`remote_request_id`) é do transporte direto, e só ele
     // sabe consultá-lo: fica fora. Sem valor no negócio, a conversa só é lida
     // depois que a chave está ligada E o canal existe — antes, não há destino.
+    //
+    // O evento de ETAPA da Meta (0524) vai pelo mesmo caminho e com o mesmo
+    // retrato do transporte direto: o nome padrão da Meta, o instante da
+    // entrada na etapa e nenhum valor. Sem isto, quem só tem o canal via toda
+    // etapa virar `sem_conexao` — uma conexão direta que ali nunca vai existir.
+    const eventoNoCanal = eventoParaOCanal(qualificacao, registro?.meta_event_name);
     if (
       credencial.motivo === "sem_conexao" &&
       plataforma === "meta_ads" &&
-      EVENTO === "Purchase" &&
+      eventoNoCanal !== null &&
       !registro?.remote_request_id &&
-      (valorDaVenda !== null || valorPodeVirDaConversa)
+      (qualificacao !== undefined || valorDaVenda !== null || valorPodeVirDaConversa)
     ) {
       // A chave vem ANTES de tudo (doc 76): desligada — o padrão —, nem as
       // conversas são lidas, e nada sai para o provedor.
@@ -306,21 +316,59 @@ export async function processarConversao(
         };
       }
       if (canal && valorPodeVirDaConversa) await lerOValorNaConversa();
-      if (canal && valorDaVenda !== null) {
+      if (canal && (qualificacao !== undefined || valorDaVenda !== null)) {
         const pelo = await canal.reportar({
-          event: EVENTO,
+          event: eventoNoCanal,
           eventId: `${lead.id}:${EVENTO}`,
-          occurredAt: new Date(lead.closed_at ?? row.created_at ?? Date.now()),
+          occurredAt: new Date(
+            qualificacao
+              ? (registro?.event_occurred_at ?? qualificacao.ocorridoEm)
+              : (lead.closed_at ?? row.created_at ?? Date.now()),
+          ),
           phone: telefone,
-          valueCents: valorDaVenda,
+          valueCents: qualificacao ? null : valorDaVenda,
           currency: moedaDaVenda ?? "BRL",
         });
         return desfecho(doCanal(pelo), false);
       }
     }
 
-    await registra("skipped", semValor ? "sem_valor" : credencial.motivo);
-    return ok("skipped", semValor ? "sem_valor" : credencial.motivo);
+    // ─── EVENTO DE ETAPA FORA DO VOCABULÁRIO DO CANAL (#2457) ──────────────
+    //
+    // `eventoNoCanal` é null quando o nome escolhido para a etapa não está em
+    // `ChannelConversionInput` — `QualifiedLead` e `ViewContent` estão na lista
+    // que a própria tela oferece (`EVENTOS_DA_META`) e fora da do canal. Sem
+    // conexão direta não há CAMINHO nenhum para eles, e gravar `sem_conexao`
+    // mandava a pessoa preencher um token que esta instalação só-com-canal
+    // nunca vai ter.
+    //
+    // A decisão é PENDER COM MOTIVO VISÍVEL, não inventar um caminho: mandar
+    // `QualifiedLead` renomeado como `LeadSubmitted` contaria à Meta um
+    // acontecimento que não aconteceu, e o vocabulário do canal é contrato do
+    // provedor, não lista nossa. O motivo novo diz o que fazer — escolher um
+    // evento que o canal repassa, ou configurar a conexão direta.
+    //
+    // Vale mesmo com a chave do canal desligada: ligá-la não resolve, o nome
+    // continua fora da lista. E só para etapa da Meta: sem `eventoMeta` não é
+    // etapa desta plataforma e a pendência segue `sem_conexao` de sempre.
+    const foraDoVocabularioDoCanal =
+      credencial.motivo === "sem_conexao" &&
+      plataforma === "meta_ads" &&
+      Boolean(qualificacao?.eventoMeta) &&
+      eventoNoCanal === null;
+    const motivoDaPendencia = foraDoVocabularioDoCanal
+      ? EVENTO_FORA_DO_CANAL
+      : semValor
+        ? "sem_valor"
+        : credencial.motivo;
+    await registra(
+      "skipped",
+      motivoDaPendencia,
+      foraDoVocabularioDoCanal
+        ? eventoForaDoCanal(registro?.meta_event_name ?? qualificacao?.eventoMeta ?? "")
+        : undefined,
+    );
+    return ok("skipped", motivoDaPendencia);
   }
 
   if (valorPodeVirDaConversa) await lerOValorNaConversa();
@@ -465,6 +513,34 @@ export async function processarConversao(
     );
     return ok("skipped", "recusado_pela_plataforma");
   }
+}
+
+/**
+ * O slug do motivo quando o nome da etapa não está em
+ * `EVENTOS_DE_ETAPA_NO_CANAL`. Estável, como todos os outros: o banco guarda o
+ * slug e `MOTIVO_LEGIVEL` (em `estado-da-conexao.ts`) traduz com o que fazer.
+ */
+const EVENTO_FORA_DO_CANAL = "evento_fora_do_canal";
+
+/** O detalhe da pendência: o evento escolhido, pelo rótulo da tela e pelo nome da Meta. */
+function eventoForaDoCanal(nome: string): string {
+  return `Evento escolhido: ${rotuloDoEventoDaMeta(nome)} (${nome}).`;
+}
+
+/**
+ * O nome que sai pelo canal: a compra, ou o evento padrão da Meta da etapa — o
+ * do retrato gravado no primeiro envio e, só na falta dele, o da regra (a mesma
+ * precedência do transporte direto). Etapa do Google, ou evento da Meta fora do
+ * vocabulário do canal, não tem caminho por ele.
+ */
+function eventoParaOCanal(
+  qualificacao: EventoDeEtapa | undefined,
+  retrato: string | null | undefined,
+): ChannelConversionInput["event"] | null {
+  if (!qualificacao) return "Purchase";
+  if (!qualificacao.eventoMeta) return null;
+  const nome = retrato ?? qualificacao.eventoMeta;
+  return EVENTOS_DE_ETAPA_NO_CANAL.find((e) => e === nome) ?? null;
 }
 
 /** O desfecho do canal, no vocabulário do transporte — um só caminho de registro. */

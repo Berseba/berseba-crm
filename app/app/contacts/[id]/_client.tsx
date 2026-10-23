@@ -8,6 +8,7 @@ import { format } from "date-fns";
 import { ShieldCheck, PencilSimple, LockOpen } from "@/lib/ui/icons";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card } from "@/components/ui/card";
+import { FichasDoModulo } from "@/components/modulos/FichasDoModulo";
 import { ChipDeEtiqueta } from "@/components/tags/ChipDeEtiqueta";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,24 +30,33 @@ import {
   useMarkPersonalContact,
   useUnmarkPersonalContact,
 } from "@/hooks/contacts/usePersonalContact";
+import {
+  useMarkAlwaysHumanContact,
+  useUnmarkAlwaysHumanContact,
+} from "@/hooks/contacts/useAlwaysHumanContact";
 import { useHierarquiaDoAnuncio } from "@/hooks/contacts/useHierarquiaDoAnuncio";
+import { useContactTagVocabulary } from "@/hooks/contacts/useContactTagVocabulary";
 import { useAuth } from "@/hooks/auth/AuthProvider";
 import { useDefaultPipeline } from "@/hooks/pipelines/useDefaultPipeline";
-import { camposDoFunil } from "@/lib/leads/campos-do-funil";
+import { camposDoFunil, camposPorEscopo } from "@/lib/leads/campos-do-funil";
+import { canonicalTagsDoFunil } from "@/lib/contacts/etiquetas";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { TimelineView } from "@/components/contacts/TimelineView";
 import { EditContactDialog } from "@/components/contacts/EditContactDialog";
+import { CartaoDaCarteira } from "@/components/contacts/CartaoDaCarteira";
 import { AnonymizeDialog } from "@/components/contacts/AnonymizeDialog";
 import { PropostasDeDado } from "@/components/contacts/PropostasDeDado";
 import { RoteirosDoContato } from "@/components/contacts/RoteirosDoContato";
 import { ConversaNoDossie } from "@/components/kanban/ConversaNoDossie";
-import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
-import { origemDoContato } from "@/lib/leads/origem-do-contato";
+import { rotuloParaAEquipe } from "@/lib/contacts/rotulo-do-contato";
+import { ORIGEM_AGENDA_DO_CELULAR, origemDoContato } from "@/lib/leads/origem-do-contato";
 import { phoneForDisplay } from "@/lib/channels/phone-variants";
 import { DialButton } from "@/components/voice/DialButton";
 
 interface Props {
   contactId: string;
+  /** Painéis de módulo de dados que declaram referência a contato. Resolvido no servidor. */
+  paineisDeModulo?: { modulo: string; objeto: string }[];
 }
 
 /**
@@ -67,7 +77,7 @@ function NivelDaOrigem({ rotulo, valor }: { rotulo: string; valor: string | null
   );
 }
 
-export function ContactDetailClient({ contactId }: Props) {
+export function ContactDetailClient({ contactId, paineisDeModulo = [] }: Props) {
   const localeDaData = useLocaleDeData();
   const t = useT();
   const q = useContact(contactId);
@@ -76,6 +86,11 @@ export function ContactDetailClient({ contactId }: Props) {
   // As DEFINIÇÕES continuam no funil (`crm_pipelines.settings.fields[]`) — só o
   // VALOR mora no contato. `camposDoFunil` é o mesmo leitor que o Kanban usa.
   const pipelineQuery = useDefaultPipeline(Boolean(activeOrg));
+  // As duas fontes do autocompletar de etiquetas (issue #2732). Os dois hooks
+  // ficam ANTES dos early returns pelo mesmo motivo do `desbloquear` abaixo:
+  // chamá-los depois mudaria a ordem dos hooks entre renderizações.
+  const vocabularioDeEtiquetas = useContactTagVocabulary(activeOrg?.orgId ?? null);
+  const canonicalTags = canonicalTagsDoFunil(pipelineQuery.data?.pipeline.settings ?? null);
   const [editOpen, setEditOpen] = useState(false);
   const [anonOpen, setAnonOpen] = useState(false);
   // Desfazer o descadastro é o override da regra W-02 — só admin, e auditado.
@@ -86,6 +101,11 @@ export function ContactDetailClient({ contactId }: Props) {
   // mesmo motivo do `desbloquear` acima.
   const marcarPessoal = useMarkPersonalContact(contactId);
   const desmarcarPessoal = useUnmarkPersonalContact(contactId);
+  // A marca PERMANENTE "sempre atendimento humano" (issue 2379). Os hooks
+  // ficam aqui pelos MESMOS motivos dos de pessoal: ordem de hooks estável e
+  // efeito que o Inbox enxerga.
+  const marcarSempreHumano = useMarkAlwaysHumanContact(contactId);
+  const desmarcarSempreHumano = useUnmarkAlwaysHumanContact(contactId);
 
   /*
     Pede o nome da campanha SÓ quando há um anúncio e ainda não há nome.
@@ -135,7 +155,7 @@ export function ContactDetailClient({ contactId }: Props) {
   // Uma decisão, um lugar (lib/contacts/rotulo-do-contato.ts). Esta tela era
   // uma das DUAS que ignoravam o telefone: contato com número e sem nome
   // aparecia como "Sem nome" aqui e com o número no inbox.
-  const displayName = rotuloDoContato(contact, t);
+  const displayName = rotuloParaAEquipe(contact, t);
 
   // Os quatro níveis que quem opera tráfego lê. O jsonb já os recebia dos dois
   // caminhos de entrada — site e clique-para-WhatsApp — e nenhuma tela o abria.
@@ -187,6 +207,10 @@ export function ContactDetailClient({ contactId }: Props) {
             {/* Selo lido da COLUNA, nunca da etiqueta (critério 5): editar
                 etiquetas não apaga o selo — mesma regra do "Bloqueado" acima. */}
             {contact.is_personal && <Badge variant="secondary">{t("Pessoal")}</Badge>}
+            {/* A marca PERMANENTE (issue 2379): lida da COLUNA, mesma régua do
+                "Bloqueado" e do "Pessoal" — a devolução não a apaga, então o selo
+                continua a verdade mesmo quando a conversa já voltou ao automático. */}
+            {contact.ai_opt_out && <Badge variant="secondary">{t("Sempre atendimento humano")}</Badge>}
             {contact.is_anonymized && <Badge variant="destructive">{t("Anonimizado")}</Badge>}
           </div>
         </div>
@@ -275,6 +299,56 @@ export function ContactDetailClient({ contactId }: Props) {
                 </span>
               </Button>
             )}
+            {/* SEMPRE ATENDIMENTO HUMANO (issue 2379): a marca que a devolução
+                NÃO desfaz — nem a manual, nem a automática do cron. Marcar
+                confirma (a IA para de vez); remover é direto e NÃO devolve o
+                atendimento, que continua sendo gesto do botão "Devolver ao
+                automático". Mesmo gate de pessoal: decisão operacional. */}
+            {!contact.ai_opt_out && podeMarcarPessoal && (
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    disabled={marcarSempreHumano.isPending}
+                    className="shrink-0"
+                    data-testid="marcar-sempre-humano"
+                  >
+                    <span>{t("Marcar como sempre humano")}</span>
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>
+                      {t("Marcar este contato como sempre humano?")}
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      {t("A IA deixa de responder este contato para sempre: a devolução automática e o botão de devolver ao automático passam a recusar, e a marca só sai por aqui. A conversa atual continua com a equipe.")}
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>{t("Cancelar")}</AlertDialogCancel>
+                    <AlertDialogAction onClick={() => marcarSempreHumano.mutate()}>
+                      {t("Marcar como sempre humano")}
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
+            )}
+            {contact.ai_opt_out && podeMarcarPessoal && (
+              <Button
+                variant="outline"
+                disabled={desmarcarSempreHumano.isPending}
+                className="shrink-0"
+                data-testid="desmarcar-sempre-humano"
+                onClick={() => desmarcarSempreHumano.mutate()}
+              >
+                <span>
+                  {desmarcarSempreHumano.isPending
+                    ? t("Removendo...")
+                    : t("Remover marca de humano")}
+                </span>
+              </Button>
+            )}
             <DialButton contactId={contactId} hasPhone={!!contact.phone_number} />
             <Button variant="outline" onClick={() => setEditOpen(true)} className="shrink-0">
               <PencilSimple size={16} weight="bold" aria-hidden />
@@ -316,6 +390,16 @@ export function ContactDetailClient({ contactId }: Props) {
                 <dt className="text-xs uppercase text-muted-foreground">{t("Nome")} · WhatsApp</dt>
                 <dd className="mt-1">{contact.display_name ?? "—"}</dd>
               </div>
+              {contact.address_book_name && (
+                <div>
+                  {/* Só a equipe vê: nenhuma mensagem usa este nome (PR #2439). */}
+                  <dt className="text-xs uppercase text-muted-foreground">{t("Nome na agenda do celular")}</dt>
+                  <dd className="mt-1">{contact.address_book_name}</dd>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {t("Só a equipe vê. Para usar em mensagens, copie para o nome.")}
+                  </p>
+                </div>
+              )}
               <div>
                 <dt className="text-xs uppercase text-muted-foreground">Email</dt>
                 <dd className="mt-1">{contact.email ?? "—"}</dd>
@@ -351,7 +435,9 @@ export function ContactDetailClient({ contactId }: Props) {
               */}
               <div>
                 <dt className="text-xs uppercase text-muted-foreground">{t("Origem")}</dt>
-                <dd className="mt-1">{origem.origem}</dd>
+                <dd className="mt-1">
+                  {origem.origem === ORIGEM_AGENDA_DO_CELULAR ? t("Agenda do celular") : origem.origem}
+                </dd>
               </div>
               <NivelDaOrigem rotulo={t("Campanha")} valor={origem.campanha} />
               <NivelDaOrigem rotulo={t("Conjunto")} valor={origem.conjunto} />
@@ -413,9 +499,34 @@ export function ContactDetailClient({ contactId }: Props) {
               </div>
             </dl>
           </Card>
+          {/* CARTEIRA DO CLIENTE (#2591): de quem é este cliente. Fica na Visão
+              geral, junto dos dados que dizem "quem é esta pessoa" — quem atende
+              responde a pergunta antes de prometer o negócio, e o gerente muda o
+              dono aqui (o seletor só aparece para `manager`+; o gate real é o da
+              rota `PATCH /contacts/[id]/carteira`). Só de `agent` para cima: é
+              o piso do GET da carteira, e o `viewer` receberia 403. */}
+          {activeOrg && ROLE_RANK[activeOrg.role] >= ROLE_RANK.agent && (
+            <div className="mt-4">
+              <CartaoDaCarteira contactId={contactId} papelDoUsuario={activeOrg.role} />
+            </div>
+          )}
           <div className="mt-4">
             <RoteirosDoContato contactId={contactId} />
           </div>
+          {/*
+            O que os módulos de dados instalados guardam sobre esta pessoa. A lista vem do servidor e
+            é vazia quando não há módulo com ficha de contato — então quem não instalou nada não vê
+            nada a mais, que é o estado de primeira classe do não-negociável 1.
+          */}
+          {paineisDeModulo.map((painel) => (
+            <div className="mt-4" key={`${painel.modulo}:${painel.objeto}`}>
+              <FichasDoModulo
+                modulo={painel.modulo}
+                objeto={painel.objeto}
+                contatoId={contactId}
+              />
+            </div>
+          ))}
         </TabsContent>
 
         <TabsContent value="timeline" className="mt-4">
@@ -454,7 +565,12 @@ export function ContactDetailClient({ contactId }: Props) {
         contact={contact}
         open={editOpen}
         onOpenChange={setEditOpen}
-        customFieldDefs={camposDoFunil(pipelineQuery.data?.pipeline.settings ?? null)}
+        customFieldDefs={camposPorEscopo(
+          camposDoFunil(pipelineQuery.data?.pipeline.settings ?? null),
+          "contato",
+        )}
+        vocabulario={vocabularioDeEtiquetas.data}
+        canonicalTags={canonicalTags}
       />
       <AnonymizeDialog contactId={contactId} open={anonOpen} onOpenChange={setAnonOpen} />
     </div>

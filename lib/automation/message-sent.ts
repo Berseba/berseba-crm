@@ -48,7 +48,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import type { RuleCondition } from "@/lib/automation/conditions";
+import { ehCondicaoDeCampo, type ConditionNode, type Conditions } from "@/lib/automation/conditions";
 import type { EventRow } from "@/lib/event-log/dispatcher";
 import { casaComPadraoAutomatico, lerPadroesAutomaticos } from "@/lib/escalacao/mensagem-automatica.berseba";
 import { semAssinatura } from "@/lib/messaging/assinatura";
@@ -277,11 +277,17 @@ export async function isStaleBacklog(admin: SupabaseClient, row: EventRow, now =
  * condition still decides with the others. A `neq` never opens an origin.
  */
 export function ruleAcceptsOrigin(
-  conditions: readonly RuleCondition[] | null | undefined,
+  conditions: Conditions | null | undefined,
   event: Record<string, unknown> | undefined,
 ): boolean {
   const origin = event?.sent_via;
   if (typeof origin !== "string") return false;
   if (TEAM_ORIGINS.has(origin)) return true;
-  return (conditions ?? []).some((c) => c.field === ORIGIN_FIELD && c.op === "eq" && c.value === origin);
+  // Upstream v1.87.0 conditions are a list or an `{all|any}` group: look at every leaf.
+  const namesOrigin = (node: ConditionNode): boolean =>
+    ehCondicaoDeCampo(node)
+      ? node.field === ORIGIN_FIELD && node.op === "eq" && node.value === origin
+      : [...(node.all ?? []), ...(node.any ?? [])].some(namesOrigin);
+  if (!conditions) return false;
+  return Array.isArray(conditions) ? conditions.some(namesOrigin) : namesOrigin(conditions);
 }

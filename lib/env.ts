@@ -9,6 +9,8 @@
 
 import { z } from "zod";
 
+import { RETENCAO_TETO_DIAS } from "@/lib/retencao/politica";
+
 const isProd = process.env.NODE_ENV === "production";
 
 /**
@@ -45,6 +47,19 @@ const requiredAlways = (name: string) => z.string().min(1, `${name} é obrigató
  *
  * Desligar a poda não é isto: se tiver de existir, é decisão de produto e vem
  * com nome próprio, não com um zero que o schema recusa.
+ *
+ * ─── E o teto ──────────────────────────────────────────────────────────────
+ *
+ * Sem teto, um `WEBHOOK_LOG_BODY_RETENTION_DAYS=9999999` (medido na #2612)
+ * vira `new Date(Date.now() - 9999999 * 86_400_000)` em `limiteEm`, ou seja,
+ * um corte no ano −25353 indo ao PostgREST; um `1e9` estoura a faixa de
+ * `Date` e lança `RangeError: Invalid time value` antes de chegar lá. Por isso
+ * o valor lido aqui passa por `RETENCAO_TETO_DIAS` (`lib/retencao/politica.ts`
+ * — a MESMA constante dos demais prazos, importada, nunca reimplementada).
+ * Acima do teto: o teto vale e o aviso sai AQUI, no lugar em que o valor é
+ * lido, uma vez só no boot — no formato `chave=valor está acima do teto de N
+ * dias — usando N`, o mesmo do teto de `interpretarRetencao` (#2603). Dentro
+ * do intervalo, o número passa intacto, sem aviso.
  */
 const diasDeRetencao = (nome: string, padrao: number) =>
   z.coerce
@@ -59,6 +74,20 @@ const diasDeRetencao = (nome: string, padrao: number) =>
           `(${error.issues[0]?.message ?? "valor recusado"})`,
       );
       return padrao;
+    })
+    .transform((valor) => {
+      // O teto é aplicado DEPOIS do catch: `catch` devolve o padrão só para
+      // valor inválido, e um `9999999` é um número VÁLIDO demais — ele passaria
+      // pelo catch como estava. Transform é o único ponto em que os dois
+      // desfechos (inválido → padrão, gigante → teto) convivem sem um comer o
+      // outro, e ambos com aviso.
+      if (valor > RETENCAO_TETO_DIAS) {
+        console.warn(
+          `[env] ${nome}=${valor} está acima do teto de ${RETENCAO_TETO_DIAS} dias — usando ${RETENCAO_TETO_DIAS}.`,
+        );
+        return RETENCAO_TETO_DIAS;
+      }
+      return valor;
     });
 
 const schema = z.object({
@@ -209,6 +238,44 @@ const schema = z.object({
   AVEC_API_KEY: z.string().optional().default(""),
   /** Comma-separated organization ids that get the `avec_*` agent tools. */
   AVEC_API_ORG_IDS: z.string().optional().default(""),
+  // ─── Videochamada (Jitsi Meet, #2440) — OPCIONAL, DESLIGADA POR PADRÃO ───
+  //
+  // Mesmo desenho de WACALLS_API_BASE_URL: NUNCA `required()`. Vazio = a
+  // instalação não oferece videochamada e o botão "Vídeo" não aparece no
+  // header da conversa (esconde, nunca erro). Quem lê é `servidorDeVideo()`
+  // em `lib/video/jitsi.ts`.
+  //
+  // `https://meet.jit.si` (público; desde 24/08/2023 quem abre a sala entra
+  // com conta Google/GitHub/Facebook, o convidado não) ou o servidor próprio em
+  // Docker/consórcio — a URL é a ORIGEM da aba de videochamada.
+  //
+  // Validada como URL http(s) desde o review do #2441: depois de trocarmos o
+  // iframe por aba nova, este valor vira `href` num `<a>`, então um `javascript:`
+  // escrito no `.env` seria código executando no clique do operador. A segunda
+  // triagem (`EH_HTTP`, em `lib/video/jitsi.ts`) fica no lado do navegador,
+  // que lê o payload injetado e não passa por aqui de novo.
+  //
+  // O formato é `.refine().catch()` e não `.url()` puro, pelo motivo que a
+  // nota de META_GRAPH_BASE_URL registra: validação que DERRUBA roda no import
+  // do Next e derruba TODAS as telas com o contêiner `healthy`. Aqui a ação
+  // falha fechada — URL fora de http(s) vira `""`, o botão some, a feature
+  // desliga — e a informação sobe em alto e bom som no log (padrão
+  // `diasDeRetencao`, lá em cima).
+  JITSI_SERVER_URL: z
+    .string()
+    .optional()
+    .default("")
+    .refine((v) => v.trim() === "" || /^https?:\/\/\S+$/i.test(v.trim()), {
+      message: "precisa ser uma URL http(s) como https://meet.jit.si",
+    })
+    .catch(({ error }) => {
+      console.warn(
+        `[env] JITSI_SERVER_URL inválida (${JSON.stringify(process.env.JITSI_SERVER_URL)}) — videochamada DESLIGADA. ` +
+          `Ela vira o link da sala no botão "Vídeo", então só http(s) vale (ex.: https://meet.jit.si). ` +
+          `(${error.issues[0]?.message ?? "valor recusado"})`,
+      );
+      return "";
+    }),
 
   // ─── Canal Datafy (recorte do #1130) — OPCIONAL, DESLIGADO POR PADRÃO ───
   //
@@ -263,6 +330,12 @@ const schema = z.object({
   // daqui, é por organização (BYOK). Quem lê é `baseDaApiDoJev()`, em
   // lib/ai/decisao/cliente.ts.
   JEV_API_BASE_URL: z.string().optional().default(""),
+  // Endereço de TESTE da API do provedor de cobrança. Existe só para o dublê
+  // do e2e (tests/e2e/fixtures/provedor-de-cobranca.ts, porta 3995). Quem lê é
+  // `baseDeTesteDaCobranca()` (lib/cobranca/provedores/base-de-teste.ts), que
+  // só a aceita em loopback E com o próprio app em loopback: numa VPS ela é
+  // ignorada, com log. Vazio = as URLs oficiais do provedor.
+  COBRANCA_API_BASE_URL_TESTE: z.string().optional().default(""),
   // Destinos internos que o DONO DA INSTALAÇÃO autoriza (decisão 22-d, #1004):
   // IPv4 e faixas CIDR IPv4 que a saída pode alcançar mesmo sendo rede interna,
   // e só para destinos que a própria INSTALAÇÃO configura (nunca o endereço que
@@ -279,6 +352,14 @@ const schema = z.object({
   // consome (deploy sem worker). NUNCA os dois — dois consumidores = turno
   // duplicado ou perdido (bug real da fusão).
   AGENT_DISPATCH_CONSUMER: z.enum(["engine", "native"]).optional().default("engine"),
+
+  // Há um worker drenando o `event_log` em laço ao lado deste app? Quem declara
+  // é o compose que sobe os dois (`docker-compose.prod.yml`), não o `.env`:
+  // vazio é "não", e o webhook de mensagem segue drenando a fila inteira dentro
+  // da própria requisição. `1`/`true` troca isso por um dreno só da organização
+  // e dos gatilhos de follow-up — `lib/dev/kick-local-pipeline.ts`.
+  // `z.string()` e não `z.enum`: valor torto aqui não pode derrubar o app.
+  EVENT_LOG_WORKER_DRAINS: z.string().optional().default(""),
 
   /**
    * Kill switch do teto de gasto de IA — a alavanca que o operador da VPS puxa
@@ -460,6 +541,16 @@ const schema = z.object({
    * 30 (a janela em que um near-miss ainda é curável).
    */
   GOLDEN_CANDIDATES_RETENTION_DAYS: z.string().optional().default(""),
+  /**
+   * As tabelas append-only da IA (migration 0587). `z.string()` pela MESMA razão
+   * das irmãs — quem interpreta é `lib/retencao/politica.ts`, onde lixo cai no
+   * padrão em vez de derrubar o app. Padrões/pisos: telemetria 400/100, ritmo de
+   * envio 2/2, cópias enviadas 30/7, checkpoints superados 180/30.
+   */
+  AI_TELEMETRY_RETENTION_DAYS: z.string().optional().default(""),
+  PACING_LEDGER_RETENTION_DAYS: z.string().optional().default(""),
+  OUTBOUND_COPIES_RETENTION_DAYS: z.string().optional().default(""),
+  LEAD_CHECKPOINT_RETENTION_DAYS: z.string().optional().default(""),
 
   // LGPD export (S-08.04)
   LGPD_SIGNING_KEY: z.string().optional().default(""),
@@ -573,7 +664,9 @@ const schema = z.object({
 
   /**
    * Par VAPID do Web Push. Opcionais: sem elas a bandeja só funciona com a aba
-   * viva (Notification API + SW local). Gerar: `npx web-push generate-vapid-keys`.
+   * viva (Notification API + SW local). O kit gera o par sozinho no install e na
+   * atualização; fora dele, `npx web-push generate-vapid-keys`. Nunca troque um par
+   * existente: trocar desliga os avisos de todo aparelho já inscrito.
    */
   VAPID_PUBLIC_KEY: z.string().optional().default(""),
   VAPID_PRIVATE_KEY: z.string().optional().default(""),

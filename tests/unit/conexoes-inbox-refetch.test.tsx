@@ -83,8 +83,9 @@ function pagina(ids: string[]) {
   };
 }
 
+// O Skeleton deixou a classe `animate-pulse` no #2411: a âncora é `data-esqueleto`, como em inbox-media-image.
 function esqueleto(): number {
-  return document.querySelectorAll(".animate-pulse").length;
+  return document.querySelectorAll("[data-esqueleto]").length;
 }
 
 /** A tela real: hook real alimentando o componente real, mais o estado exposto. */

@@ -147,10 +147,20 @@ it('uses only supplied in-memory sample contact in sandbox', () => {
 
 describe('produto_codigo in preview (Berseba, migration 9004)', () => {
   const assisted = () => ({ ...preview(), kind: 'assisted' as const, contactId: 'contact' });
+  // Upstream's dry-run media preparation (#2490) is what checks the code now.
+  const found = vi.fn(async () => ({
+    ok: true as const,
+    fotos: [{ storagePath: 'org/dry-run/catalogo-capa.jpg', mime: 'image/jpeg' }],
+    tinha: 1,
+  }));
+  const notFound = async (codigo: string) => ({
+    ok: false as const,
+    code: 'produto_nao_encontrado' as const,
+    message: `não há produto ativo com o código ${JSON.stringify(codigo)} no catálogo.`,
+  });
 
   it('keeps an existing product code on the candidate, so the Assisted draft can carry the photo', async () => {
-    const p = assisted(),
-      exists = vi.fn(async (code: string) => code === 'mechas-morena');
+    const p = assisted();
     const tools = applyPreviewPolicy(
       { send_message: definition(vi.fn()) },
       p,
@@ -158,13 +168,13 @@ describe('produto_codigo in preview (Berseba, migration 9004)', () => {
       () => [],
       undefined,
       undefined,
-      exists,
+      found,
     );
     const out = await execute(tools, 'send_message', {
       body: 'Olá, posso ajudar?',
       produto_codigo: ' mechas-morena ',
     });
-    expect(exists).toHaveBeenCalledWith('mechas-morena');
+    expect(found).toHaveBeenCalled();
     expect(out).toMatchObject({ ok: true, status: 'awaiting_approval' });
     expect(p.result.candidates).toEqual([
       expect.objectContaining({ body: 'Olá, posso ajudar?', productCode: 'mechas-morena' }),
@@ -180,7 +190,7 @@ describe('produto_codigo in preview (Berseba, migration 9004)', () => {
       () => [],
       undefined,
       undefined,
-      async () => false,
+      notFound,
     );
     const out = await execute(tools, 'send_message', {
       body: 'Olá, posso ajudar?',
@@ -188,13 +198,11 @@ describe('produto_codigo in preview (Berseba, migration 9004)', () => {
     });
     expect(out).toMatchObject({ ok: false, error: { code: 'produto_nao_encontrado' } });
     expect(p.result.candidates).toEqual([]);
-    // Not an impediment: the model corrects the code, as in the live turn.
-    expect(p.result.impediments).toEqual([]);
   });
 
-  it('a blank code is no code: the candidate carries none and nothing is looked up', async () => {
+  it('a blank code is no code: the candidate carries none and nothing is prepared', async () => {
     const p = assisted(),
-      exists = vi.fn(async () => true);
+      prepare = vi.fn(async () => ({ ok: true as const, fotos: [], tinha: 0 }));
     const tools = applyPreviewPolicy(
       { send_message: definition(vi.fn()) },
       p,
@@ -202,10 +210,10 @@ describe('produto_codigo in preview (Berseba, migration 9004)', () => {
       () => [],
       undefined,
       undefined,
-      exists,
+      prepare,
     );
     await execute(tools, 'send_message', { body: 'Olá, posso ajudar?', produto_codigo: '  ' });
-    expect(exists).not.toHaveBeenCalled();
+    expect(prepare).not.toHaveBeenCalled();
     expect(p.result.candidates[0]).not.toHaveProperty('productCode');
   });
 });

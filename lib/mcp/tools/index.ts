@@ -62,6 +62,7 @@ import {
 import { crmListContactOrders, crmSearchProducts } from "./comercio";
 import { crmGetHonorariosContrato, crmListHonorariosParcelas } from "./honorarios";
 import { crmDescribeExternalData, crmQueryExternalData } from "./dados-externos";
+import { crmConsultarReceita } from "./receitas-externas";
 import { crmListPrivacyRequests } from "./privacidade";
 import {
   crmArchiveStage,
@@ -142,6 +143,7 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   crmPrepararProposta,
   crmDescribeExternalData,
   crmQueryExternalData,
+  crmConsultarReceita,
   crmListPrivacyRequests,
   // read — organizar a operação (W4)
   crmListStages,

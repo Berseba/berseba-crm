@@ -62,6 +62,8 @@ export function vetoReason(gate: string, code: string): string {
     // Berseba: upstream has no sentence for this gate yet (BERSEBA.md, "Clinical brakes").
     clinical_claim:
       "Não enviei: a mensagem afirmava diagnóstico, indicava remédio ou prometia resultado — só o profissional pode dizer isso",
+    near_dup:
+      "Não enviei: o agente ia repetir quase a mesma mensagem que já foi enviada nesta conversa",
   };
   return porGate[gate] ?? `Não enviei: bloqueado pela regra "${gate}" (${code})`;
 }

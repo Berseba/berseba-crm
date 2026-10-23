@@ -12,7 +12,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, formatRelative, isToday, isYesterday } from "date-fns";
 import { toast } from "sonner";
 import { apiClient } from "@/lib/api/client";
-import { CaretDown, CaretUp, ChatCircle, Trash } from "@/lib/ui/icons";
+import { CaretDown, CaretUp, ChatCircle, Check, PencilSimple, Trash } from "@/lib/ui/icons";
 import {
   Table,
   TableBody,
@@ -34,21 +34,33 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useActiveOrg } from "@/hooks/auth/AuthProvider";
+import { useContactTagVocabulary } from "@/hooks/contacts/useContactTagVocabulary";
 import { useDeleteContact, mensagemDeBloqueioPorVinculo } from "@/hooks/contacts/useDeleteContact";
 import type { ContactOrderBy } from "@/lib/schemas/contacts";
 import type { Contact } from "@/lib/types/contacts";
-import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
+import { rotuloParaAEquipe } from "@/lib/contacts/rotulo-do-contato";
 import { phoneForDisplay } from "@/lib/channels/phone-variants";
+import { useConversaNovaComEscolhaDeCanal } from "@/components/channels/SeletorDeCanalParaConversa";
+import { EditContactDialog } from "@/components/contacts/EditContactDialog";
 
 interface Props {
   contacts: Contact[];
   orderBy: ContactOrderBy;
   orderDir: "asc" | "desc";
   onSort: (column: ContactOrderBy) => void;
+  /**
+   * Seleção múltipla (#2484, fatia F3). Quando `onAlternarSelecao` vem, cada
+   * linha ganha a caixa de marcação e a tabela oferece o "selecionar todas" —
+   * sem ela, a tabela é exatamente a que era. A barra de ações em lote mora
+   * FORA (no cliente da página): esta componente só mede a seleção.
+   */
+  selecionados?: Set<string>;
+  onAlternarSelecao?: (id: string) => void;
+  onSelecionarTodosVisiveis?: () => void;
 }
 
 function displayName(c: Contact, t: (texto: string) => string = (texto) => texto): string {
-  return rotuloDoContato(c, t);
+  return rotuloParaAEquipe(c, t);
 }
 
 /** Hoje/ontem: relativo ("há 2 horas", "ontem"). Mais antigo: data, não dia da semana. */
@@ -108,15 +120,46 @@ function SortableHead({
   );
 }
 
-export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
+export function ContactsTable({
+  contacts,
+  orderBy,
+  orderDir,
+  onSort,
+  selecionados,
+  onAlternarSelecao,
+  onSelecionarTodosVisiveis,
+}: Props) {
   const localeDaData = useLocaleDeData();
   const t = useT();
-  const clientesLigado = useActiveOrg()?.cliente_pela_agenda === true;
+  const orgAtiva = useActiveOrg();
+  const clientesLigado = orgAtiva?.cliente_pela_agenda === true;
+  // O autocompletar de etiquetas do diálogo de edição (issue #2732): o mesmo
+  // vocabulário da ficha. O caminho rápido NÃO traz as `canonical_tags` do funil
+  // — ele já abre sem os campos do funil (ver o comentário de `contatoEmEdicao`),
+  // e o diálogo segue contando com o vocabulário da organização para sugerir o
+  // que já existe.
+  const vocabularioDeEtiquetas = useContactTagVocabulary(orgAtiva?.orgId ?? null);
   const del = useDeleteContact();
   const [alvo, setAlvo] = useState<Contact | null>(null);
-  const [abrindo, setAbrindo] = useState<string | null>(null);
+  // Issue #2715 — editar pela linha, sem abrir a ficha. Sem customFieldDefs:
+  // o contrato do diálogo some a seção de campos do funil, e o caminho rápido
+  // coexiste com o completo (quem precisa dos campos abre a ficha, como hoje).
+  const [contatoEmEdicao, setContatoEmEdicao] = useState<Contact | null>(null);
   const router = useRouter();
   const qc = useQueryClient();
+  // Issue #2382 — seletor de canal ao INICIAR a conversa. O diálogo é o retorno
+  // do hook (nulo quando não há o que escolher), e o que acontece depois de
+  // abrir é daqui: invalidar a lista e navegar para o inbox.
+  const {
+    iniciarConversa: abrirConversa,
+    abrindo,
+    seletor: seletorDeCanal,
+  } = useConversaNovaComEscolhaDeCanal({
+    aoAbrir: async (conversationId) => {
+      await qc.invalidateQueries({ queryKey: ["contacts"] });
+      router.push(`/app/inbox?id=${conversationId}`);
+    },
+  });
 
   // Pré-checagem da exclusão (issue #1925): o diálogo "Excluir contato?" avisa
   // que a Agenda vai barrar ANTES do clique, com a MESMA contagem que o 409
@@ -143,27 +186,9 @@ export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
 
   async function iniciarConversa(c: Contact) {
     if (!c.phone_number || abrindo) return;
-    setAbrindo(c.id);
-    try {
-      const res = await fetch("/api/v1/conversations/open-with-contact", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ contact_id: c.id, phone_number: c.phone_number }),
-      });
-      const json = (await res.json()) as {
-        data?: { conversation_id: string };
-        error?: { message?: string };
-      };
-      if (!res.ok || !json.data?.conversation_id) {
-        throw new Error(json.error?.message ?? t("Não foi possível abrir a conversa."));
-      }
-      await qc.invalidateQueries({ queryKey: ["contacts"] });
-      router.push(`/app/inbox?id=${json.data.conversation_id}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? t(err.message) : t("Não foi possível abrir a conversa."));
-    } finally {
-      setAbrindo(null);
-    }
+    // O hook decide se há escolha (issue #2382) e faz o POST; quem decide o
+    // destino depois é `aoAbrir`, declarado acima.
+    await abrirConversa({ contact_id: c.id, phone_number: c.phone_number });
   }
 
   async function confirmarExclusao() {
@@ -182,6 +207,31 @@ export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
     <Table>
       <TableHeader>
         <TableRow>
+          {/*
+            Cabeça da seleção em lote (#2484, F3): marca de uma vez tudo o que
+            está na tela. Só existe quando a tabela recebe as props de seleção
+            — quem não liga o lote continua com a tabela de sempre.
+          */}
+          {onAlternarSelecao && (
+            <TableHead className="w-[40px]">
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={
+                  selecionados ? contacts.every((c) => selecionados.has(c.id)) : false
+                }
+                aria-label={t("Selecionar todos os contatos visíveis")}
+                title={t("Selecionar todas")}
+                data-testid="selecionar-todos-contatos"
+                onClick={onSelecionarTodosVisiveis}
+                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-muted-foreground bg-background transition-colors hover:bg-surface-elevated focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent"
+              >
+                {selecionados && contacts.every((c) => selecionados.has(c.id)) && (
+                  <Check size={12} weight="bold" aria-hidden />
+                )}
+              </button>
+            </TableHead>
+          )}
           <SortableHead
             label={t("Nome")}
             column="display_name"
@@ -220,6 +270,21 @@ export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
       <TableBody>
         {contacts.map((c) => (
           <TableRow key={c.id} className="cursor-pointer">
+            {onAlternarSelecao && (
+              <TableCell>
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={selecionados?.has(c.id) ?? false}
+                  aria-label={`${t("Selecionar contato")} ${displayName(c, t)}`}
+                  data-testid={`selecionar-contato-${c.id}`}
+                  onClick={() => onAlternarSelecao(c.id)}
+                  className="flex h-4 w-4 shrink-0 items-center justify-center rounded-sm border border-muted-foreground bg-background transition-colors hover:bg-surface-elevated focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-accent"
+                >
+                  {selecionados?.has(c.id) && <Check size={12} weight="bold" aria-hidden />}
+                </button>
+              </TableCell>
+            )}
             <TableCell className="font-medium">
               <Link href={`/app/contacts/${c.id}`} className="hover:underline">
                 {displayName(c)}
@@ -293,12 +358,26 @@ export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
                     className="h-8 w-8"
                     title={t("Iniciar conversa no Inbox")}
                     aria-label={`${t("Iniciar conversa com")} ${displayName(c, t)} ${t("no Inbox")}`}
-                    disabled={abrindo === c.id}
+                    disabled={abrindo}
                     onClick={() => void iniciarConversa(c)}
                   >
                     <ChatCircle size={16} weight="regular" aria-hidden />
                   </Button>
                 ) : null}
+                {/* Issue #2715 — atalho de edição na linha: o MESMO diálogo da ficha (EditContactDialog), sem formulário novo. A lista já é invalidada pelo useUpdateContact (["contacts"]).
+                    Anonimizado não ganha lápis, como na ficha: o servidor recusa com lgpd_anonymization_irreversible. */}
+                {!c.is_anonymized && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    title={t("Editar contato")}
+                    aria-label={`${t("Editar contato")} ${displayName(c, t)}`}
+                    onClick={() => setContatoEmEdicao(c)}
+                  >
+                    <PencilSimple size={16} weight="regular" aria-hidden />
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -352,6 +431,18 @@ export function ContactsTable({ contacts, orderBy, orderDir, onSort }: Props) {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
+    {/* Issue #2715 — edição pela linha. Montado só com alvo escolhido, no
+        mesmo molde do AlertDialog de exclusão: fechar zera o state. */}
+    {contatoEmEdicao && (
+      <EditContactDialog
+        contact={contatoEmEdicao}
+        open
+        onOpenChange={(v) => { if (!v) setContatoEmEdicao(null); }}
+        vocabulario={vocabularioDeEtiquetas.data}
+      />
+    )}
+    {/* Issue #2382 — o seletor de canal, quando há mais de um elegível. */}
+    {seletorDeCanal}
     </>
   );
 }

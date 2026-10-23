@@ -20,6 +20,7 @@ import {
   type PerfilDoPais,
 } from "@/lib/legal/perfil-do-pais";
 import { logger } from "@/lib/logger";
+import { textoLegivelDeMencao } from "@/lib/notifications/mentions";
 import { camposLegiveis, perguntasDosGrafos, type CampoLegivel } from "@/lib/lgpd/campos-personalizados";
 import { maskPhone } from "@/lib/lgpd/mask";
 import { phoneLookupVariants } from "@/lib/channels/phone-variants";
@@ -33,6 +34,15 @@ export interface ContactSnapshot {
   id: string;
   name: string | null;
   display_name: string | null;
+  /**
+   * O nome que a equipe salvou na agenda do celular (PR #2439). Só a equipe o
+   * vê na tela, mas é dado pessoal do titular: a anonimização o apaga
+   * (`trg_contato_anonimizado_esquece_a_agenda`), então o `data.json` o leva.
+   * Quem RECEBE o `data.json` é o titular fora do Brasil: o worker só assina a
+   * ligação dele quando o país não é o padrão (`lgpd-export-worker.ts`). No
+   * Brasil o arquivo fica guardado sem ser enviado, e o PDF não lê este campo.
+   */
+  address_book_name: string | null;
   email: string | null;
   phone_number: string | null;
   cpf_present: boolean;
@@ -395,6 +405,9 @@ export interface CaseEventRow {
  *
  * O vínculo é a FK DIRETA `contact_id`, e não a conversa: ela existe nesta
  * tabela exatamente para isso.
+ *
+ * Coletada, mas FORA do `data.json` que o titular recebe: é conversa interna da
+ * equipe (doc 103, A — `lib/lgpd/copia-do-titular.ts`).
  */
 export interface CaseChatMessageRow {
   id: string;
@@ -584,11 +597,25 @@ export interface ExportPayload {
    */
   lei_citada: string | null;
   /**
-   * Como o documento rotula a citação ("Direito exercido" em Portugal).
-   * AUSENTE no Brasil — o renderizador usa "Base legal" — para o `data.json`
-   * brasileiro sair igual byte a byte (doc 88).
+   * Como o documento rotula a citação ("Direito exercido" em Portugal e,
+   * desde a issue #2344, no Brasil também). AUSENTE no Brasil — o
+   * renderizador lê o rótulo do PERFIL PADRÃO — para o `data.json` brasileiro
+   * sair igual byte a byte (doc 88).
    */
   lei_rotulo?: string;
+  /**
+   * O papel do responsável pelos dados, no vocabulário do país: "Responsável
+   * pelo tratamento" em Portugal (RGPD art. 4.º, n.º 7). AUSENTE no Brasil —
+   * o renderizador usa o rótulo do PERFIL PADRÃO ("Controlador"), pela mesma
+   * régua do `lei_rotulo`: nenhuma chave nova no `data.json` brasileiro.
+   */
+  papel_controlador?: string;
+  /**
+   * O papel de quem recebe os pedidos do titular: "Encarregado da proteção de
+   * dados" em Portugal (RGPD art. 37.º). Ausente no Brasil, que segue com
+   * "Encarregado (DPO)" pelo perfil padrão.
+   */
+  papel_encarregado?: string;
   /**
    * Fuso IANA da organização, para as datas do documento. Ausente no Brasil,
    * que segue no formato de sempre (`America/Sao_Paulo`, sem nome de fuso).
@@ -603,17 +630,20 @@ export interface ExportPayload {
    */
   art15?: Art15NoDocumento;
   /**
-   * TODAS as mensagens do titular — a parte da cópia do art. 15.º, n.º 3, que
-   * `messages_recent` (recorte de 100) não entrega. Sai só junto do `art15`
-   * (fora do Brasil, ver `foraDoBrasil`): o `data.json` brasileiro continua o
-   * de sempre, byte a byte.
+   * TODAS as mensagens do titular — o que `messages_recent` (recorte de 100,
+   * a amostra do PDF) não entrega. Portugal pela cópia do art. 15.º, n.º 3
+   * (#2340); o Brasil pela declaração completa da LGPD (art. 19, II — doc 110,
+   * 2A, que solta só aqui a trava "byte a byte" do doc 88).
    */
   messages_completas?: MessageRow[];
   /**
    * As seções deste `data.json` cuja consulta voltou no teto de linhas — pode
    * haver mais registros do que os entregues. Lista vazia = nenhuma bateu no
-   * teto. Só fora do Brasil, junto de `messages_completas` (byte a byte do
-   * doc 88); é a ressalva que o PDF cita na linha do n.º 3.
+   * teto. Em todo país, junto de `messages_completas` (doc 110, 2A); fora do
+   * Brasil é a ressalva que o PDF cita na linha do n.º 3 (o PDF brasileiro não
+   * muda). Entra também a seção cuja PAGINAÇÃO foi interrompida por erro
+   * (#2576): o arquivo sai com o que chegou, e a lista é o que avisa o titular
+   * de que pode haver mais do que o entregue.
    */
   secoes_no_limite?: string[];
   /** O rótulo do documento do titular no país ("CPF", "Documento"). */
@@ -739,6 +769,10 @@ export interface ExportPayload {
    * a pedido dele é o que se entrega a pedido dele (Art. 18 II). A mídia vem
    * como METADADO (caminho, MIME, bytes): o export é `data.json` + `report.pdf`,
    * e nenhum binário trafega por ele.
+   *
+   * No `data.json` que o titular recebe (`lib/lgpd/copia-do-titular.ts`):
+   * fora no Brasil, por ser nota da equipe (doc 103, A); em Portugal vão só
+   * `body` e `created_at` — sem o nome de quem escreveu nem o anexo (doc 110, 3A).
    */
   conversation_notes?: Array<{
     id: string;
@@ -1036,8 +1070,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
   // do que o `data.json` entrega, e o titular tem de saber quais são. É o que
   // impede o relatório de chamar a cópia de "completa" — ela não é, e paginar
   // as dezenove seções seria trocar a ressalva por memória sem teto no worker.
-  // Sai só fora do Brasil (`corpoDaCopiaCompleta`): o `data.json` brasileiro é
-  // travado byte a byte pelo doc 88.
+  // Sai em todo país (`corpoDaCopiaCompleta`, doc 110, 2A).
   const secoes_no_limite: string[] = [];
   const conferirTeto = (secao: string, linhas: readonly unknown[] | null, teto: number) => {
     if ((linhas?.length ?? 0) >= teto && !secoes_no_limite.includes(secao)) secoes_no_limite.push(secao);
@@ -1051,7 +1084,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     const { data, error } = await admin
       .from("contacts")
       .select(
-        "id, name, display_name, email, phone_number, wa_lid, cpf_encrypted, birthdate, is_blocked, is_anonymized, consent, tags, source, source_metadata, custom_fields, created_at, last_activity_at, first_service_at",
+        "id, name, display_name, address_book_name, email, phone_number, wa_lid, cpf_encrypted, birthdate, is_blocked, is_anonymized, consent, tags, source, source_metadata, custom_fields, created_at, last_activity_at, first_service_at",
       )
       .eq("organization_id", organizationId)
       .eq("id", contactId)
@@ -1105,6 +1138,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
         id: data.id,
         name: data.name ?? null,
         display_name: data.display_name ?? null,
+        address_book_name: data.address_book_name ?? null,
         email: data.email ?? null,
         phone_number: data.phone_number ?? null,
         cpf_present: Boolean(data.cpf_encrypted),
@@ -1203,10 +1237,9 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
   let messages_count_total = 0;
   let messages_recent: MessageRow[] = [];
   /**
-   * As mensagens da cópia do art. 15.º, n.º 3 — TODAS, em páginas de
-   * 500, e não as 100 de `RECENT_MESSAGES_LIMIT`. Existe só fora do Brasil:
-   * o `data.json` brasileiro é travado byte a byte pelo doc 88 e a LGPD não
-   * pede a cópia em formato eletrónico que o n.º 3 pede (issue #2340).
+   * As mensagens da cópia — TODAS, em páginas de 500, e não as 100 de
+   * `RECENT_MESSAGES_LIMIT`. Em todo país: Portugal pelo art. 15.º, n.º 3
+   * (#2340), o Brasil pela declaração completa da LGPD (doc 110, 2A).
    */
   let messages_completas: MessageRow[] | null = null;
   if (contactId) {
@@ -1240,34 +1273,41 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
       messages_recent = data.map(paraMensagem);
     }
 
-    // Mensagens da cópia do n.º 3 (art. 15.º) — fora do Brasil. Páginas de 500
-    // até a última vir vazia: limite fixo aqui seria entregar uma amostra com
-    // outro nome, que é exatamente o defeito da issue #2340.
-    if (perfil.codigo !== PAIS_PADRAO) {
-      const completas: MessageRow[] = [];
-      for (let de = 0; ; de += MENSAGENS_POR_PAGINA) {
-        const { data, error } = await admin
-          .from("messages")
-          .select(
-            "id, conversation_id, direction, type, status, body, media_url, media_derived_text, sent_at, created_at",
-          )
-          .eq("organization_id", organizationId)
-          .eq("contact_id", contactId)
-          .order("created_at", { ascending: false })
-          .range(de, de + MENSAGENS_POR_PAGINA - 1);
-        if (error) {
-          logger.warn("[lgpd-export-worker] messages completas load failed", {
-            request_id: requestId,
-            error: error.message,
-          });
-          break;
+    // Mensagens da cópia, em todo país. Páginas de 500 até a última vir vazia:
+    // limite fixo aqui seria entregar uma amostra com outro nome, que é
+    // exatamente o defeito da issue #2340.
+    const completas: MessageRow[] = [];
+    for (let de = 0; ; de += MENSAGENS_POR_PAGINA) {
+      const { data, error } = await admin
+        .from("messages")
+        .select(
+          "id, conversation_id, direction, type, status, body, media_url, media_derived_text, sent_at, created_at",
+        )
+        .eq("organization_id", organizationId)
+        .eq("contact_id", contactId)
+        .order("created_at", { ascending: false })
+        .range(de, de + MENSAGENS_POR_PAGINA - 1);
+      if (error) {
+        logger.warn("[lgpd-export-worker] messages completas load failed", {
+          request_id: requestId,
+          error: error.message,
+        });
+        // Página falhou NO MEIO da paginação (#2576): o arquivo sai com as
+        // mensagens até aqui, e sem esta linha o titular receberia um arquivo
+        // PARCIAL calado — sem dizer que pode haver mais. Registrar a seção
+        // como incompleta é o que `secoes_no_limite` existe para; falhar o
+        // pedido inteiro trocaria um aviso por uma tentativa de novo que leria
+        // a mesma página que acabou de falhar.
+        if (!secoes_no_limite.includes("messages_completas")) {
+          secoes_no_limite.push("messages_completas");
         }
-        const linhas = data ?? [];
-        completas.push(...linhas.map(paraMensagem));
-        if (linhas.length < MENSAGENS_POR_PAGINA) break;
+        break;
       }
-      messages_completas = completas;
+      const linhas = data ?? [];
+      completas.push(...linhas.map(paraMensagem));
+      if (linhas.length < MENSAGENS_POR_PAGINA) break;
     }
+    messages_completas = completas;
   }
 
   // Leads (direct contact_id FK on crm_leads).
@@ -1460,7 +1500,11 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
       .eq("contact_id", contactId)
       .order("created_at", { ascending: false })
       .limit(500);
-    if (error) {
+    // #1907: a comanda é tabela do módulo `financeiro`. Sem ele instalado, `sales`
+    // não existe (42P01 no Postgres, PGRST205 pelo PostgREST) e o bloco sai vazio
+    // sem registrar falha. Instalado, a leitura acontece mesmo com o módulo
+    // suspenso: o titular tem direito ao que já está gravado.
+    if (error && error.code !== "42P01" && error.code !== "PGRST205") {
       logger.warn("[lgpd-export-worker] sales load failed", {
         request_id: requestId,
         error: error.message,
@@ -2081,7 +2125,9 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
           .order("id")
           .range(offset, offset + pageSize - 1);
         if (error) throw error;
-        conversation_notes.push(...(data ?? []));
+        // Corpo legível: o token de menção (#2372) leva o UUID do atendente,
+        // que não é dado do titular.
+        conversation_notes.push(...(data ?? []).map((n) => ({ ...n, body: textoLegivelDeMencao(n.body) })));
         if (!data || data.length < pageSize) break;
       }
     }
@@ -2176,7 +2222,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
           .from("agent_inbox_items")
           .select("id,ref_id,title,body,status,created_at,resolved_at")
           .eq("organization_id", organizationId)
-          .eq("ref_kind", "appointment")
+          .in("ref_kind", ["appointment", "agenda_reminder_sender"])
           .in("kind", ["other", "appointment_outcome_required", "appointment_recovery_review"])
           .in("ref_id", ids.slice(batch, batch + refBatchSize))
           .order("id")
@@ -2211,7 +2257,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     lei_citada: citacaoDaLei(perfil),
     ...foraDoBrasil(perfil, controlador),
     ...blocoArt15(perfil, controlador, decisoes_automatizadas),
-    ...corpoDaCopiaCompleta(perfil, messages_completas, secoes_no_limite),
+    ...corpoDaCopiaCompleta(messages_completas, secoes_no_limite),
     documento_rotulo: perfil.documento.rotulo,
     generated_at: new Date().toISOString(),
     no_local_footprint:
@@ -2262,16 +2308,20 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
 }
 
 /**
- * O que só existe no documento FORA do Brasil: o rótulo da citação e o fuso.
- * Para o Brasil devolve `{}` — nenhuma chave nova no `data.json` (doc 88).
+ * O que só existe no documento FORA do Brasil: o rótulo da citação, os papéis
+ * e o fuso. Para o Brasil devolve `{}` — nenhuma chave nova no `data.json`
+ * (doc 88). O rótulo brasileiro ("Direito exercido", issue #2344) e os papéis
+ * brasileiros saem do PERFIL PADRÃO no renderizador, não daqui.
  */
 function foraDoBrasil(
   perfil: PerfilDoPais,
   controlador: Controlador,
-): Pick<ExportPayload, "lei_rotulo" | "fuso"> {
+): Pick<ExportPayload, "lei_rotulo" | "papel_controlador" | "papel_encarregado" | "fuso"> {
   if (perfil.codigo === PAIS_PADRAO) return {};
   return {
     ...(perfil.lei?.rotuloNoDocumento ? { lei_rotulo: perfil.lei.rotuloNoDocumento } : {}),
+    papel_controlador: perfil.papel.controlador,
+    papel_encarregado: perfil.papel.encarregado,
     ...(controlador.timezone ? { fuso: controlador.timezone } : {}),
   };
 }
@@ -2370,18 +2420,15 @@ function blocoArt15(
 }
 
 /**
- * A cópia do n.º 3: as mensagens TODAS, e não as 100 de
- * `RECENT_MESSAGES_LIMIT`, e a lista das seções que bateram no teto. `null`
- * (não coletado) não vira chave — o caminho sem contato fica sem
- * `messages_completas`; o Brasil fica sem as duas, e o fixture brasileiro
- * continua byte a byte.
+ * A cópia: as mensagens TODAS, e não as 100 de `RECENT_MESSAGES_LIMIT`, e a
+ * lista das seções que bateram no teto. `null` (não coletado) não vira chave —
+ * o caminho sem contato fica sem `messages_completas`. Em todo país desde o
+ * doc 110 (2A); antes o Brasil ficava sem as duas pela trava do doc 88.
  */
 function corpoDaCopiaCompleta(
-  perfil: PerfilDoPais,
   mensagens: MessageRow[] | null,
   secoesNoLimite: string[],
 ): Pick<ExportPayload, "messages_completas" | "secoes_no_limite"> {
-  if (perfil.codigo === PAIS_PADRAO) return {};
   return {
     ...(mensagens === null ? {} : { messages_completas: mensagens }),
     secoes_no_limite: secoesNoLimite,

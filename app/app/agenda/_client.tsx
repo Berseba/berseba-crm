@@ -16,6 +16,7 @@ import { AvisoDaConexaoGoogle } from "./_components/AvisoDaConexaoGoogle";
 import { CartaoDaConexaoGoogle } from "./_components/CartaoDaConexaoGoogle";
 
 import { AgendaInterativa } from "@/components/agenda/AgendaInterativa";
+import { ReservasColetivas } from "@/components/agenda/ReservasColetivas";
 import { FiltroDePessoas } from "@/components/agenda/FiltroDePessoas";
 import { HistoricoDaAgenda } from "@/components/agenda/HistoricoDaAgenda";
 import type { Agendamento, HorarioLivre, VisaoDaAgenda } from "@/components/agenda/tipos";
@@ -75,6 +76,7 @@ const VISOES: Array<{ id: VisaoDaAgenda; rotulo: string }> = [
  * imports sem querer.
  */
 export function AgendaClient({
+  tituloDaAgenda,
   fusoDaAgenda,
   fusoDeApresentacao,
   hojeNaOrganizacao,
@@ -88,6 +90,7 @@ export function AgendaClient({
   agendamentosIniciais,
   podeMarcar,
 }: {
+  tituloDaAgenda?: string | null;
   /**
    * O fuso RESOLVIDO da organização (`fusoUtilizavel(activeOrg.timezone)`,
    * calculado em `page.tsx`). É a régua da grade: sem ele a agenda desenha
@@ -114,6 +117,7 @@ export function AgendaClient({
     nome: string;
     duracaoMin: number;
     donoId: string | null;
+    servicoColetivo?: boolean;
     localKind: string | null;
     localDetalhes: string | null;
   }>;
@@ -465,6 +469,7 @@ export function AgendaClient({
       data-fuso={fusoDeApresentacao ?? "organizacao"}
       className="flex h-full flex-col gap-4 p-6"
     >
+      {tiposIniciais.some((tipo) => tipo.servicoColetivo) && <ReservasColetivas today={hojeNaOrganizacao} zone={fusoDaAgenda} canWrite={podeMarcar}/>}
       {/*
         Em Suspense porque `useSearchParams` obriga: sem a fronteira, o Next
         reprova o build da rota. Fallback nulo porque a ausência do aviso é o
@@ -485,7 +490,7 @@ export function AgendaClient({
 
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">{t("Agenda")}</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">{tituloDaAgenda ?? t("Agendamentos")}</h1>
           <p className="text-sm text-muted-foreground">
             {t("O que está marcado, com quem, e quem atende — seu e da equipe.")}
           </p>
@@ -585,7 +590,24 @@ export function AgendaClient({
           */}
           <span
             data-testid="periodo"
-            className="truncate text-sm font-semibold first-letter:uppercase"
+            /*
+              QUEBRA EM DUAS LINHAS NO CELULAR, em vez de cortar.
+
+              Era `truncate`. Em 360px, "Segunda-feira, 5 de outubro" vira
+              "Segunda-feira, 5 de outu…" — e o que o corte come é justamente o
+              MÊS, a informação que diz onde a pessoa está no calendário. Medido
+              na captura de 360px: a reticência caía depois de "outu".
+
+              Trocar o formato por viewport exigiria decidir layout em
+              JavaScript, que é o que a casa recusa (pisca na hidratação), e o
+              padrão é traduzível — ele vem do dicionário, não do código. Duas
+              linhas custam ~20px e dizem a data inteira.
+
+              `lg:truncate` devolve uma linha onde a largura sobra: ali o corte
+              nunca chegava a acontecer, e manter o `truncate` protege a barra
+              de uma data longa num idioma mais verboso.
+            */
+            className="text-sm font-semibold text-balance first-letter:uppercase lg:truncate"
           >
             {periodo}
           </span>
@@ -610,7 +632,15 @@ export function AgendaClient({
                 aria-pressed={visao === v.id}
                 onClick={() => setVisao(v.id)}
                 className={cn(
-                  "rounded-sm px-2.5 py-1 text-xs transition-colors duration-fast ease-out",
+                  // `min-h-11 px-3` até `lg` — o alternador de visão media
+                  // **24px de altura** em 360px (`py-1` em volta de `text-xs`),
+                  // pouco mais da metade do piso de 44px da Apple HIG. É o
+                  // controle que decide o que a agenda mostra, e no celular ele
+                  // era uma tira fina entre dois outros controles.
+                  //
+                  // `lg:` devolve o compacto onde quem aciona é cursor, no mesmo
+                  // corte que `components/ui/button.tsx` já usa.
+                  "min-h-11 rounded-sm px-3 py-1 text-xs transition-colors duration-fast ease-out lg:min-h-0 lg:px-2.5",
                   "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-500",
                   visao === v.id
                     ? "bg-accent font-semibold text-accent-foreground"
@@ -723,11 +753,11 @@ export function AgendaClient({
           <div className="grid shrink-0 gap-3 rounded-lg border p-3 lg:grid-cols-2">
             {!remarcandoId ? (
               <div className="lg:col-span-2">
-              <VinculoDaMarcacao
-                contactId={contactId}
-                conversationId={conversationId}
-                onChange={(contact, conversation) => escolherVinculo({ contact, conversation })}
-              />
+                <VinculoDaMarcacao
+                  contactId={contactId}
+                  conversationId={conversationId}
+                  onChange={(contact, conversation) => escolherVinculo({ contact, conversation })}
+                />
               </div>
             ) : null}
             {tiposIniciais.length > 1 && (
@@ -806,10 +836,7 @@ export function AgendaClient({
             </div>
             {!remarcandoId ? (
               <>
-                <EnderecoDaMarcacao
-                  value={endereco}
-                  onChange={setEnderecoEditado}
-                />
+                <EnderecoDaMarcacao value={endereco} onChange={setEnderecoEditado} />
                 <div>
                   <label className="block" htmlFor="observacao-do-compromisso">
                     {t("Observação")}{" "}

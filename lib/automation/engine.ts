@@ -23,7 +23,7 @@ import type { ServiceBoundary } from "@/lib/atendimento/fronteira";
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { EventRow, HandlerResult } from "@/lib/event-log/dispatcher";
-import { evaluateConditions, type RuleCondition } from "@/lib/automation/conditions";
+import { evaluateConditions, type Conditions } from "@/lib/automation/conditions";
 import { getAction } from "@/lib/automation/actions";
 import type { ActionResultDetail } from "@/lib/automation/types";
 import { audit } from "@/lib/audit";
@@ -66,8 +66,9 @@ function entidadeDoEvento(row: Pick<EventRow, "event_type" | "entity_kind">): st
 interface RuleRow {
   id: string;
   name: string;
-  conditions: RuleCondition[];
+  conditions: Conditions;
   actions: Array<{ type: string; config?: Record<string, unknown> }>;
+  trigger_config?: Record<string, unknown> | null;
 }
 
 /**
@@ -308,7 +309,7 @@ export async function runAutomationForEvent(
 
   const { data: rules, error } = await admin
     .from("automation_rules")
-    .select("id, name, conditions, actions")
+    .select("id, name, conditions, actions, trigger_config")
     .eq("organization_id", row.organization_id)
     .eq("trigger_event", row.event_type)
     .eq("is_active", true)
@@ -370,7 +371,21 @@ export async function runAutomationForEvent(
   if (!fromAcceptedOrigin.length) {
     return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "ok", detail: "origin_not_team" };
   }
-  const applicable = fromAcceptedOrigin.filter((r) => evaluateConditions(r.conditions ?? [], context));
+  const lead = context.lead as
+    | { source_metadata?: Record<string, unknown> | null }
+    | undefined;
+  const webhookSourceId = lead?.source_metadata?.webhook_source_id;
+  const applicable = fromAcceptedOrigin.filter((rule) => {
+    const configuredSourceId = rule.trigger_config?.webhook_source_id;
+    if (
+      row.event_type === "lead.created" &&
+      typeof configuredSourceId === "string" &&
+      configuredSourceId !== webhookSourceId
+    ) {
+      return false;
+    }
+    return evaluateConditions(rule.conditions ?? [], context);
+  });
   if (!applicable.length) {
     return { consumer_key: AUTOMATION_CONSUMER_KEY, status: "ok", detail: "no_match" };
   }
