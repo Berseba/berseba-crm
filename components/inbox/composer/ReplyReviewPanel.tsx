@@ -52,7 +52,18 @@ type Draft = {
   edited_body: string | null;
   error_code: string | null;
   proposals: Array<{ tool: string; arguments: unknown }>;
+  /** Berseba: catalog product the agent attached (migration 9004). */
+  product_code?: string | null;
 };
+type DraftProduct = {
+  code: string;
+  name: string | null;
+  has_photo: boolean;
+  thumbnail_url: string | null;
+} | null;
+
+/** WhatsApp's caption cap — the same `LIMITE_DA_LEGENDA` the send enforces. */
+const CAPTION_LIMIT = 1024;
 export function ReplyReviewPanel({
   conversationId,
   disabled,
@@ -90,6 +101,23 @@ export function ReplyReviewPanel({
   // uma sugestão rejeitada ficava na tela para sempre, sem botão de fechar.
   const draft = sugestaoParaMostrar(query.data?.data.drafts);
   const body = draft ? (edits[draft.id] ?? draft.edited_body ?? draft.original_body ?? "") : "";
+  // Berseba: the product photo. The signed thumbnail lives an hour; fetched once
+  // per draft, not on every poll.
+  const productCode = draft?.product_code ?? null;
+  const product = useQuery({
+    queryKey: ["reply-draft-product", draft?.id],
+    queryFn: () =>
+      apiClient.get<{ data: { product: DraftProduct } }>(`/api/v1/ai/replies/${draft!.id}/product`),
+    enabled: productCode !== null,
+    staleTime: 30 * 60 * 1000,
+    retry: false,
+  });
+  const productInfo = productCode ? (product.data?.data.product ?? null) : null;
+  // Known only once the route answered: `name: null` = deactivated since the draft.
+  const productGone = product.isSuccess && productInfo !== null && productInfo.name === null;
+  const productWithoutPhoto = productInfo !== null && productInfo.name !== null && !productInfo.has_photo;
+  const sendsPhoto = productCode !== null && !productGone && !productWithoutPhoto;
+  const captionTooLong = productCode !== null && body.trim().length > CAPTION_LIMIT;
   async function generate() {
     setNotice(null);
     setBusy(true);
@@ -197,6 +225,31 @@ export function ReplyReviewPanel({
       {/* Collapsed hides the draft, never the reason a draft failed. */}
       {draft && (!collapsed || draft.status === "failed") && (
         <>
+          {productCode && !collapsed && (
+            <div className="flex items-center gap-2" data-testid="reply-draft-product">
+              {productInfo?.thumbnail_url ? (
+                // Short-lived signed URL from another host: `next/image` would need an allowlist at build time.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={productInfo.thumbnail_url}
+                  alt={t("Foto do produto")}
+                  className="h-10 w-10 shrink-0 rounded-md object-cover"
+                />
+              ) : (
+                <div className="h-10 w-10 shrink-0 rounded-md bg-muted" aria-hidden="true" />
+              )}
+              <div className="min-w-0 text-xs">
+                <p className="truncate font-medium">{productInfo?.name ?? productCode}</p>
+                <p className="text-muted-foreground">
+                  {productGone
+                    ? t("Este produto não está mais ativo no catálogo. A resposta não será enviada.")
+                    : productWithoutPhoto
+                      ? t("Este produto não tem foto no catálogo. Vai só o texto.")
+                      : t("Foto do catálogo, enviada junto com a resposta.")}
+                </p>
+              </div>
+            </div>
+          )}
           {body && !collapsed && (
             <Textarea
               aria-label={t("Resposta sugerida")}
@@ -218,6 +271,11 @@ export function ReplyReviewPanel({
               </ul>
             </details>
           )}
+          {draft.status === "pending" && captionTooLong && (
+            <p role="alert" className="text-xs text-destructive">
+              {t("A legenda da foto aceita até 1.024 caracteres. Encurte o texto para enviar.")}
+            </p>
+          )}
           {draft.status === "pending" && (
             <div className="flex flex-wrap items-center gap-2">
               <Input
@@ -231,7 +289,7 @@ export function ReplyReviewPanel({
               <Button
                 type="button"
                 size="sm"
-                disabled={disabled || busy || !body.trim()}
+                disabled={disabled || busy || !body.trim() || captionTooLong || productGone}
                 onClick={() => decide("approve")}
               >
                 {t("Aprovar e enviar")}
@@ -249,14 +307,27 @@ export function ReplyReviewPanel({
           )}
           {draft.status === "pending" && (
             <p className="text-xs text-muted-foreground">
-              {t(
-                "Aprovar envia somente este texto. Não altera dados, agenda ou a autonomia do agente.",
-              )}
+              {sendsPhoto
+                ? t(
+                    "Aprovar envia a foto do produto com este texto como legenda. Não altera dados, agenda ou a autonomia do agente.",
+                  )
+                : t(
+                    "Aprovar envia somente este texto. Não altera dados, agenda ou a autonomia do agente.",
+                  )}
             </p>
           )}
           {draft.status === "failed" && (
             <p className="text-xs">
-              {t("Confira a configuração do agente e tente gerar novamente.")}
+              {/* Berseba: a product failure names its cause instead of the agent setup. */}
+              {draft.error_code === "product_not_found"
+                ? t("O produto desta sugestão não está mais ativo no catálogo. Nada foi enviado.")
+                : draft.error_code === "caption_too_long"
+                  ? t("O texto passou do limite da legenda da foto. Nada foi enviado.")
+                  : draft.error_code === "product_photo_unavailable"
+                    ? t(
+                        "Não foi possível preparar a foto do produto. Nada foi enviado; gere a sugestão de novo.",
+                      )
+                    : t("Confira a configuração do agente e tente gerar novamente.")}
             </p>
           )}
         </>

@@ -9,9 +9,18 @@ import { assertApprovedReplyPg, assertApprovedReplyReceiptPg } from "@/lib/ai/re
 import { StaleServiceBoundaryError } from "@/lib/atendimento/fronteira";
 import { withServiceJob } from "@/lib/atendimento/fronteira-server";
 import type { InboundTurnDeps } from "./inbound-turn";
+import { prepareApprovedReplyPhoto } from "./approved-reply-photo";
+import {
+  copiarFotoNoStorage,
+  enviarComFotos,
+  type CopiarFoto,
+  type FotoParaEnvio,
+} from "./fotos-do-produto";
 export function createApprovedReplyHandler(
   deps: Pick<InboundTurnDeps, "crmCfg" | "log" | "sleep"> & {
     channel?: (pool: pg.Pool) => RuntimeSendChannel;
+    /** Copies a catalog photo into the conversation folder. Tests inject a fake. */
+    copyPhoto?: (log: InboundTurnDeps["log"]) => CopiarFoto;
   },
 ) {
   return async (job: JobRow, pool: pg.Pool) => {
@@ -48,6 +57,23 @@ export function createApprovedReplyHandler(
           [job.organization_id, job.contact_id, policy.channel_session_id],
         );
         if (!rows[0]) throw new StaleServiceBoundaryError();
+        // Berseba (9004): a draft with a product sends its cover photo, caption = body.
+        // Resolved before the chain and outside the number lock (the copy is network),
+        // like the autonomous turn; a refusal settles without sending anything.
+        const photo = await prepareApprovedReplyPhoto(
+          pool,
+          (deps.copyPhoto ?? copiarFotoNoStorage)(deps.log),
+          {
+            organizationId: job.organization_id,
+            draftId: policy.draft_id,
+            conversationId: policy.conversation_id,
+            body: policy.body,
+          },
+        );
+        if (!photo.ok) {
+          await settle(photo.state, photo.error);
+          return;
+        }
         const channel =
           deps.channel?.(pool) ??
           createRuntimeSendChannel(pool, { ...deps.crmCfg, agentActorId: policy.agent_id });
@@ -73,14 +99,26 @@ export function createApprovedReplyHandler(
           sleep: deps.sleep,
           send: async (body) => {
             await assertApprovedReplyPg(pool, context);
-            return channel.send({
-              tenantId: job.organization_id,
-              leadId: job.contact_id,
-              jobId: job.id,
-              jobClaim: claim,
-              seq: 1,
-              conversationId: policy.conversation_id,
-              body,
+            const sendOne = (text: string, media?: FotoParaEnvio) =>
+              channel.send({
+                tenantId: job.organization_id,
+                leadId: job.contact_id,
+                jobId: job.id,
+                jobClaim: claim,
+                seq: 1,
+                conversationId: policy.conversation_id,
+                body: text,
+                ...(media ? { media } : {}),
+              });
+            // The autonomous turn's sender, capped at one physical message: the
+            // approved reply has a single `seq` and a single receipt.
+            let sent = 0;
+            return enviarComFotos(body, photo.photo ? [photo.photo] : [], {
+              enviarTexto: (text) => (sent++, sendOne(text)),
+              enviarFoto: (media, caption) => (sent++, sendOne(caption, media)),
+              sleep: deps.sleep ?? (async () => {}),
+              jitter: () => 0,
+              restantes: () => 1 - sent,
             });
           },
         });

@@ -1,4 +1,13 @@
 {
+  "Este produto não tem foto no catálogo. Vai só o texto.": "This product has no photo in the catalog. Only the text goes.",
+  "O produto desta sugestão não está mais ativo no catálogo. Nada foi enviado.": "The product in this suggestion is no longer active in the catalog. Nothing was sent.",
+  "O texto passou do limite da legenda da foto. Nada foi enviado.": "The text went over the photo caption limit. Nothing was sent.",
+  "Não foi possível preparar a foto do produto. Nada foi enviado; gere a sugestão de novo.": "The product photo could not be prepared. Nothing was sent; generate the suggestion again.",
+  "Aprovar envia a foto do produto com este texto como legenda. Não altera dados, agenda ou a autonomia do agente.": "Approving sends the product photo with this text as its caption. It does not change data, the calendar or the agent's autonomy.",
+  "Foto do produto": "Product photo",
+  "Foto do catálogo, enviada junto com a resposta.": "Catalog photo, sent together with the reply.",
+  "Este produto não está mais ativo no catálogo. A resposta não será enviada.": "This product is no longer active in the catalog. The reply will not be sent.",
+  "A legenda da foto aceita até 1.024 caracteres. Encurte o texto para enviar.": "The photo caption accepts up to 1,024 characters. Shorten the text to send.",
   "Mostrar sugestão": "Show suggestion",
   "Recolher sugestão": "Collapse suggestion",
   "Arquivo": "File",

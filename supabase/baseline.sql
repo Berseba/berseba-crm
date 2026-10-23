@@ -22372,6 +22372,48 @@ end;$$;
 revoke all on function public.fn_reply_record_receipt(uuid,uuid,text,timestamptz,uuid,text,text[]) from public,anon,authenticated;
 grant execute on function public.fn_reply_record_receipt(uuid,uuid,text,timestamptz,uuid,text,text[]) to service_role;
 
+-- ---- assisted draft carries a product photo (migration 9004) ----
+-- Berseba. Placed next to the receipt it redefines, not at the end of the file:
+-- upstream appends there, and a block of ours at the end would conflict on every
+-- sync. It stays the LAST definition of fn_reply_record_receipt in this file.
+alter table public.ai_reply_drafts add column if not exists product_code text;
+
+comment on column public.ai_reply_drafts.product_code is
+  'catalog_products.codigo the agent attached in Assisted mode (migration 9004). The approved reply sends that product''s cover photo with the approved body as its caption. Server-written only.';
+
+create or replace function public.fn_reply_record_receipt(p_org uuid,p_job uuid,p_worker text,p_acquired_at timestamptz,p_message uuid,p_external text,p_echo_ids text[] default '{}')
+returns jsonb language plpgsql security definer set search_path=public as $$
+declare contact uuid;d public.ai_reply_drafts;m public.messages;
+begin
+ select contact_id into contact from public.job_queue where organization_id=p_org and id=p_job;
+ if contact is null then return null;end if;
+ perform public.fn_service_lock(p_org,contact);
+ perform 1 from public.contacts where organization_id=p_org and id=contact and not is_anonymized for share;
+ if not found then return null;end if;
+ select * into d from public.ai_reply_drafts where organization_id=p_org and send_job_id=p_job;
+ if not found then return null;end if;
+ perform 1 from public.conversations where organization_id=p_org and id=d.conversation_id and contact_id=contact for no key update;
+ if not found then return null;end if;
+ perform 1 from public.job_queue where organization_id=p_org and id=p_job for update;
+ perform 1 from public.ai_reply_drafts where organization_id=p_org and id=d.id for update;
+ if public.fn_reply_receipt_policy(p_org,p_job,p_worker,p_acquired_at)->>'current'<>'true' then return null;end if;
+ -- 9004: a draft with a product goes out as one image whose caption is the approved body.
+ select * into m from public.messages where organization_id=p_org and id=p_message and conversation_id=d.conversation_id and contact_id=d.contact_id and channel_session_id=d.channel_session_id and direction='outbound' and (type='text' or (type='image' and d.product_code is not null)) and body=d.approved_body and exists(select 1 from public.send_ledger l where l.organization_id=p_org and l.job_id=p_job and l.seq=1 and l.id::text=messages.metadata->>'idempotency_key') for update;
+ if not found then return null;end if;
+ delete from public.messages where organization_id=p_org and conversation_id=d.conversation_id and sent_via='external_device' and external_id=any(p_echo_ids) and id<>p_message;
+ update public.messages set status='sent',external_id=p_external,ack=0 where organization_id=p_org and id=p_message returning * into m;
+ update public.send_ledger set status='accepted',crm_message_id=p_message,updated_at=now(),last_error=null where organization_id=p_org and job_id=p_job and seq=1 and id::text=m.metadata->>'idempotency_key';
+ -- A resposta aprovada é uma SAÍDA: responde tudo até aqui, e a régua da Fila
+ -- (issue #990, migration 0267) volta ao `last_inbound_at` — "não há mensagem do
+ -- cliente sem resposta". Sem esta coluna o valor antigo ficaria congelado e a
+ -- conversa continuaria contando a espera que esta resposta acabou de encerrar.
+ update public.conversations set last_outbound_at=now(),last_message_at=now(),last_message_preview=left(d.approved_body,280),unread_count_for_assignee=0,awaiting_since=last_inbound_at where organization_id=p_org and id=d.conversation_id;
+ update public.contacts set last_activity_at=now() where organization_id=p_org and id=contact;
+ return to_jsonb(m);
+end;$$;
+revoke all on function public.fn_reply_record_receipt(uuid,uuid,text,timestamptz,uuid,text,text[]) from public,anon,authenticated;
+grant execute on function public.fn_reply_record_receipt(uuid,uuid,text,timestamptz,uuid,text,text[]) to service_role;
+
 create or replace function public.fn_reply_settle(p_org uuid,p_job uuid,p_worker text,p_acquired_at timestamptz,p_state text,p_error text default null)
 returns boolean language plpgsql security definer set search_path=public as $$
 declare j public.job_queue;d public.ai_reply_drafts;contact uuid;pol jsonb;

@@ -47,6 +47,23 @@ describe("prepararFotosDoProduto — a foto do catálogo vai para a pasta da con
     });
   });
 
+  it("`limit` copies only the first photos in screen order — the cover first", async () => {
+    const { db } = banco({ id: PRODUTO, fotos: [CAPA, SEGUNDA] });
+    const copiar = vi.fn(async () => true);
+
+    const r = await prepararFotosDoProduto(db, copiar, {
+      tenantId: ORG,
+      conversationId: CONVERSA,
+      codigo: "IP15",
+      limit: 1,
+    });
+
+    expect(copiar.mock.calls).toEqual([
+      [CAPA, `${ORG}/${CONVERSA}/catalogo-11111111-2222-4333-8444-555555555555.jpg`],
+    ]);
+    expect(r).toMatchObject({ ok: true, tinha: 1 });
+  });
+
   it("caminho de OUTRA organização na linha nunca é copiado (a cópia é por service role)", async () => {
     const alheio = `${OUTRA_ORG}/${PRODUTO}/11111111-2222-4333-8444-555555555555.jpg`;
     const { db } = banco({ id: PRODUTO, fotos: [alheio] });

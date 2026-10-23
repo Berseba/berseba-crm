@@ -6,6 +6,8 @@ import { requireRole } from "@/lib/auth/require-role";
 import { createClient } from "@/lib/supabase/server";
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
+import { captionFits } from "@/lib/agent-engine/agent/approved-reply-photo";
+import { LIMITE_DA_LEGENDA } from "@/lib/agent-engine/agent/fotos-do-produto";
 const input = z.object({
   action: z.enum(["approve", "reject"]),
   revision: z.string().regex(/^\d+$/),
@@ -24,6 +26,24 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     return fail("validation_failed", "Campos inválidos.", 422, { requestId });
   const db = await createClient(),
     p = parsed.data;
+  // Berseba (9004): a draft with a product goes out as one photo whose caption is
+  // this body, and WhatsApp caps a caption. Refused here, before approving, so the
+  // attendant shortens it instead of watching the send fail. The worker checks again.
+  if (p.action === "approve" && p.body !== undefined && !captionFits(p.body)) {
+    const { data: draft } = await db
+      .from("ai_reply_drafts")
+      .select("product_code")
+      .eq("organization_id", auth.org.orgId)
+      .eq("id", id)
+      .maybeSingle();
+    if (draft?.product_code)
+      return fail(
+        "reply_caption_too_long",
+        `A legenda da foto aceita até ${LIMITE_DA_LEGENDA} caracteres. Encurte o texto para enviar.`,
+        422,
+        { requestId },
+      );
+  }
   const { data, error } = await db.rpc("fn_reply_action", {
     p_org: auth.org.orgId,
     p_id: id,
