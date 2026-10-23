@@ -131,8 +131,10 @@ describe("salon", () => {
     expect(steps("longo")).toEqual([0, 120]);
   });
 
-  it("the tintura's drying is 1h30 after the start", () => {
-    expect(etapasDe(oferta("tintura_raiz"), "444096", "medio")).toEqual([
+  it("the root tint asks no length; its drying is the medium one, 1h30 after the start", () => {
+    expect(oferta("tintura_raiz").comprimento).toBe(false); // same service at any length
+    expect(oferta("tonalizante_raiz").comprimento).toBe(false);
+    expect(etapasDe(oferta("tintura_raiz"), "444096", null)).toEqual([
       { servico: "2181246", inicio: 0, papel: "principal" },
       { servico: "2129312", inicio: 90, papel: "auxiliar" },
     ]);
@@ -159,7 +161,7 @@ describe("montarOpcoes", () => {
       slot("444091", "2129312", "2026-10-27", "11:30"),
       slot("797917", "2129312", "2026-10-27", "11:30"),
     ];
-    const [o] = montarOpcoes(salao, oferta("tintura_raiz"), ["444091"], "medio", slots);
+    const [o] = montarOpcoes(salao, oferta("tintura_raiz"), ["444091"], null, slots);
     expect(o).toMatchObject({ profissional: "444091", auxiliar: "444091", fim: "12:00" });
   });
 

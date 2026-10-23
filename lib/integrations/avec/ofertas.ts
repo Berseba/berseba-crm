@@ -258,12 +258,14 @@ const SALAO_MAYARA: Salao = {
     {
       id: "tintura_raiz",
       rotulo: "Tintura de raiz (retoque de raiz ou cobertura de branco), com secagem",
-      perguntar: "o comprimento do cabelo e se tem preferência de profissional",
-      comprimento: true,
-      // Application 30 min, the dye acts 1 h, then the drying: +90 in 152 visits of the agenda.
+      perguntar: "se tem preferência de profissional",
+      // The root is the same service and time at any length (Matheus, 2026-10-23): no length
+      // question, and the drying is the medium one. Application 30 min, the dye acts 1 h, then
+      // the drying: +90 in 152 visits of the agenda.
+      comprimento: false,
       porProfissional: cada(COR, [
         { servico: "2181246", inicio: 0, papel: "principal" },
-        { servico: SECAGEM, inicio: 90, papel: "auxiliar" },
+        { servico: SECAGEM.medio, inicio: 90, papel: "auxiliar" },
       ]),
     },
     {
@@ -310,11 +312,11 @@ const SALAO_MAYARA: Salao = {
     {
       id: "tonalizante_raiz",
       rotulo: "Tonalizante só na raiz, com secagem",
-      perguntar: "o comprimento do cabelo (para a secagem) e se tem preferência de profissional",
-      comprimento: true,
+      perguntar: "se tem preferência de profissional",
+      comprimento: false, // like the root tint: same at any length
       porProfissional: cada(COR, [
         { servico: "2181285", inicio: 0, papel: "principal" },
-        { servico: SECAGEM, inicio: 90, papel: "auxiliar" },
+        { servico: SECAGEM.medio, inicio: 90, papel: "auxiliar" },
       ]),
     },
     {
