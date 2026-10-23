@@ -66,6 +66,9 @@ function indisponivel(agora: Date): ProtecaoAgenda {
     reavaliar_em: new Date(agora.getTime() + 60_000).toISOString(),
   };
 }
+/** Berseba: 100 uuids keep the `in.(…)` filter near 4 KB of URL. */
+export const AGENDA_CONTACTS_PER_QUERY = 100;
+
 export async function protecaoAgendaSupabase(
   db: SupabaseClient,
   org: string,
@@ -75,26 +78,32 @@ export async function protecaoAgendaSupabase(
   if (!contatos.length) return new Map();
   try {
     const appointments: CompromissoProtetor[] = [];
-    let after: string | undefined;
-    // Keyset estável: uma resposta bem-sucedida pode ter sido truncada pelo
-    // max_rows do PostgREST. Só página VAZIA prova que a leitura terminou.
-    for (;;) {
-      let query = db
-        .from("calendar_appointments")
-        .select("id,contact_id,revision,starts_at,ends_at,status")
-        .eq("organization_id", org)
-        .in("contact_id", contatos)
-        .in("status", ["pending", "confirmed"])
-        .order("id", { ascending: true })
-        .limit(500);
-      if (after) query = query.gt("id", after);
-      const page = await query;
-      if (page.error) throw page.error;
-      if (!page.data?.length) break;
-      const last = page.data[page.data.length - 1]!.id;
-      if (after && last <= after) throw new Error("agenda_page_did_not_advance");
-      appointments.push(...page.data);
-      after = last;
+    // Berseba: the contact ids go in the URL (`in.(…)`), and from ~400 of them
+    // the request is refused (UND_ERR_HEADERS_OVERFLOW, measured in production
+    // on 2026-10-23). Read in batches so the URL size does not grow with the org.
+    for (let i = 0; i < contatos.length; i += AGENDA_CONTACTS_PER_QUERY) {
+      const lote = contatos.slice(i, i + AGENDA_CONTACTS_PER_QUERY);
+      let after: string | undefined;
+      // Keyset estável: uma resposta bem-sucedida pode ter sido truncada pelo
+      // max_rows do PostgREST. Só página VAZIA prova que a leitura terminou.
+      for (;;) {
+        let query = db
+          .from("calendar_appointments")
+          .select("id,contact_id,revision,starts_at,ends_at,status")
+          .eq("organization_id", org)
+          .in("contact_id", lote)
+          .in("status", ["pending", "confirmed"])
+          .order("id", { ascending: true })
+          .limit(500);
+        if (after) query = query.gt("id", after);
+        const page = await query;
+        if (page.error) throw page.error;
+        if (!page.data?.length) break;
+        const last = page.data[page.data.length - 1]!.id;
+        if (after && last <= after) throw new Error("agenda_page_did_not_advance");
+        appointments.push(...page.data);
+        after = last;
+      }
     }
     const organization = await db.from("organizations").select("settings").eq("id", org).single();
     if (organization.error) throw organization.error;
