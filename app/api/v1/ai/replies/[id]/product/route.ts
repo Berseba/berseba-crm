@@ -12,8 +12,9 @@ export const dynamic = "force-dynamic";
 const THUMBNAIL_TTL_SECONDS = 3600;
 
 /**
- * The product an Assisted-mode draft carries (Berseba, migration 9004): its name
- * and a signed URL of the cover, for the thumbnail in the review panel.
+ * The product an Assisted-mode draft carries (Berseba, migration 9004): its name,
+ * whether it has a photo of its own, and a signed URL of the cover, for the
+ * thumbnail in the review panel. `name: null` = no longer active (the send refuses it).
  *
  * Both reads go through the user's session, so RLS decides: the draft only if the
  * user can see its conversation, the product only from the user's organization.
@@ -47,7 +48,10 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     .maybeSingle()) as { data: { id: string; nome: string; fotos: string[] | null } | null };
   // Gone since the draft was made: the send will refuse it too (`product_not_found`).
   if (!product)
-    return ok({ product: { code: draft.product_code, name: null, thumbnail_url: null } }, { requestId });
+    return ok(
+      { product: { code: draft.product_code, name: null, has_photo: false, thumbnail_url: null } },
+      { requestId },
+    );
   const cover = (product.fotos ?? []).find((path) =>
     fotoPertenceAoProduto(path, auth.org.orgId, product.id),
   );
@@ -59,7 +63,15 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     thumbnailUrl = signed?.signedUrl ?? null;
   }
   return ok(
-    { product: { code: draft.product_code, name: product.nome, thumbnail_url: thumbnailUrl } },
+    {
+      product: {
+        code: draft.product_code,
+        name: product.nome,
+        // Whether a photo will go at all; independent of signing, which can fail.
+        has_photo: cover !== undefined,
+        thumbnail_url: thumbnailUrl,
+      },
+    },
     { requestId },
   );
 }

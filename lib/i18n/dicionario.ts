@@ -1014,6 +1014,18 @@ export const DICIONARIO: Traducoes = {
       es: "Aprobar envía la foto del producto con este texto como leyenda. No cambia datos, agenda ni la autonomía del agente.",
     },
   "Foto do produto": { es: "Foto del producto" },
+  "Este produto não tem foto no catálogo. Vai só o texto.": {
+    es: "Este producto no tiene foto en el catálogo. Va solo el texto.",
+  },
+  "O produto desta sugestão não está mais ativo no catálogo. Nada foi enviado.": {
+    es: "El producto de esta sugerencia ya no está activo en el catálogo. No se envió nada.",
+  },
+  "O texto passou do limite da legenda da foto. Nada foi enviado.": {
+    es: "El texto superó el límite de la leyenda de la foto. No se envió nada.",
+  },
+  "Não foi possível preparar a foto do produto. Nada foi enviado; gere a sugestão de novo.": {
+    es: "No fue posible preparar la foto del producto. No se envió nada; genera la sugerencia de nuevo.",
+  },
   "Foto do catálogo, enviada junto com a resposta.": {
     es: "Foto del catálogo, enviada junto con la respuesta.",
   },

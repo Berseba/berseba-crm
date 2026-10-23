@@ -28,19 +28,19 @@ function draft(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function serve(d: ReturnType<typeof draft>) {
+type Product = { code: string; name: string | null; has_photo: boolean; thumbnail_url: string | null };
+const ACTIVE: Product = {
+  code: "mechas-morena",
+  name: "Mechas morena",
+  has_photo: true,
+  thumbnail_url: "https://storage.test/signed/capa.jpg",
+};
+
+function serve(d: ReturnType<typeof draft>, product: Product = ACTIVE) {
   api.get.mockImplementation(async (url: string) => {
     if (url.endsWith("/draft-reply")) return { data: { drafts: [d] } };
     if (url === `/api/v1/ai/replies/${DRAFT}/product`)
-      return {
-        data: {
-          product: {
-            code: "mechas-morena",
-            name: "Mechas morena",
-            thumbnail_url: "https://storage.test/signed/capa.jpg",
-          },
-        },
-      };
+      return { data: { product } };
     throw new Error(`unexpected GET ${url}`);
   });
 }
@@ -100,5 +100,35 @@ describe("ReplyReviewPanel — the product photo of an Assisted-mode draft", () 
     expect(screen.queryByTestId("reply-draft-product")).toBeNull();
     expect(screen.getByText(/Aprovar envia somente este texto/)).toBeInTheDocument();
     expect(api.get).not.toHaveBeenCalledWith(`/api/v1/ai/replies/${DRAFT}/product`);
+  });
+
+  it("a product deactivated since the draft blocks approval and says why", async () => {
+    serve(draft(), { code: "mechas-morena", name: null, has_photo: false, thumbnail_url: null });
+    mount();
+    expect(
+      await screen.findByText("Este produto não está mais ativo no catálogo. A resposta não será enviada."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Aprovar e enviar" })).toBeDisabled();
+  });
+
+  it("a product without a photo says only the text goes", async () => {
+    serve(draft(), { ...ACTIVE, has_photo: false, thumbnail_url: null });
+    mount();
+    expect(
+      await screen.findByText("Este produto não tem foto no catálogo. Vai só o texto."),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Aprovar envia somente este texto/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Aprovar e enviar" })).toBeEnabled();
+  });
+
+  it("a send that failed for the product names the product, not the agent setup", async () => {
+    serve(draft({ status: "failed", error_code: "product_not_found" }));
+    mount();
+    expect(
+      await screen.findByText(
+        "O produto desta sugestão não está mais ativo no catálogo. Nada foi enviado.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Confira a configuração do agente/)).toBeNull();
   });
 });

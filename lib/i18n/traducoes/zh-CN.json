@@ -1,4 +1,8 @@
 {
+  "Este produto não tem foto no catálogo. Vai só o texto.": "该产品在目录中没有照片。只发送文本。",
+  "O produto desta sugestão não está mais ativo no catálogo. Nada foi enviado.": "此建议中的产品已不在目录中启用。未发送任何内容。",
+  "O texto passou do limite da legenda da foto. Nada foi enviado.": "文本超过了照片说明的长度限制。未发送任何内容。",
+  "Não foi possível preparar a foto do produto. Nada foi enviado; gere a sugestão de novo.": "无法准备产品照片。未发送任何内容；请重新生成建议。",
   "Aprovar envia a foto do produto com este texto como legenda. Não altera dados, agenda ou a autonomia do agente.": "批准后将发送产品照片，并以此文本作为说明。不会更改数据、日程或代理的自主性。",
   "Foto do produto": "产品照片",
   "Foto do catálogo, enviada junto com a resposta.": "目录照片，将随回复一起发送。",

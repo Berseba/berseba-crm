@@ -55,7 +55,13 @@ type Draft = {
   /** Berseba: catalog product the agent attached (migration 9004). */
   product_code?: string | null;
 };
-type DraftProduct = { code: string; name: string | null; thumbnail_url: string | null } | null;
+type DraftProduct = {
+  code: string;
+  name: string | null;
+  has_photo: boolean;
+  thumbnail_url: string | null;
+} | null;
+
 /** WhatsApp's caption cap — the same `LIMITE_DA_LEGENDA` the send enforces. */
 const CAPTION_LIMIT = 1024;
 export function ReplyReviewPanel({
@@ -107,6 +113,10 @@ export function ReplyReviewPanel({
     retry: false,
   });
   const productInfo = productCode ? (product.data?.data.product ?? null) : null;
+  // Known only once the route answered: `name: null` = deactivated since the draft.
+  const productGone = product.isSuccess && productInfo !== null && productInfo.name === null;
+  const productWithoutPhoto = productInfo !== null && productInfo.name !== null && !productInfo.has_photo;
+  const sendsPhoto = productCode !== null && !productGone && !productWithoutPhoto;
   const captionTooLong = productCode !== null && body.trim().length > CAPTION_LIMIT;
   async function generate() {
     setNotice(null);
@@ -231,9 +241,11 @@ export function ReplyReviewPanel({
               <div className="min-w-0 text-xs">
                 <p className="truncate font-medium">{productInfo?.name ?? productCode}</p>
                 <p className="text-muted-foreground">
-                  {product.isSuccess && productInfo?.name === null
+                  {productGone
                     ? t("Este produto não está mais ativo no catálogo. A resposta não será enviada.")
-                    : t("Foto do catálogo, enviada junto com a resposta.")}
+                    : productWithoutPhoto
+                      ? t("Este produto não tem foto no catálogo. Vai só o texto.")
+                      : t("Foto do catálogo, enviada junto com a resposta.")}
                 </p>
               </div>
             </div>
@@ -277,7 +289,7 @@ export function ReplyReviewPanel({
               <Button
                 type="button"
                 size="sm"
-                disabled={disabled || busy || !body.trim() || captionTooLong}
+                disabled={disabled || busy || !body.trim() || captionTooLong || productGone}
                 onClick={() => decide("approve")}
               >
                 {t("Aprovar e enviar")}
@@ -295,7 +307,7 @@ export function ReplyReviewPanel({
           )}
           {draft.status === "pending" && (
             <p className="text-xs text-muted-foreground">
-              {productCode
+              {sendsPhoto
                 ? t(
                     "Aprovar envia a foto do produto com este texto como legenda. Não altera dados, agenda ou a autonomia do agente.",
                   )
@@ -306,7 +318,16 @@ export function ReplyReviewPanel({
           )}
           {draft.status === "failed" && (
             <p className="text-xs">
-              {t("Confira a configuração do agente e tente gerar novamente.")}
+              {/* Berseba: a product failure names its cause instead of the agent setup. */}
+              {draft.error_code === "product_not_found"
+                ? t("O produto desta sugestão não está mais ativo no catálogo. Nada foi enviado.")
+                : draft.error_code === "caption_too_long"
+                  ? t("O texto passou do limite da legenda da foto. Nada foi enviado.")
+                  : draft.error_code === "product_photo_unavailable"
+                    ? t(
+                        "Não foi possível preparar a foto do produto. Nada foi enviado; gere a sugestão de novo.",
+                      )
+                    : t("Confira a configuração do agente e tente gerar novamente.")}
             </p>
           )}
         </>
