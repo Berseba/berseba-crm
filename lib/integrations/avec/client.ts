@@ -195,12 +195,19 @@ export async function cancelAppointment(
 /** `POST /v1/appointments` (Berseba/berseba-mayara-morales#19); answers 501 until switched on. */
 export async function createAppointment(
   config: AvecConfig,
-  params: { phone: string; slotId: string; note?: string; idempotencyKey: string },
+  params: {
+    phone: string;
+    slotId: string;
+    note?: string;
+    clientName?: string;
+    idempotencyKey: string;
+  },
 ): Promise<AvecAppointment> {
   return request(config, "POST", "/v1/appointments", appointmentSchema, {
     body: {
       phone: params.phone,
       slot_id: params.slotId,
+      ...(params.clientName ? { client_name: params.clientName } : {}),
       ...(params.note ? { note: params.note } : {}),
     },
     idempotencyKey: params.idempotencyKey,

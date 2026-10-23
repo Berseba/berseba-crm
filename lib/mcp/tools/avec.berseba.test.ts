@@ -142,7 +142,7 @@ function fakeDb(phone: string | null = CONTACT_PHONE) {
       const ok =
         filters.some(([c, v]) => c === "organization_id" && v === ORG) &&
         filters.some(([c, v]) => c === "id" && v === CONTACT);
-      return { data: ok ? { phone_number: phone } : null, error: null };
+      return { data: ok ? { phone_number: phone, name: "Ana Teste" } : null, error: null };
     },
   };
   return { supabase: { from: vi.fn(() => query) }, filters };
@@ -489,6 +489,10 @@ describe("request shape", () => {
       "444091-2129312-2026-10-27-1430",
     ]);
     expect((calls[0]!.body as { note?: string }).note).toBe("Primeira vez");
+    // The contact's name breaks a two-records-one-phone tie in avec; never the model's words.
+    expect(
+      calls.every((c) => (c.body as { client_name?: string }).client_name === "Ana Teste"),
+    ).toBe(true);
     expect((calls[1]!.body as { note?: string }).note).toBeUndefined();
     expect(new Set(calls.map((c) => c.headers["Idempotency-Key"])).size).toBe(3);
     expect(r).toMatchObject({

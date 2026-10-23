@@ -98,21 +98,29 @@ function refusal(motivo: string, handoff: boolean, mensagem: string): Refusal {
 }
 
 /** The phone of the turn's contact as `+<digits>`, or `null`. Never from the args. */
-async function turnPhone(ctx: McpContext): Promise<string | null> {
-  if (!ctx.contatoDoTurno) return null;
+async function turnContact(
+  ctx: McpContext,
+): Promise<{ phone: string | null; name: string | null }> {
+  if (!ctx.contatoDoTurno) return { phone: null, name: null };
   const { data, error } = await ctx.supabase
     .from("contacts")
-    .select("phone_number")
+    .select("phone_number, name")
     .eq("organization_id", ctx.organizationId)
     .eq("id", ctx.contatoDoTurno)
-    .maybeSingle<{ phone_number: string | null }>();
+    .maybeSingle<{ phone_number: string | null; name: string | null }>();
   if (error) throw new Error(`avec: contact lookup failed: ${error.message}`);
   const digits = data?.phone_number?.replace(/\D/g, "") ?? "";
-  return digits.length >= 10 ? `+${digits}` : null;
+  return {
+    phone: digits.length >= 10 ? `+${digits}` : null,
+    // Only breaks a tie when two avec records share the phone (Berseba/berseba-mayara-morales#28).
+    name: data?.name?.trim() || null,
+  };
 }
 
 /** Org gate + trusted phone. Returns the refusal to hand the model when either is missing. */
-async function prepare(ctx: McpContext): Promise<{ config: AvecConfig; phone: string } | Refusal> {
+async function prepare(
+  ctx: McpContext,
+): Promise<{ config: AvecConfig; phone: string; name: string | null } | Refusal> {
   const config = avecConfigFor(ctx.organizationId);
   if (!config) {
     return refusal(
@@ -128,7 +136,7 @@ async function prepare(ctx: McpContext): Promise<{ config: AvecConfig; phone: st
       "esta ferramenta só funciona dentro de uma conversa com a cliente.",
     );
   }
-  const phone = await turnPhone(ctx);
+  const { phone, name } = await turnContact(ctx);
   if (!phone) {
     return refusal(
       "contato_sem_telefone",
@@ -137,7 +145,7 @@ async function prepare(ctx: McpContext): Promise<{ config: AvecConfig; phone: st
         HANDOFF_INSTRUCTION,
     );
   }
-  return { config, phone };
+  return { config, phone, name };
 }
 
 /** Errors the agent can act on itself; everything else hands off. */
@@ -912,6 +920,7 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
         feitos.push(
           await createAppointment(ready.config, {
             phone: ready.phone,
+            clientName: ready.name ?? undefined,
             slotId: slot.slotId,
             note: i === 0 ? input.note : undefined,
             idempotencyKey: key,
