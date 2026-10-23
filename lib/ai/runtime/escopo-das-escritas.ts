@@ -52,8 +52,8 @@ export type DonoDoCampo =
 export const ESCOPO_DAS_ESCRITAS: Readonly<Record<string, Readonly<Record<string, DonoDoCampo>>>> = {
   // ---- Berseba: avec agenda. The ids are avec's, not CRM records: the avec API scopes them by
   // the phone of the turn's contact (an id of another client answers 404), see lib/mcp/tools/avec.ts.
-  avec_book: { slot_id: "configuracao" },
-  avec_reschedule: { appointment_id: "configuracao", slot_id: "configuracao" },
+  avec_book: { opcao_id: "configuracao" },
+  avec_reschedule: { appointment_id: "configuracao", opcao_id: "configuracao" },
   avec_cancel: { appointment_id: "configuracao" },
 
   // ---- agenda ----
