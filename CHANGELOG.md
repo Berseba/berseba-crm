@@ -8,6 +8,14 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.10.1] — 2026-10-24
+
+### Corrigido
+
+- **Na tintura e no tonalizante de raiz, a atendente do salão não pergunta mais o comprimento do cabelo** Para o salão Mayara Morales, retoque de raiz (tintura ou tonalizante) é o mesmo serviço e o mesmo tempo em qualquer comprimento de cabelo: a atendente não pergunta mais o comprimento e reserva a secagem média depois da cor. Outras organizações não mudam.
+
+  Quando o avec tem duas fichas com o mesmo telefone, a atendente desempata pelo nome do contato do WhatsApp e, se ainda houver dúvida, pergunta o nome completo de quem vai ser atendida e tenta de novo; só então passa para a equipe. Se o horário for para outra pessoa (por exemplo, a filha escrevendo do celular da mãe), o nome dela precisa bater com a ficha: nunca marca na ficha de outra pessoa.
+
 ## [2.10.0] — 2026-10-23
 
 ### Adicionado
@@ -9513,7 +9521,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.10.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.10.1...HEAD
+[2.10.1]: https://github.com/berseba/berseba-crm/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/berseba/berseba-crm/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/berseba/berseba-crm/compare/v2.8.0...v2.9.0
 [2.8.0]: https://github.com/berseba/berseba-crm/compare/v2.7.0...v2.8.0
