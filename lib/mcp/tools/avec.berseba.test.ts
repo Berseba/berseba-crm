@@ -142,7 +142,7 @@ function fakeDb(phone: string | null = CONTACT_PHONE) {
       const ok =
         filters.some(([c, v]) => c === "organization_id" && v === ORG) &&
         filters.some(([c, v]) => c === "id" && v === CONTACT);
-      return { data: ok ? { phone_number: phone } : null, error: null };
+      return { data: ok ? { phone_number: phone, name: "Ana Teste" } : null, error: null };
     },
   };
   return { supabase: { from: vi.fn(() => query) }, filters };
@@ -489,6 +489,10 @@ describe("request shape", () => {
       "444091-2129312-2026-10-27-1430",
     ]);
     expect((calls[0]!.body as { note?: string }).note).toBe("Primeira vez");
+    // The contact's name breaks a two-records-one-phone tie in avec; never the model's words.
+    expect(
+      calls.every((c) => (c.body as { client_name?: string }).client_name === "Ana Teste"),
+    ).toBe(true);
     expect((calls[1]!.body as { note?: string }).note).toBeUndefined();
     expect(new Set(calls.map((c) => c.headers["Idempotency-Key"])).size).toBe(3);
     expect(r).toMatchObject({
@@ -501,6 +505,27 @@ describe("request shape", () => {
         profissional: "Mayara Morales",
       },
     });
+  });
+
+  it("two avec records on the phone: ask the full name, then book with it", async () => {
+    problem(409, "ambiguous_client");
+    const first = await run(tools.avecBook, { opcao_id: SOBRANCELHA_OPCAO });
+    expect(first).toMatchObject({ ok: false, handoff: false, code: "ambiguous_client" });
+    expect(String(first.mensagem)).toMatch(/nome completo/);
+
+    answer(201, { ...APPOINTMENT, date: "2026-10-27" });
+    const second = await run(tools.avecBook, {
+      opcao_id: SOBRANCELHA_OPCAO,
+      nome_completo: "Laura Teste",
+    });
+    expect(second).toMatchObject({ ok: true });
+    expect(calls[1]!.body).toMatchObject({ client_name: "Laura Teste", name_must_match: true });
+    expect(calls[1]!.headers["Idempotency-Key"]).not.toBe(calls[0]!.headers["Idempotency-Key"]);
+    expect((calls[0]!.body as Record<string, unknown>).name_must_match).toBeUndefined();
+
+    problem(409, "ambiguous_client");
+    const third = await run(tools.avecBook, { opcao_id: SOBRANCELHA_OPCAO, nome_completo: "Ana" });
+    expect(third).toMatchObject({ ok: false, handoff: true, code: "ambiguous_client" });
   });
 
   it("avec_book refuses an option the salon did not declare, before any call", async () => {
@@ -537,7 +562,7 @@ describe("errors → handoff", () => {
     [401, "unauthorized", true],
     [404, "not_found", false],
     [409, "ambiguous_appointment", true],
-    [409, "ambiguous_client", true],
+    [409, "ambiguous_client", false], // asks the full name first; with it, hands off (below)
     [409, "idempotency_in_flight", false],
     [409, "already_booked", false],
     [422, "not_allowed", true],
@@ -556,6 +581,8 @@ describe("errors → handoff", () => {
     const r = await run(tools.avecBook, { opcao_id: SOBRANCELHA_OPCAO });
     expect(r).toMatchObject({ ok: false, code, handoff });
     if (handoff) expect(r.todo).toEqual(expect.any(String));
+    // The client never hears the receptionist's name, only "nossa equipe de atendimento".
+    expect(String(r.mensagem ?? "")).not.toMatch(/Ruth/);
   });
 
   it("a body without a Problem code still hands off", async () => {
@@ -660,8 +687,15 @@ describe("audit", () => {
       appointment_id: "a",
       reason: "[redacted]",
     });
-    expect(tools.avecBook.redigirParaAuditoria!({ opcao_id: "s", note: "alergia" })).toEqual({
+    expect(
+      tools.avecBook.redigirParaAuditoria!({
+        opcao_id: "s",
+        note: "alergia",
+        nome_completo: "Laura",
+      }),
+    ).toEqual({
       opcao_id: "s",
+      nome_completo: "[redacted]",
       note: "[redacted]",
     });
   });

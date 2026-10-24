@@ -52,11 +52,12 @@ import type { McpContext, McpToolDefinition } from "../types";
 
 const SLOT_TAKEN_TTL_MS = 30 * 60_000;
 
-// Same wording as "Quando passa para a Ruth" in the avec API's docs/integracao-crm.md.
+// The client never hears the receptionist's name (Matheus, 2026-10-23): "nossa equipe de atendimento".
 const HANDOFF_INSTRUCTION =
-  "Não tente de novo. Diga à cliente, sem falar de erro nem de sistema, que a Ruth da recepção " +
-  "vai finalizar e já responde por aqui. Depois chame crm_request_human_handoff com um resumo: " +
-  "o pedido (serviço, dia, hora, profissional) e o que a Ruth precisa fazer no avec (o campo todo).";
+  "Não tente de novo. Diga à cliente, sem falar de erro nem de sistema, que a nossa equipe de " +
+  "atendimento vai finalizar e já responde por aqui (nunca diga o nome de quem atende). Depois " +
+  "chame crm_request_human_handoff com um resumo: o pedido (serviço, dia, hora, profissional) e o " +
+  "que a equipe precisa fazer no avec (o campo todo).";
 
 /** What Ruth must do in avec, per code; the agent puts it in the handoff summary. */
 const TODO_BY_CODE: Record<string, string> = {
@@ -98,21 +99,29 @@ function refusal(motivo: string, handoff: boolean, mensagem: string): Refusal {
 }
 
 /** The phone of the turn's contact as `+<digits>`, or `null`. Never from the args. */
-async function turnPhone(ctx: McpContext): Promise<string | null> {
-  if (!ctx.contatoDoTurno) return null;
+async function turnContact(
+  ctx: McpContext,
+): Promise<{ phone: string | null; name: string | null }> {
+  if (!ctx.contatoDoTurno) return { phone: null, name: null };
   const { data, error } = await ctx.supabase
     .from("contacts")
-    .select("phone_number")
+    .select("phone_number, name")
     .eq("organization_id", ctx.organizationId)
     .eq("id", ctx.contatoDoTurno)
-    .maybeSingle<{ phone_number: string | null }>();
+    .maybeSingle<{ phone_number: string | null; name: string | null }>();
   if (error) throw new Error(`avec: contact lookup failed: ${error.message}`);
   const digits = data?.phone_number?.replace(/\D/g, "") ?? "";
-  return digits.length >= 10 ? `+${digits}` : null;
+  return {
+    phone: digits.length >= 10 ? `+${digits}` : null,
+    // Only breaks a tie when two avec records share the phone (Berseba/berseba-mayara-morales#28).
+    name: data?.name?.trim() || null,
+  };
 }
 
 /** Org gate + trusted phone. Returns the refusal to hand the model when either is missing. */
-async function prepare(ctx: McpContext): Promise<{ config: AvecConfig; phone: string } | Refusal> {
+async function prepare(
+  ctx: McpContext,
+): Promise<{ config: AvecConfig; phone: string; name: string | null } | Refusal> {
   const config = avecConfigFor(ctx.organizationId);
   if (!config) {
     return refusal(
@@ -128,7 +137,7 @@ async function prepare(ctx: McpContext): Promise<{ config: AvecConfig; phone: st
       "esta ferramenta só funciona dentro de uma conversa com a cliente.",
     );
   }
-  const phone = await turnPhone(ctx);
+  const { phone, name } = await turnContact(ctx);
   if (!phone) {
     return refusal(
       "contato_sem_telefone",
@@ -137,7 +146,7 @@ async function prepare(ctx: McpContext): Promise<{ config: AvecConfig; phone: st
         HANDOFF_INSTRUCTION,
     );
   }
-  return { config, phone };
+  return { config, phone, name };
 }
 
 /** Errors the agent can act on itself; everything else hands off. */
@@ -708,7 +717,7 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
             "sem_horario",
             true,
             "não encontrei horário para esse pedido. Não diga que não há horário: diga à " +
-              "cliente, com carinho, que a Ruth da recepção vai ver o melhor horário para ela e " +
+              "cliente, com carinho, que a nossa equipe de atendimento vai ver o melhor horário e " +
               "já responde por aqui. Depois chame crm_request_human_handoff com o pedido e o todo.",
           ),
           todo: `Sem horário na agenda pelo sistema para ${pedido}${quando ? ` (${quando})` : ""}: ver um encaixe com a cliente.`,
@@ -876,6 +885,15 @@ const bookShape = {
   note: freeText(
     "Observação curta para o salão, se a cliente pediu algo (vai para o agendamento).",
   ),
+  nome_completo: z
+    .string()
+    .trim()
+    .min(3)
+    .max(120)
+    .optional()
+    .describe(
+      "Nome completo de quem vai ser atendida, só quando a cliente disse (ex.: é para a filha) ou quando esta ferramenta pediu.",
+    ),
 };
 
 export const avecBook: McpToolDefinition<typeof bookShape> = {
@@ -883,13 +901,14 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
   description:
     "Marca no avec a visita de uma opção de avec_free_slots para a cliente DESTA conversa, pelo " +
     "telefone dela, com todas as etapas (ex.: corte, lavagem e secagem). Antes: confirme com " +
-    "ela o serviço, o dia, a hora e a profissional, e espere o sim. Se o avec não conhecer a " +
+    "ela o serviço, o dia, a hora e a profissional, e espere o sim. Se o horário for para outra " +
+    "pessoa (filha, mãe), mande o nome completo dela em nome_completo. Se o avec não conhecer a " +
     "cliente, a resposta pede para passar para a equipe cadastrá-la.",
   inputSchema: bookShape,
   category: "write",
   requiresRole: "ai_operator",
   requiresScope: "mcp:write",
-  redigirParaAuditoria: redactFreeText("note"),
+  redigirParaAuditoria: (args) => redactFreeText("nome_completo")(redactFreeText("note")(args)),
   handler: async (input, ctx) => {
     const ready = await prepare(ctx);
     if ("ok" in ready) return ready;
@@ -907,11 +926,20 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
     if (!avecIdempotencyKey(ctx, "avec_book", input)) return NO_JOB;
     const feitos: AvecAppointment[] = [];
     for (const [i, slot] of opcao.slots.entries()) {
-      const key = avecIdempotencyKey(ctx, "avec_book", { opcao_id: input.opcao_id, etapa: i })!;
+      // The name is in the key: after "which of the two records?", the retry is another write.
+      const key = avecIdempotencyKey(ctx, "avec_book", {
+        opcao_id: input.opcao_id,
+        etapa: i,
+        nome: input.nome_completo ?? null,
+      })!;
       try {
         feitos.push(
           await createAppointment(ready.config, {
             phone: ready.phone,
+            // Who the client said will be served must match the record; the WhatsApp name only
+            // breaks a tie between records of the phone (Berseba/berseba-mayara-morales#28, #29).
+            clientName: input.nome_completo ?? ready.name ?? undefined,
+            nameMustMatch: Boolean(input.nome_completo),
             slotId: slot.slotId,
             note: i === 0 ? input.note : undefined,
             idempotencyKey: key,
@@ -919,6 +947,22 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
         );
       } catch (err) {
         if (i === 0) {
+          if (
+            err instanceof AvecApiError &&
+            err.code === "ambiguous_client" &&
+            !input.nome_completo
+          ) {
+            // Be proactive before handing off: the full name usually tells which record it is.
+            return {
+              ok: false,
+              code: err.code,
+              handoff: false,
+              mensagem:
+                'o salão tem mais de uma ficha com este telefone. Pergunte com naturalidade: "Pra ' +
+                'eu confirmar aqui, qual é o nome completo de quem vai ser atendida?" e chame ' +
+                "avec_book de novo com o mesmo opcao_id e nome_completo.",
+            };
+          }
           const twice =
             err instanceof AvecApiError && err.code === "slot_unavailable" && slotTakenBefore(ctx);
           return failure(err, { slotTakenTwice: twice, isWrite: true });
@@ -935,7 +979,7 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
           parcial: true,
           mensagem:
             "a visita ficou marcada só em parte. Não confirme o horário à cliente: diga que a " +
-            "Ruth da recepção finaliza o agendamento e já responde por aqui. " +
+            "nossa equipe de atendimento finaliza o agendamento e já responde por aqui. " +
             HANDOFF_INSTRUCTION,
           todo:
             `Ficou marcado no avec: ${feitos.map((f) => `${f.service ?? "serviço"} ${dataBr(f.date)} ${f.start_time} (${f.professional ?? ""})`).join("; ")}. ` +
