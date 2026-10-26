@@ -61,6 +61,13 @@ export const ALVO_DE_FUNIL: Record<string, AlvoDeFunil> = {
   avec_book: "sem_funil",
   avec_reschedule: "sem_funil",
   avec_cancel: "sem_funil",
+  // Berseba: Mirae agenda writes. No lead_id nor contact_id argument for this gate to check:
+  // the card move of an evaluation booked by mirae_book is scoped inside the handler, through
+  // sincronizaEstagioDoAgente with the agent's published pipeline_ids
+  // (lib/integrations/mirae/evaluation-stage.ts).
+  mirae_book: "sem_funil",
+  mirae_reschedule: "sem_funil",
+  mirae_cancel: "sem_funil",
   // ---- escrevem em crm_leads: o coração do escopo ----
   crm_create_lead: "pipeline_no_argumento",
   crm_update_lead: "funil_vem_do_lead",

@@ -29,6 +29,7 @@ import { ALFABETO_DO_NOME_NO_STORAGE } from "@/lib/ai/skills/package";
 import { TETO_NOME_DE_SESSAO_WAHA, nomeCurtoDaSessao, nomeDaSessaoNovo } from "@/lib/channels/nome-da-sessao";
 import { randomId } from "@/lib/random-id";
 import { avecIdempotencyKey } from "@/lib/mcp/tools/avec";
+import { miraeIdempotencyKey } from "@/lib/mcp/tools/mirae";
 import { nomeDaSessaoDeVoz } from "@/lib/wacalls/nome-da-sessao";
 
 const RAIZ = process.cwd();
@@ -109,6 +110,23 @@ const FRONTEIRAS: Fronteira[] = [
           avecIdempotencyKey({ sourceJobId: VERSAO } as never, tool, {
             appointment_id: "88123-901-430008-2026-10-23",
             slot_id: "430008-901-2026-10-24-1430",
+          }) ?? "",
+      ),
+  },
+  // Berseba: the key the Mirae tools send to the Mirae API v1 (Fiore Pilates).
+  {
+    id: "mirae.idempotency-key",
+    terceiro: "API v1 do Mirae (agenda da Fiore Pilates)",
+    teto: 128,
+    forma: /^[!-~]{8,128}$/,
+    fonte:
+      "Mirae docs/integracao-crm.md — «obrigatória em todo POST, com 8 a 128 caracteres visíveis e sem espaço»",
+    medir: () =>
+      ["mirae_book", "mirae_reschedule", "mirae_cancel"].map(
+        (tool) =>
+          miraeIdempotencyKey({ sourceJobId: VERSAO } as never, tool, {
+            appointmentId: "8ClDgOSe2sTXOwZA2O8tM",
+            startsAt: "2026-10-27T15:00:00-03:00",
           }) ?? "",
       ),
   },
@@ -221,6 +239,8 @@ const SITES: { arquivo: string; fronteira: string; papel?: "gerador" | "validado
   { arquivo: "app/api/v1/onboarding/whatsapp/session/route.ts", fronteira: "api.idempotency-key", papel: "validador" },
   // Berseba: sends the key `lib/mcp/tools/avec.ts` derives per job (stable on retry, not a uuid).
   { arquivo: "lib/integrations/avec/client.ts", fronteira: "avec.idempotency-key" },
+  // Berseba: sends the key `lib/mcp/tools/mirae.ts` derives per job (stable on retry, not a uuid).
+  { arquivo: "lib/integrations/mirae/client.ts", fronteira: "mirae.idempotency-key" },
 ];
 
 describe("todo identificador que cruza fronteira cabe no que o terceiro aceita", () => {
@@ -343,7 +363,7 @@ describe("a varredura é de classe: site novo de fronteira reprova", () => {
     // Só o cabeçalho como tal (`'Idempotency-Key'`/`"Idempotency-Key"`), não a
     // prosa dos comentários: o que cruza fronteira é o cabeçalho.
     const achados = caminhosCom(/['"]Idempotency-Key['"]/);
-    const registrados = SITES.filter((s) => s.fronteira === "api.idempotency-key" || s.fronteira === "avec.idempotency-key").map((s) => s.arquivo); // Berseba: avec
+    const registrados = SITES.filter((s) => s.fronteira === "api.idempotency-key" || s.fronteira === "avec.idempotency-key" || s.fronteira === "mirae.idempotency-key").map((s) => s.arquivo); // Berseba: avec, Mirae
     expect(achados.sort()).toEqual([...registrados].sort());
   });
 

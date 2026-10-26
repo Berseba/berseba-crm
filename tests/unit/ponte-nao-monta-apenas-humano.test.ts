@@ -93,9 +93,10 @@ describe("a ponte do turno respeita `apenasHumano`", () => {
     // pela capacidade, as duas desligadas aqui), e as de módulo opcional, que
     // nenhum módulo ligado aqui oferece.
     expect(Object.keys(montadas).length).toBeGreaterThan(
-      // Berseba: minus the avec tools, offered only to the organizations in AVEC_API_ORG_IDS.
+      // Berseba: minus the avec and Mirae tools, offered only to the organizations in
+      // AVEC_API_ORG_IDS and MIRAE_API_ORG_IDS.
       allTools.length - apenasHumano.length - semModulo - 4 -
-        allTools.filter((t) => t.name.startsWith("avec_")).length,
+        allTools.filter((t) => t.name.startsWith("avec_") || t.name.startsWith("mirae_")).length,
     );
     expect(montadas).toHaveProperty("crm_search_contacts");
   });
