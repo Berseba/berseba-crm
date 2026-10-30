@@ -2,6 +2,7 @@
  * Berseba: the Mirae agenda tools (Fiore Pilates). `fetch` is mocked: no network.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 const ORG = "11111111-1111-4111-8111-111111111111";
 const OTHER_ORG = "99999999-9999-4999-8999-999999999999";
@@ -451,6 +452,8 @@ describe("mirae_free_slots", () => {
   });
 
   it("for a reschedule past the studio's deadline: hand off with the deadline from Mirae", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-29T12:00:00-03:00"));
     answer(200, { person: null, data: [{ ...APPOINTMENT, can_change: false }] });
     answer(200, {
       time_zone: "America/Sao_Paulo",
@@ -465,6 +468,44 @@ describe("mirae_free_slots", () => {
     });
     expect(r).toMatchObject({ code: "too_late", handoff: true });
     expect(r.todo).toBe("Quer remarcar avaliação inicial de 29/10 às 14:00; faltam menos de 4 h.");
+  });
+
+  it("can_change false on a past or cancelled appointment is not 'too late': search again", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-29T12:00:00-03:00"));
+    for (const gone of [
+      { ...APPOINTMENT, can_change: false, status: "cancelled" },
+      { ...APPOINTMENT, ...slot("2026-10-28", "09:00"), can_change: false },
+    ]) {
+      answer(200, { person: null, data: [gone] });
+      const r = await run(tools.miraeFreeSlots, {
+        servico: "avaliacao",
+        remarcar_appointment_id: APPOINTMENT.id,
+      });
+      expect(r).toMatchObject({ code: "not_changeable", handoff: false });
+    }
+    expect(calls).toHaveLength(2);
+  });
+
+  it("an end time Mirae writes in UTC is told in Brasília", async () => {
+    answer(200, {
+      data: [{ ...slot("2026-10-27", "15:00"), ends_at: "2026-10-27T18:50:00Z" }],
+    });
+    const r = await run(tools.miraeFreeSlots, { servico: "avaliacao" });
+    expect((r.opcoes as Args[])[0]).toMatchObject({ inicio: "15:00", termina: "15:50" });
+  });
+
+  it("an impossible calendar date never reaches the API", () => {
+    const shape = z.object(tools.miraeFreeSlots.inputSchema);
+    expect(shape.safeParse({ servico: "aula", data: "2026-02-30" }).success).toBe(false);
+    expect(shape.safeParse({ servico: "aula", data: "2026-13-01" }).success).toBe(false);
+    expect(shape.safeParse({ servico: "aula", data: "2028-02-29" }).success).toBe(true);
+  });
+
+  it("from after to is sent back to the agent without a call", async () => {
+    const r = await run(tools.miraeMyAppointments, { from: "2026-11-10", to: "2026-11-01" });
+    expect(r).toMatchObject({ ok: false, handoff: false });
+    expect(calls).toHaveLength(0);
   });
 
   it("a clinical appointment is not rescheduled through the API", async () => {
@@ -626,6 +667,37 @@ describe("writes without an answer", () => {
     expect(calls[1]!.headers["Idempotency-Key"]).toBe(calls[0]!.headers["Idempotency-Key"]);
   });
 
+  it.each([
+    ["slot_unavailable", "the first request may hold the slot"],
+    ["request_in_progress", "an in-flight code Mirae may answer"],
+  ])("lost, then %s on the retry: unconfirmed, never 'search again' (%s)", async (code) => {
+    noAnswer();
+    problem(409, code);
+    const r = await run(tools.miraeBook, { opcao_id: EVALUATION_OPCAO });
+    expect(r).toMatchObject({ ok: false, handoff: true });
+    expect(r.todo).toMatch(/Conferir no Mirae/);
+    expect(String(r.mensagem)).not.toMatch(/mirae_free_slots/);
+    expect(moveCard).not.toHaveBeenCalled();
+  });
+
+  it("a 201 with a body off the contract is retried with the same key, then trusted", async () => {
+    answer(201, { unexpected: true });
+    answer(201, APPOINTMENT);
+    const r = await run(tools.miraeBook, { opcao_id: EVALUATION_OPCAO });
+    expect(r).toMatchObject({ ok: true });
+    expect(calls).toHaveLength(2);
+    expect(calls[1]!.headers["Idempotency-Key"]).toBe(calls[0]!.headers["Idempotency-Key"]);
+  });
+
+  it("a 2xx body off the contract twice: unconfirmed, and the integration is alerted", async () => {
+    answer(200, { id: APPOINTMENT.id, status: "canceled" });
+    answer(200, { id: APPOINTMENT.id, status: "canceled" });
+    const r = await run(tools.miraeCancel, { appointment_id: APPOINTMENT.id });
+    expect(r).toMatchObject({ ok: false, handoff: true, code: "invalid_response" });
+    expect(r.todo).toMatch(/Conferir no Mirae/);
+    await vi.waitFor(() => expect(captureMessage).toHaveBeenCalled());
+  });
+
   it("a 4xx is never retried", async () => {
     problem(409, "is_student");
     await run(tools.miraeBook, { opcao_id: EVALUATION_OPCAO });
@@ -689,7 +761,15 @@ describe("each code of the contract", () => {
     problem(409, "already_booked", { starts_at: "2026-10-29T14:00:00-03:00" });
     const r = await run(tools.miraeBook, { opcao_id: EVALUATION_OPCAO });
     expect(r.mensagem).toMatch(/29\/10 às 14:00/);
+    expect(r.mensagem).toMatch(/avaliação inicial marcada/);
     expect(r.mensagem).toMatch(/remarcar/);
+  });
+
+  it("already_booked on a class names the class, not an evaluation", async () => {
+    problem(409, "already_booked");
+    const opcao_id = tools.encodeOpcao(CONFIG, { s: "class", t: "2026-10-27T15:00:00-03:00" });
+    const r = await run(tools.miraeBook, { opcao_id });
+    expect(r.mensagem).toMatch(/ela já tem aula marcada/);
   });
 
   it("ambiguous_person asks the full name, and with it tries again by name", async () => {

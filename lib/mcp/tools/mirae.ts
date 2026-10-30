@@ -178,8 +178,22 @@ export function todayInBrasilia(now = new Date()): string {
 
 /** `27/10`: the agent repeats this, never computes it. */
 const dataBr = (date: string) => `${date.slice(8, 10)}/${date.slice(5, 7)}`;
-/** `HH:MM` of an ISO date-time with offset, as Mirae writes it (`...T15:50:00-03:00`). */
-const hhmm = (iso: string) => iso.slice(11, 16);
+const BRASILIA_TIME = new Intl.DateTimeFormat("en-GB", {
+  timeZone: "America/Sao_Paulo",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+/** `HH:MM` in Brasília of an ISO date-time, whatever offset Mirae writes (`-03:00` or `Z`). */
+const hhmm = (iso: string) => {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? iso.slice(11, 16) : BRASILIA_TIME.format(at);
+};
+/** `YYYY-MM-DD` in Brasília of an ISO date-time. */
+const dayOf = (iso: string) => {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? iso.slice(0, 10) : todayInBrasilia(at);
+};
 
 const SERVICO_DE: Record<string, string> = {
   evaluation: "avaliação inicial",
@@ -262,6 +276,8 @@ interface FailureOptions {
   nameGiven?: boolean;
   appointmentId?: string;
   verbo?: string;
+  /** The service of the write, to name it in the message. */
+  service?: MiraeService;
 }
 
 /** What each Mirae `code` means for the agent; anything else hands off with the default todo. */
@@ -289,6 +305,7 @@ async function failure(err: unknown, o: FailureOptions) {
   });
 
   if (o.unconfirmed) {
+    if (INTEGRATION_CODES.has(err.code)) alertIntegration(o.ctx, err.code, err.status);
     return handOff(
       TODO_BY_CODE.write_unconfirmed!,
       "a agenda pode ter gravado essa alteração, mas a resposta se perdeu. ",
@@ -308,7 +325,7 @@ async function failure(err: unknown, o: FailureOptions) {
           );
     case "already_booked":
       return teach(
-        `ela já tem avaliação marcada${err.startsAt ? ` em ${dataBr(err.startsAt.slice(0, 10))} às ${hhmm(err.startsAt)}` : ""}. ` +
+        `ela já tem ${o.service ? `${SERVICO_DE[o.service]} marcada` : "um horário marcado"}${err.startsAt ? ` em ${dataBr(dayOf(err.startsAt))} às ${hhmm(err.startsAt)}` : ""}. ` +
           "Diga isso e ofereça remarcar: mirae_my_appointments, depois mirae_free_slots com " +
           "remarcar_appointment_id.",
       );
@@ -335,7 +352,11 @@ async function failure(err: unknown, o: FailureOptions) {
   }
 }
 
-/** A write: one retry with the SAME key when there was no answer or a 5xx, never a new key. */
+/**
+ * A write: one retry with the SAME key when there was no answer or a 5xx, never a new key.
+ * After a lost first attempt, only a success is trusted: any refusal of the retry (the first
+ * request may still be running, or may hold the slot it took) hands off as unconfirmed.
+ */
 async function write<T>(
   run: () => Promise<T>,
   o: Omit<FailureOptions, "unconfirmed">,
@@ -349,7 +370,7 @@ async function write<T>(
     try {
       return await run();
     } catch (second) {
-      return failure(second, { ...o, unconfirmed: lost(second) });
+      return failure(second, { ...o, unconfirmed: true });
     }
   }
 }
@@ -424,6 +445,10 @@ function opcaoView(config: MiraeConfig, s: MiraeSlot, service: MiraeService, r?:
 const date = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "use AAAA-MM-DD")
+  .refine((v) => {
+    const at = new Date(`${v}T12:00:00Z`);
+    return !Number.isNaN(at.getTime()) && at.toISOString().slice(0, 10) === v;
+  }, "essa data não existe no calendário: confira o dia com a pessoa")
   .optional()
   .describe("Data no formato AAAA-MM-DD (fuso de Brasília).");
 
@@ -468,6 +493,9 @@ export const miraeMyAppointments: McpToolDefinition<typeof myAppointmentsShape> 
   handler: async (input, ctx) => {
     const ready = await prepare(ctx);
     if ("ok" in ready) return ready;
+    if (input.from && input.to && input.from > input.to) {
+      return { ok: false, handoff: false, mensagem: "from vem depois de to: inverta as datas." };
+    }
     try {
       // Field by field, never a spread: nothing in the args may reach the API as the phone.
       const r = await listAppointments(ready.config, {
@@ -620,6 +648,15 @@ export const miraeFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
             ready,
           });
         }
+        if (
+          !reschedule.can_change &&
+          (reschedule.status === "cancelled" || Date.parse(reschedule.starts_at) <= Date.now())
+        ) {
+          return failure(new MiraeApiError(409, "not_changeable", "past or cancelled"), {
+            ctx,
+            ready,
+          });
+        }
         if (!reschedule.can_change) {
           return failure(new MiraeApiError(409, "too_late", "can_change false"), {
             ctx,
@@ -760,6 +797,7 @@ export const miraeBook: McpToolDefinition<typeof bookShape> = {
         ctx,
         ready,
         nameGiven: Boolean(input.nome_completo),
+        service: opcao.s,
       },
     );
     if ("ok" in booked) return booked;
@@ -831,6 +869,7 @@ export const miraeReschedule: McpToolDefinition<typeof rescheduleShape> = {
         nameGiven: Boolean(input.nome_completo),
         appointmentId: input.appointment_id,
         verbo: "remarcar",
+        service: opcao.s,
       },
     );
     if ("ok" in moved) return moved;

@@ -6,8 +6,8 @@
  * undeclared keys.
  *
  * Every failure becomes a `MiraeApiError` carrying `status` and the API's stable `code`
- * (`application/problem+json`). `status: 0` = no HTTP answer (`timeout`, `network_error`); for a
- * write that means Mirae may have written it.
+ * (`application/problem+json`). `status: 0` = no usable HTTP answer (`timeout`, `network_error`,
+ * or a POST whose 2xx body could not be read); for a write that means Mirae may have written it.
  */
 import { z } from "zod";
 
@@ -149,8 +149,11 @@ async function request<T>(
   }
   const parsed = schema.safeParse(payload);
   if (!parsed.success) {
+    // A POST that answered 2xx did write; an unreadable body (cut by the timeout, or off the
+    // contract) is reported as status 0 so the write is retried with the same key and, failing
+    // again, handed off as unconfirmed, never as "nothing happened".
     throw new MiraeApiError(
-      response.status,
+      method === "POST" ? 0 : response.status,
       "invalid_response",
       `${method} ${path}: unexpected body`,
     );
