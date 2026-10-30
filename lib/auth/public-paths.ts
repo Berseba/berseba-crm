@@ -3,6 +3,13 @@
  * Match precedence: array order. First match wins.
  */
 export const PUBLIC_PATHS: RegExp[] = [
+  // Berseba: Mirae reads the studio's funnel SERVER-TO-SERVER. Bearer `dsk_…` only, checked
+  // INSIDE the routes (`lib/integrations/mirae/read-auth.ts`, scope `mcp:read`), with the
+  // organization taken from the token row and never from the query — the same "the proxy does
+  // not decide" as `/api/v1/contacts` below, not "no auth". Anchored with `$`: no sub-path under
+  // `/api/v1/mirae/` becomes public by riding along.
+  /^\/api\/v1\/mirae\/leads$/,
+  /^\/api\/v1\/mirae\/pipelines$/,
   // Link público persistido: org e destino são resolvidos exclusivamente no servidor.
   /^\/api\/v1\/rastreio\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
   /^\/$/,
