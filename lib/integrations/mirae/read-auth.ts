@@ -15,13 +15,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
 import { fail } from "@/lib/api/wrappers";
-import {
-  McpAuthError,
-  ensureRole,
-  ensureScope,
-  extractBearer,
-  validateBearerToken,
-} from "@/lib/mcp/auth";
+import { McpAuthError, ensureRole, ensureScope, validateBearerToken } from "@/lib/mcp/auth";
 import { JANELA_SEGUNDOS, TETO_POR_ORGANIZACAO, TETO_POR_TOKEN } from "@/lib/mcp/rate-limit";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -42,15 +36,8 @@ export async function authorizeMiraeRead(
   authHeader: string | null,
   requestId: string,
 ): Promise<MiraeReadAuth> {
-  if (!extractBearer(authHeader)) {
-    return {
-      ok: false,
-      response: fail("unauthenticated", "Missing or malformed Authorization header.", 401, {
-        requestId,
-      }),
-    };
-  }
-
+  // No pre-check of the header: `validateBearerToken` answers 401 on a missing one itself and,
+  // unlike a shortcut here, counts it as a failed attempt like the MCP does.
   let auth;
   try {
     auth = await validateBearerToken(authHeader);

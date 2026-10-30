@@ -82,6 +82,8 @@ interface Db {
   tables: Record<string, Row[]>;
   selects: Record<string, string[]>;
   inSizes: number[];
+  /** A table whose queries answer with a database error. */
+  failing?: string;
 }
 
 function fakeSupabase(db: Db) {
@@ -93,6 +95,7 @@ function fakeSupabase(db: Db) {
       let columns = "*";
       let single = false;
       const run = () => {
+        if (db.failing === table) return { data: null, error: { message: "boom" } };
         let rows = (db.tables[table] ?? []).filter((r) => preds.every((p) => p(r)));
         rows = [...rows].sort((a, b) => {
           for (const { col, asc } of orders) {
@@ -400,12 +403,18 @@ function baseTables(): Record<string, Row[]> {
 let db: Db;
 
 function token(over: { organizationId?: string; scopes?: string[] } = {}): void {
-  vi.mocked(validateBearerToken).mockResolvedValue({
-    organizationId: over.organizationId ?? ORG_A,
-    role: "agent",
-    actor: { type: "ai_agent", id: "run-1", role: "agent", api_token_id: "tok-1" } as never,
-    apiTokenId: "tok-1",
-    scopes: over.scopes ?? ["mcp:read"],
+  // Like the real one: no `Bearer …` header is a 401 from the validator itself.
+  vi.mocked(validateBearerToken).mockImplementation(async (header) => {
+    if (!header?.startsWith("Bearer ")) {
+      throw new McpAuthError(-32001, 401, "Missing or malformed Authorization header.");
+    }
+    return {
+      organizationId: over.organizationId ?? ORG_A,
+      role: "agent",
+      actor: { type: "ai_agent", id: "run-1", role: "agent", api_token_id: "tok-1" } as never,
+      apiTokenId: "tok-1",
+      scopes: over.scopes ?? ["mcp:read"],
+    };
   });
 }
 
@@ -441,12 +450,15 @@ describe("auth (both routes)", () => {
       "pipelines",
       () => getPipelines(new NextRequest("https://crm.example/api/v1/mirae/pipelines")),
     ],
-  ])("%s: no Bearer → 401, the token lookup is never reached", async (_name, call) => {
-    const res = await call();
-    expect(res.status).toBe(401);
-    expect(validateBearerToken).not.toHaveBeenCalled();
-    expect(createAdminClient).not.toHaveBeenCalled();
-  });
+  ])(
+    "%s: no Bearer → 401 from the validator (counted as a failed attempt), no data read",
+    async (_name, call) => {
+      const res = await call();
+      expect(res.status).toBe(401);
+      expect(validateBearerToken).toHaveBeenCalledWith(null);
+      expect(createAdminClient).not.toHaveBeenCalled();
+    },
+  );
 
   it("a session cookie is not a way in: still 401", async () => {
     const res = await getLeads(
@@ -507,9 +519,17 @@ describe("GET /api/v1/mirae/leads — query validation (422)", () => {
     JSON.stringify({ created_at: "2026-10-01T00:00:00Z,id.gt.0", id: L_OPEN }),
     "utf8",
   ).toString("base64url");
+  const impossibleDate = Buffer.from(
+    JSON.stringify({ created_at: "2026-99-99T99:99:99Z", id: L_OPEN }),
+    "utf8",
+  ).toString("base64url");
 
   it.each([
     ["no pipeline_id", RANGE],
+    [
+      "cursor with a date that does not exist",
+      `pipeline_id=${PIPE_A}&${RANGE}&cursor=${impossibleDate}`,
+    ],
     ["pipeline_id not a uuid", `pipeline_id=abc&${RANGE}`],
     ["no created_from", `pipeline_id=${PIPE_A}&created_to=2026-11-01T00:00:00Z`],
     ["no created_to", `pipeline_id=${PIPE_A}&created_from=2026-10-01T00:00:00Z`],
@@ -594,7 +614,7 @@ describe("GET /api/v1/mirae/leads — items", () => {
     expect(body.next_cursor).toBeNull();
   });
 
-  it("an open lead with a contact carries stage, origin, E.164 phone, tags, last conversation and card url", async () => {
+  it("an open lead with a contact carries stage, origin, E.164 phone, last messages and card url", async () => {
     const [open] = (await page()).data;
     expect(open).toEqual({
       id: L_OPEN,
@@ -605,8 +625,8 @@ describe("GET /api/v1/mirae/leads — items", () => {
       lost_reason: null,
       lost_from_stage: null,
       origin: { source: "instagram", campaign: "outubro-gestantes" },
-      contact: { phone: "+5511999990001", tags: ["gestante"] },
-      // The most recent 1:1 conversation; the newer GROUP conversation does not count.
+      contact: { phone: "+5511999990001" },
+      // The latest across the 1:1 conversations; the newer GROUP conversation does not count.
       last_inbound_at: "2026-10-05T10:00:00.000Z",
       last_outbound_at: "2026-10-05T09:00:00.000Z",
       url: `${env.NEXT_PUBLIC_APP_URL.replace(/\/+$/, "")}/app/leads/${L_OPEN}`,
@@ -624,17 +644,17 @@ describe("GET /api/v1/mirae/leads — items", () => {
     });
   });
 
-  it("a lead without a contact: phone null, no tags, origin from the lead's own source", async () => {
+  it("a lead without a contact: phone null, origin from the lead's own source", async () => {
     const orphan = (await page()).data.find((l) => l.id === L_NO_CONTACT);
     expect(orphan).toMatchObject({
-      contact: { phone: null, tags: [] },
+      contact: { phone: null },
       origin: { source: "google", campaign: "lp" },
       last_inbound_at: null,
       last_outbound_at: null,
     });
   });
 
-  it("never returns name, e-mail, CPF, message text, title or custom fields", async () => {
+  it("never returns name, e-mail, CPF, message text, title, custom fields or tags", async () => {
     const body = await page();
     const allowed = [
       "closed_at",
@@ -652,10 +672,10 @@ describe("GET /api/v1/mirae/leads — items", () => {
     ];
     for (const item of body.data) {
       expect(Object.keys(item).sort()).toEqual(allowed);
-      expect(Object.keys(item.contact as object).sort()).toEqual(["phone", "tags"]);
+      expect(Object.keys(item.contact as object).sort()).toEqual(["phone"]);
     }
     const text = JSON.stringify(body);
-    for (const secret of ["Maria", "maria@example.com", "123.456.789", "secret"]) {
+    for (const secret of ["Maria", "maria@example.com", "123.456.789", "secret", '"gestante"']) {
       expect(text).not.toContain(secret);
     }
     // And they are not even read from the database (stage and funnel names are fine).
@@ -673,6 +693,7 @@ describe("GET /api/v1/mirae/leads — items", () => {
       "last_message_preview",
       "title",
       "description",
+      "tags",
     ]) {
       expect(read.split(",").map((c) => c.trim())).not.toContain(column);
     }
@@ -690,9 +711,66 @@ describe("GET /api/v1/mirae/leads — items", () => {
       );
     }
     await page();
-    expect(db.selects.contacts).toHaveLength(2); // personal ids + the page's contacts
+    expect(db.selects.contacts).toHaveLength(1);
     expect(db.selects.conversations).toHaveLength(1);
     expect(db.selects.crm_stages).toHaveLength(1);
+  });
+
+  it("last inbound and last outbound are each the latest across the 1:1 conversations", async () => {
+    // The studio wrote today from another number, where the client never answered.
+    db.tables.conversations!.push({
+      contact_id: C_MARIA,
+      organization_id: ORG_A,
+      is_group: false,
+      last_message_at: "2026-10-08T10:00:00.000Z",
+      last_inbound_at: null,
+      last_outbound_at: "2026-10-08T10:00:00.000Z",
+    });
+    const open = (await page()).data.find((l) => l.id === L_OPEN);
+    expect(open).toMatchObject({
+      last_inbound_at: "2026-10-05T10:00:00.000Z",
+      last_outbound_at: "2026-10-08T10:00:00.000Z",
+    });
+  });
+
+  it("personal contacts stay out however many there are (no id-list ceiling)", async () => {
+    for (let i = 0; i < 600; i++) {
+      const contactId = uuid(10_000 + i);
+      db.tables.contacts!.push({
+        id: contactId,
+        organization_id: ORG_A,
+        phone_number: `+55119${String(i).padStart(8, "0")}`,
+        source: "whatsapp",
+        source_metadata: {},
+        is_personal: true,
+      });
+      db.tables.crm_leads!.push(
+        lead({
+          id: uuid(20_000 + i),
+          contact_id: contactId,
+          created_at: "2026-10-06T12:00:00.000Z",
+        }),
+      );
+    }
+    const seen: string[] = [];
+    let cursor: string | null = null;
+    do {
+      const res = await getLeads(
+        leadsReq(`pipeline_id=${PIPE_A}&${RANGE}${cursor ? `&cursor=${cursor}` : ""}`),
+      );
+      const body = (await res.json()) as LeadsBody;
+      seen.push(...body.data.map((l) => String(l.id)));
+      cursor = body.next_cursor;
+    } while (cursor);
+    // Pages made only of personal deals come back empty but keep the cursor going.
+    expect(seen).toEqual([L_OPEN, L_NO_CONTACT, L_LOST]);
+  });
+
+  it("the contacts lookup failing is a 500, never a page with personal deals in it", async () => {
+    db.failing = "contacts";
+    const res = await getLeads(leadsReq(`pipeline_id=${PIPE_A}&${RANGE}`));
+    expect(res.status).toBe(500);
+    expect(JSON.stringify(await res.json())).not.toContain("boom");
   });
 });
 

@@ -6,8 +6,9 @@
  * moves with upstream and would cost N calls per page.
  *
  * What leaves the CRM is the minimum to count and to link back: ids, dates, status, stage, loss
- * reason, origin (source + campaign), phone in E.164 (Mirae's join key with its students), contact
- * tags and the last message dates. Never a name, e-mail, CPF, message text nor custom fields.
+ * reason, origin (source + campaign), phone in E.164 (Mirae's join key with its students) and the
+ * last message dates. Never a name, e-mail, CPF, message text, custom fields nor tags (free text
+ * that may carry health data, and Mirae does not need them).
  *
  * Every query is scoped by `organization_id` from the token row: the client is service-role and
  * RLS does not apply. A pipeline of another organization is a 404, the same answer as one that
@@ -16,9 +17,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { z } from "zod";
 
-import { idsDeContatosPessoais } from "@/app/api/v1/conversations/_handler";
 import { env } from "@/lib/env";
 import { origemDoContato } from "@/lib/leads/origem-do-contato";
+import { logger } from "@/lib/logger";
 
 export const PAGE_SIZE = 200;
 export const MAX_RANGE_DAYS = 400;
@@ -30,6 +31,8 @@ const DAY_MS = 24 * 60 * 60 * 1000;
  * uuids are ~3.7 KB. It also keeps the conversations lookup far below `max_rows` (1000).
  */
 const LOOKUP_CHUNK = 100;
+/** PostgREST's `max_rows`: a lookup chunk that returns this many rows may have been cut. */
+const MAX_ROWS = 1000;
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** A Postgres `timestamptz` as PostgREST prints it. Nothing else may reach the `or=` filter. */
@@ -83,6 +86,8 @@ export function decodeCursor(raw: string): Cursor | null {
     const c = JSON.parse(Buffer.from(raw, "base64url").toString("utf8")) as Partial<Cursor>;
     if (typeof c.id !== "string" || !UUID.test(c.id)) return null;
     if (typeof c.created_at !== "string" || !TIMESTAMP.test(c.created_at)) return null;
+    // The shape alone lets "2026-99-99T99:99:99Z" through, which Postgres refuses with a 500.
+    if (Number.isNaN(Date.parse(c.created_at))) return null;
     return { created_at: c.created_at, id: c.id };
   } catch {
     return null;
@@ -98,7 +103,7 @@ export interface MiraeLead {
   lost_reason: string | null;
   lost_from_stage: { id: string; name: string } | null;
   origin: { source: string; campaign: string | null };
-  contact: { phone: string | null; tags: string[] };
+  contact: { phone: string | null };
   last_inbound_at: string | null;
   last_outbound_at: string | null;
   url: string;
@@ -128,7 +133,7 @@ interface StageRow {
 interface ContactRow {
   id: string;
   phone_number: string | null;
-  tags: string[] | null;
+  is_personal: boolean;
   source: string;
   source_metadata: Record<string, unknown> | null;
 }
@@ -149,6 +154,7 @@ function chunks<T>(items: T[]): T[][] {
 
 /** Runs one `in.(…)` lookup per chunk of ids and concatenates the rows. */
 async function lookup<T>(
+  table: string,
   ids: string[],
   query: (chunk: string[]) => PromiseLike<{ data: unknown; error: { message: string } | null }>,
 ): Promise<T[]> {
@@ -157,7 +163,9 @@ async function lookup<T>(
   const rows: T[] = [];
   for (const { data, error } of results) {
     if (error) throw new FunnelReadError(error.message);
-    rows.push(...((data ?? []) as T[]));
+    const chunkRows = (data ?? []) as T[];
+    if (chunkRows.length >= MAX_ROWS) logger.warn("mirae.lookup_may_be_truncated", { table });
+    rows.push(...chunkRows);
   }
   return rows;
 }
@@ -194,24 +202,12 @@ export async function listMiraeLeads(
     .order("id", { ascending: true })
     .limit(PAGE_SIZE + 1);
 
-  // Two disjunctions, ANDed inside ONE `or=` tree (`or=(and(or(…),or(…)))`) rather than two
-  // `or=` params, so the result does not depend on how PostgREST combines repeated keys.
-  const conditions: string[] = [];
-  // A personal contact's deals are not listed (spec 21), the same id primitive as
-  // `listLeadsHandler`, in the WHERE before the limit so the cursor describes the visible set.
-  // Unlike there, `contact_id IS NULL` is kept explicitly: `NOT IN` alone drops the NULLs, and a
-  // lead without a contact is still a lead of the funnel.
-  const personal = await idsDeContatosPessoais(supabase, organizationId);
-  if (personal.length > 0) {
-    conditions.push(`or(contact_id.is.null,contact_id.not.in.(${personal.join(",")}))`);
-  }
   const cursor = q.cursor ? decodeCursor(q.cursor) : null;
   if (cursor) {
-    conditions.push(
-      `or(created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id}))`,
+    query = query.or(
+      `created_at.gt.${cursor.created_at},and(created_at.eq.${cursor.created_at},id.gt.${cursor.id})`,
     );
   }
-  if (conditions.length > 0) query = query.or(`and(${conditions.join(",")})`);
 
   const { data, error } = await query;
   if (error) throw new FunnelReadError(error.message);
@@ -230,48 +226,59 @@ export async function listMiraeLeads(
   const contactIds = page.flatMap((l) => (l.contact_id ? [l.contact_id] : []));
 
   const [stages, contacts, conversations] = await Promise.all([
-    lookup<StageRow>(stageIds, (ids) =>
+    lookup<StageRow>("crm_stages", stageIds, (ids) =>
       supabase
         .from("crm_stages")
         .select("id, name, is_won, is_lost")
         .eq("organization_id", organizationId)
         .in("id", ids),
     ),
-    lookup<ContactRow>(contactIds, (ids) =>
+    lookup<ContactRow>("contacts", contactIds, (ids) =>
       supabase
         .from("contacts")
-        .select("id, phone_number, tags, source, source_metadata")
+        .select("id, phone_number, is_personal, source, source_metadata")
         .eq("organization_id", organizationId)
         .in("id", ids),
     ),
-    lookup<ConversationRow>(contactIds, (ids) =>
+    lookup<ConversationRow>("conversations", contactIds, (ids) =>
       supabase
         .from("conversations")
         .select("contact_id, last_inbound_at, last_outbound_at")
         .eq("organization_id", organizationId)
         .eq("is_group", false)
-        .in("contact_id", ids)
-        .order("last_message_at", { ascending: false, nullsFirst: false }),
+        .in("contact_id", ids),
     ),
   ]);
 
   const stageById = new Map(stages.map((s) => [s.id, s]));
   const contactById = new Map(contacts.map((c) => [c.id, c]));
-  // Rows come newest first: the first one seen per contact is its most recent conversation.
-  const conversationByContact = new Map<string, ConversationRow>();
+  // The latest of each across the contact's 1:1 conversations: the studio may write from one
+  // number while the client last answered on another.
+  const lastByContact = new Map<string, { inbound: string | null; outbound: string | null }>();
   for (const conv of conversations) {
-    if (!conversationByContact.has(conv.contact_id))
-      conversationByContact.set(conv.contact_id, conv);
+    const acc = lastByContact.get(conv.contact_id) ?? { inbound: null, outbound: null };
+    acc.inbound = latest(acc.inbound, conv.last_inbound_at);
+    acc.outbound = latest(acc.outbound, conv.last_outbound_at);
+    lastByContact.set(conv.contact_id, acc);
   }
+
+  // A personal contact's deals are not listed (spec 21). Filtered here, after the contact lookup,
+  // and not as a `NOT IN` before the limit: that id list is capped (500 rows, then the URL budget)
+  // and fails open on error, so it could let personal deals through. A page may therefore hold
+  // fewer than PAGE_SIZE leads, or none, and still carry a `next_cursor`.
+  const visible = page.filter((lead) => {
+    const contact = lead.contact_id ? contactById.get(lead.contact_id) : undefined;
+    return !contact?.is_personal;
+  });
 
   return {
     ok: true,
     next_cursor,
-    data: page.map((lead) => {
+    data: visible.map((lead) => {
       const stage = stageById.get(lead.stage_id);
       const lostFrom = lead.lost_from_stage_id ? stageById.get(lead.lost_from_stage_id) : undefined;
       const contact = lead.contact_id ? contactById.get(lead.contact_id) : undefined;
-      const conv = lead.contact_id ? conversationByContact.get(lead.contact_id) : undefined;
+      const messages = lead.contact_id ? lastByContact.get(lead.contact_id) : undefined;
       // Origin is the contact's (`origemDoContato`, the same reading as the contact screen). A lead
       // without a contact falls back to its own `source`/`source_metadata` through the same rule.
       const origin = contact
@@ -293,13 +300,19 @@ export async function listMiraeLeads(
           ? { id: lead.lost_from_stage_id, name: lostFrom?.name ?? "" }
           : null,
         origin: { source: origin.origem, campaign: origin.campanha },
-        contact: { phone: contact?.phone_number ?? null, tags: contact?.tags ?? [] },
-        last_inbound_at: conv?.last_inbound_at ?? null,
-        last_outbound_at: conv?.last_outbound_at ?? null,
+        contact: { phone: contact?.phone_number ?? null },
+        last_inbound_at: messages?.inbound ?? null,
+        last_outbound_at: messages?.outbound ?? null,
         url: leadUrl(lead.id),
       };
     }),
   };
+}
+
+function latest(a: string | null, b: string | null): string | null {
+  if (a === null) return b;
+  if (b === null) return a;
+  return Date.parse(b) > Date.parse(a) ? b : a;
 }
 
 export interface MiraePipeline {
@@ -309,7 +322,11 @@ export interface MiraePipeline {
   stages: Array<{ id: string; name: string; position: number; is_won: boolean; is_lost: boolean }>;
 }
 
-/** The organization's live funnels and their live stages, for Mirae's "milestone → stage" mapping. */
+/**
+ * The organization's live funnels and their live stages, for Mirae's "milestone → stage" mapping.
+ * Archived stages are left out on purpose (nothing should be moved into them), so a lead still
+ * parked in one arrives from `/leads` with a stage id this list does not carry.
+ */
 export async function listMiraePipelines(
   supabase: SupabaseClient,
   organizationId: string,
@@ -326,6 +343,7 @@ export async function listMiraePipelines(
   if (rows.length === 0) return [];
 
   const stages = await lookup<StageRow & { pipeline_id: string; position: number }>(
+    "crm_stages",
     rows.map((p) => p.id),
     (ids) =>
       supabase
