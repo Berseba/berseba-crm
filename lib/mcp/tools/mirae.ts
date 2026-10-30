@@ -347,6 +347,12 @@ async function failure(err: unknown, o: FailureOptions) {
         await tooLateTodo(o.ready, o.appointmentId, o.verbo ?? "mudar"),
         "faltando pouco para o horário, quem remarca ou cancela é a equipe. ",
       );
+    case "no_balance":
+      return handOff(
+        TODO_BY_CODE.no_balance!,
+        "as aulas do plano dela já estão todas marcadas ou usadas: diga que a nossa equipe vai " +
+          "conferir o plano. ",
+      );
     default:
       return handOff(TODO_BY_CODE[err.code] ?? TODO_DEFAULT);
   }
@@ -354,8 +360,10 @@ async function failure(err: unknown, o: FailureOptions) {
 
 /**
  * A write: one retry with the SAME key when there was no answer or a 5xx, never a new key.
- * After a lost first attempt, only a success is trusted: any refusal of the retry (the first
- * request may still be running, or may hold the slot it took) hands off as unconfirmed.
+ * After a first attempt that may have written (no answer, 500), only a success is trusted: any
+ * refusal of the retry (the first request may still be running, or may hold the slot it took)
+ * hands off as unconfirmed. A 503 `busy_try_again` wrote nothing, so the retry's answer stands,
+ * unless it is lost too.
  */
 async function write<T>(
   run: () => Promise<T>,
@@ -367,10 +375,11 @@ async function write<T>(
     return await run();
   } catch (first) {
     if (!lost(first)) return failure(first, o);
+    const mayHaveWritten = (first as MiraeApiError).code !== "busy_try_again";
     try {
       return await run();
     } catch (second) {
-      return failure(second, { ...o, unconfirmed: true });
+      return failure(second, { ...o, unconfirmed: mayHaveWritten || lost(second) });
     }
   }
 }
@@ -459,7 +468,7 @@ const nomeCompleto = z
   .max(120)
   .optional()
   .describe(
-    "Nome completo de quem vai ser atendida, só quando a ferramenta pediu (mais de um cadastro no telefone) ou quando o horário é para outra pessoa.",
+    "Nome completo de quem vai ser atendida, quando a ferramenta pediu (mais de um cadastro no telefone) ou quando o horário é para outra pessoa e mirae_my_appointments veio com pessoa null. Se veio o cadastro de outra pessoa, o estúdio ignora o nome: passe para a equipe.",
   );
 
 const appointmentId = (from: string) =>
@@ -684,8 +693,13 @@ export const miraeFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
         service,
         date: input.data,
         period: input.periodo ? PERIOD[input.periodo] : undefined,
-        // A class is only for people of the studio; Mirae identifies her by the phone.
-        ...(service === "class" ? { phone: ready.phone, name: input.nome_completo } : {}),
+        // A class is only for people of the studio, and a reschedule only for who is in the
+        // appointment: Mirae identifies her by the phone. With `appointment_id` the options are
+        // for that appointment: no balance needed, and its current time does not come back.
+        ...(service === "class" || reschedule
+          ? { phone: ready.phone, name: input.nome_completo }
+          : {}),
+        ...(reschedule ? { appointmentId: reschedule.id } : {}),
       });
       if (slots.length === 0) {
         const quando = [
@@ -710,7 +724,12 @@ export const miraeFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
           .map((s) => opcaoView(ready.config, s, service, reschedule?.id)),
       };
     } catch (err) {
-      return failure(err, { ctx, ready, nameGiven });
+      return failure(err, {
+        ctx,
+        ready,
+        nameGiven,
+        ...(reschedule ? { appointmentId: reschedule.id, verbo: "remarcar" } : {}),
+      });
     }
   },
 };

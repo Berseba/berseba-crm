@@ -181,14 +181,20 @@ export async function listAvailability(
     from?: string;
     to?: string;
     period?: "morning" | "afternoon" | "evening";
-    /** Required for a class: it is only for people of the studio with a plan. */
+    /** Required for a class and for a reschedule: Mirae identifies the person by it. */
     phone?: string;
     name?: string;
+    /** Options to reschedule this appointment (same service; no balance needed). */
+    appointmentId?: string;
     limit?: number;
   },
 ): Promise<MiraeSlot[]> {
-  return (await request(config, "GET", "/availability", availabilitySchema, { query: params }))
-    .data;
+  const { appointmentId, ...query } = params;
+  return (
+    await request(config, "GET", "/availability", availabilitySchema, {
+      query: { ...query, appointment_id: appointmentId },
+    })
+  ).data;
 }
 
 export async function listAppointments(
