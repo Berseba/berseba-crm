@@ -8,6 +8,12 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.11.0] — 2026-10-30
+
+### Adicionado
+
+- **Ferramentas de agenda do Mirae para a Fiore Pilates** A assistente da Fiore Pilates passa a ter ferramentas para a agenda do Mirae: ver os agendamentos da pessoa da conversa, os planos com valores e os horários livres de avaliação inicial e de aula, com no máximo duas opções escolhidas pelo próprio estúdio. Também há ferramentas para marcar, remarcar e cancelar, que só entram em uso quando alguém as liga uma a uma na tela do agente. Quando uma avaliação é marcada, o card da pessoa vai sozinho para a etapa de avaliação agendada. Elas só existem para as organizações configuradas na instalação; para as demais empresas nada muda. Quando o Mirae não consegue atender, o agente passa a conversa para a equipe com um resumo do que falta fazer.
+
 ## [2.10.1] — 2026-10-24
 
 ### Corrigido
@@ -9521,7 +9527,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.10.1...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.11.0...HEAD
+[2.11.0]: https://github.com/berseba/berseba-crm/compare/v2.10.1...v2.11.0
 [2.10.1]: https://github.com/berseba/berseba-crm/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/berseba/berseba-crm/compare/v2.9.0...v2.10.0
 [2.9.0]: https://github.com/berseba/berseba-crm/compare/v2.8.0...v2.9.0
