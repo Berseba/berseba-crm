@@ -238,6 +238,17 @@ const schema = z.object({
   AVEC_API_KEY: z.string().optional().default(""),
   /** Comma-separated organization ids that get the `avec_*` agent tools. */
   AVEC_API_ORG_IDS: z.string().optional().default(""),
+
+  // ─── Berseba: Mirae agenda API (Fiore Pilates) — OPTIONAL, OFF BY DEFAULT ───
+  //
+  // Install level, like the avec block above. Off unless all four are set; parsed (and refused
+  // when malformed) by `lib/integrations/mirae/config.ts`, never here.
+  MIRAE_API_URL: z.string().optional().default(""),
+  MIRAE_API_KEY: z.string().optional().default(""),
+  /** The studio's slug in Mirae, e.g. `fiore-pilates-e-fisioterapia`. */
+  MIRAE_API_ORG_SLUG: z.string().optional().default(""),
+  /** Comma-separated organization ids that get the `mirae_*` agent tools. */
+  MIRAE_API_ORG_IDS: z.string().optional().default(""),
   // ─── Videochamada (Jitsi Meet, #2440) — OPCIONAL, DESLIGADA POR PADRÃO ───
   //
   // Mesmo desenho de WACALLS_API_BASE_URL: NUNCA `required()`. Vazio = a

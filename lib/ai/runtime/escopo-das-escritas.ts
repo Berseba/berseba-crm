@@ -55,6 +55,11 @@ export const ESCOPO_DAS_ESCRITAS: Readonly<Record<string, Readonly<Record<string
   avec_book: { opcao_id: "configuracao" },
   avec_reschedule: { appointment_id: "configuracao", opcao_id: "configuracao" },
   avec_cancel: { appointment_id: "configuracao" },
+  // ---- Berseba: Mirae agenda (Fiore Pilates). Same reason: Mirae ids, scoped by Mirae to the
+  // phone of the turn's contact, see lib/mcp/tools/mirae.ts.
+  mirae_book: { opcao_id: "configuracao" },
+  mirae_reschedule: { appointment_id: "configuracao", opcao_id: "configuracao" },
+  mirae_cancel: { appointment_id: "configuracao" },
 
   // ---- agenda ----
   crm_book_appointment: { contact_id: "contato", owner_user_id: "configuracao" },

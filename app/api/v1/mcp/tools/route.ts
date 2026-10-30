@@ -23,6 +23,7 @@ import { orgAtivaDaApi } from "@/lib/auth/require-role";
 import { allTools } from "@/lib/mcp/tools";
 import { TOOL_CATALOG, deCapacidadeDesligada, deModuloDesligado } from "@/lib/mcp/tools/catalog";
 import { isAvecToolHiddenFor } from "@/lib/integrations/avec/config"; // Berseba
+import { isMiraeToolHiddenFor } from "@/lib/integrations/mirae/config"; // Berseba
 import { capacidadesDaOrganizacao } from "@/lib/organizacao/capacidades";
 import { modulosLigados } from "@/lib/instalacao/modulos";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -61,6 +62,7 @@ export async function GET(_req: NextRequest): Promise<Response> {
   const schemaPorNome = new Map(allTools.map((t) => [t.name, t.inputSchema]));
   const tools = servidas
     .filter((c) => !isAvecToolHiddenFor(c.id, activeOrg.orgId)) // Berseba
+    .filter((c) => !isMiraeToolHiddenFor(c.id, activeOrg.orgId)) // Berseba
     .filter((c) => !deModuloDesligado(c.id, ligados) && !deCapacidadeDesligada(c.id, capacidades))
     .map((capacidade) => ({
     ...capacidade,

@@ -36,7 +36,12 @@ import {
   vagasExigidasPeloPacote,
 } from "@/lib/mcp/tools/selecao-por-pacote";
 
-const CATALOGO = TOOL_CATALOG.map((t) => ({
+// Berseba: without the avec and Mirae tools, which the route serves only to the organizations in
+// AVEC_API_ORG_IDS and MIRAE_API_ORG_IDS (lib/integrations/{avec,mirae}/config.ts); the picker
+// sums the served list, so no organization sees both sets.
+const CATALOGO = TOOL_CATALOG.filter(
+  (t) => !t.name.startsWith("avec_") && !t.name.startsWith("mirae_"),
+).map((t) => ({
   name: t.name,
   risco: t.risco,
   pacotes: t.pacotes,

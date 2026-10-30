@@ -19,6 +19,15 @@ import {
   avecMyAppointments,
   avecReschedule,
 } from "./avec";
+// Berseba: Mirae agenda tools (Fiore Pilates)
+import {
+  miraeBook,
+  miraeCancel,
+  miraeFreeSlots,
+  miraeMyAppointments,
+  miraeReschedule,
+  miraeServices,
+} from "./mirae";
 import { TOOL_CATALOG, VALID_TOOL_IDS } from "./catalog";
 import { crmSearchContacts, crmGetContact, crmProposeContactField } from "./contacts";
 import {
@@ -116,6 +125,13 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   avecBook,
   avecReschedule,
   avecCancel,
+  // Berseba: Mirae agenda (read, then write)
+  miraeMyAppointments,
+  miraeServices,
+  miraeFreeSlots,
+  miraeBook,
+  miraeReschedule,
+  miraeCancel,
   // read
   crmListEventTypes,
   crmFindFreeSlots,
