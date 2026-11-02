@@ -24,6 +24,7 @@ import { allTools } from "@/lib/mcp/tools";
 import { TOOL_CATALOG, deCapacidadeDesligada, deModuloDesligado } from "@/lib/mcp/tools/catalog";
 import { isAvecToolHiddenFor } from "@/lib/integrations/avec/config"; // Berseba
 import { isMiraeToolHiddenFor } from "@/lib/integrations/mirae/config"; // Berseba
+import { isJoOsToolHiddenFor } from "@/lib/integrations/joos/config"; // Berseba
 import { capacidadesDaOrganizacao } from "@/lib/organizacao/capacidades";
 import { modulosLigados } from "@/lib/instalacao/modulos";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -63,6 +64,7 @@ export async function GET(_req: NextRequest): Promise<Response> {
   const tools = servidas
     .filter((c) => !isAvecToolHiddenFor(c.id, activeOrg.orgId)) // Berseba
     .filter((c) => !isMiraeToolHiddenFor(c.id, activeOrg.orgId)) // Berseba
+    .filter((c) => !isJoOsToolHiddenFor(c.id, activeOrg.orgId)) // Berseba
     .filter((c) => !deModuloDesligado(c.id, ligados) && !deCapacidadeDesligada(c.id, capacidades))
     .map((capacidade) => ({
     ...capacidade,

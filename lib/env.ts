@@ -249,6 +249,16 @@ const schema = z.object({
   MIRAE_API_ORG_SLUG: z.string().optional().default(""),
   /** Comma-separated organization ids that get the `mirae_*` agent tools. */
   MIRAE_API_ORG_IDS: z.string().optional().default(""),
+
+  // ─── Berseba: Jo OS evaluation agenda (Instituto Jordão) — OPTIONAL, OFF BY DEFAULT ───
+  //
+  // Install level, like the Mirae block above. Off unless all three are set; parsed (and refused
+  // when malformed) by `lib/integrations/joos/config.ts`, never here.
+  /** The Jo OS function URL (`.../functions/v1/crm-agenda-avaliacao`). */
+  JOOS_AGENDA_URL: z.string().optional().default(""),
+  JOOS_AGENDA_SECRET: z.string().optional().default(""),
+  /** Comma-separated organization ids that get the `joos_*` agent tools. */
+  JOOS_AGENDA_ORG_IDS: z.string().optional().default(""),
   // ─── Videochamada (Jitsi Meet, #2440) — OPCIONAL, DESLIGADA POR PADRÃO ───
   //
   // Mesmo desenho de WACALLS_API_BASE_URL: NUNCA `required()`. Vazio = a

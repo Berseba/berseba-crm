@@ -28,6 +28,8 @@ import {
   miraeReschedule,
   miraeServices,
 } from "./mirae";
+// Berseba: Jo OS evaluation slots (Instituto Jordão)
+import { joosEvaluationSlots } from "./joos";
 import { TOOL_CATALOG, VALID_TOOL_IDS } from "./catalog";
 import { crmSearchContacts, crmGetContact, crmProposeContactField } from "./contacts";
 import {
@@ -132,6 +134,8 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   miraeBook,
   miraeReschedule,
   miraeCancel,
+  // Berseba: Jo OS evaluation slots (read only)
+  joosEvaluationSlots,
   // read
   crmListEventTypes,
   crmFindFreeSlots,
