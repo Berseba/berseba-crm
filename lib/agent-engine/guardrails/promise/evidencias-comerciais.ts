@@ -4,7 +4,7 @@
  * Não recebe histórico, notas do contato, prompt do agente ou argumentos de tool.
  */
 export interface EvidenciaComercial {
-  // Berseba: "agenda" = a booking the server wrote this turn (evidencia-de-agenda.berseba.ts).
+  // Berseba: "agenda" = what avec told the server this turn (evidencia-de-agenda.berseba.ts).
   origem: "catalogo" | "conhecimento" | "agenda";
   referencia: string;
   titulo: string;
@@ -13,7 +13,7 @@ export interface EvidenciaComercial {
 
 import { canonizarTipoDeFonte, type TipoDeFonteId } from "@/lib/ai/rag/tipos-de-fonte";
 import type { Queryable } from "../../queue/queue";
-import { evidenciaDoAgendamento } from "./evidencia-de-agenda.berseba";
+import { evidenciasDaAgenda } from "./evidencia-de-agenda.berseba";
 
 /**
  * Lista de PERMISSÃO, não de bloqueio: "Conversas anteriores" guarda o que o
@@ -149,10 +149,9 @@ export function criarEvidenciasComerciaisDoTurno(fontesHabilitadas: readonly str
     }
   }
 
-  /** Berseba: only a successful avec write result, as the server returned it. */
+  /** Berseba: only a successful avec agenda result, as the server returned it. */
   function registrarAgendamento(ferramenta: string, resultado: unknown) {
-    const evidencia = evidenciaDoAgendamento(ferramenta, resultado);
-    if (evidencia) guardar(evidencia);
+    for (const evidencia of evidenciasDaAgenda(ferramenta, resultado)) guardar(evidencia);
   }
 
   return {

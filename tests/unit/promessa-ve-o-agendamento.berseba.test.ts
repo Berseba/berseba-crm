@@ -18,8 +18,8 @@ import { describe, expect, it } from "vitest";
 
 import { turnoCaladoPorVetoPedePassagem } from "@/lib/agent-engine/agent/turno-calado-por-veto.berseba";
 import {
-  FERRAMENTAS_QUE_GRAVAM_NO_AVEC,
-  evidenciaDoAgendamento,
+  FERRAMENTAS_DE_AGENDA_DO_AVEC,
+  evidenciasDaAgenda,
 } from "@/lib/agent-engine/guardrails/promise/evidencia-de-agenda.berseba";
 import { criarEvidenciasComerciaisDoTurno } from "@/lib/agent-engine/guardrails/promise/evidencias-comerciais";
 
@@ -29,7 +29,7 @@ const RESULTADO_DO_BOOK = {
     servico: "Design de sobrancelha",
     dia_semana: "sábado",
     data: "2026-11-07",
-    data_br: "07/11/2026",
+    data_br: "07/11",
     inicio: "14:30",
     termina_por_volta_de: "15:00",
     profissional: "Rebeca",
@@ -38,64 +38,91 @@ const RESULTADO_DO_BOOK = {
   etapas: [],
 };
 
+const VISTA = (id: string, service: string) => ({
+  appointment_id: id,
+  service,
+  professional: "Eliton",
+  weekday: "quarta-feira",
+  date: "2026-11-04",
+  start_time: "16:00",
+  status: "Agendado",
+});
+
 const RESULTADO_DO_RESCHEDULE = {
   ok: true,
-  agendamento: {
-    appointment_id: "a-2",
-    service: "Corte",
-    professional: "Eliton",
-    weekday: "quarta-feira",
-    date: "2026-11-04",
-    start_time: "16:00",
-    data_br: "04/11/2026",
-  },
+  agendamento: { ...VISTA("a-2", "Corte"), data_br: "04/11" },
   aviso: "o appointment_id pode ter mudado: use o deste resultado daqui em diante.",
 };
 
-describe("evidenciaDoAgendamento", () => {
+describe("evidenciasDaAgenda", () => {
   it("a successful avec_book becomes agenda evidence with the visit", () => {
-    const e = evidenciaDoAgendamento("avec_book", RESULTADO_DO_BOOK);
-    expect(e).not.toBeNull();
+    const [e, ...resto] = evidenciasDaAgenda("avec_book", RESULTADO_DO_BOOK);
+    expect(resto).toEqual([]);
     expect(e!.origem).toBe("agenda");
-    expect(e!.referencia).toBe("avec_book:07/11/2026:14:30");
     expect(JSON.parse(e!.conteudo)).toEqual({
-      situacao: "confirmado pelo sistema de agenda",
+      fonte: "sistema de agenda do salão",
+      situacao: "Agendado",
       servico: "Design de sobrancelha",
       dia_semana: "sábado",
-      data: "07/11/2026",
+      data: "07/11",
       inicio: "14:30",
       profissional: "Rebeca",
     });
   });
 
   it("a successful avec_reschedule reads the appointment view fields", () => {
-    const e = evidenciaDoAgendamento("avec_reschedule", RESULTADO_DO_RESCHEDULE);
+    const [e] = evidenciasDaAgenda("avec_reschedule", RESULTADO_DO_RESCHEDULE);
     expect(e!.titulo).toContain("remarcado");
     expect(JSON.parse(e!.conteudo)).toMatchObject({
       servico: "Corte",
       dia_semana: "quarta-feira",
-      data: "04/11/2026",
+      data: "04/11",
       inicio: "16:00",
       profissional: "Eliton",
     });
   });
 
-  it("a failed or partial write is never evidence", () => {
-    expect(evidenciaDoAgendamento("avec_book", { ok: false, mensagem: "x" })).toBeNull();
-    expect(
-      evidenciaDoAgendamento("avec_book", { ok: false, parcial: true, handoff: true }),
-    ).toBeNull();
-    expect(evidenciaDoAgendamento("avec_book", { error: "boom" })).toBeNull();
-    expect(evidenciaDoAgendamento("avec_book", null)).toBeNull();
+  it("the appointments the client already has are evidence too, one per visit", () => {
+    const lidas = evidenciasDaAgenda("avec_my_appointments", {
+      ok: true,
+      agendamentos: [VISTA("a-1", "Corte"), VISTA("a-3", "Escova")],
+      total: 2,
+    });
+    expect(lidas).toHaveLength(2);
+    expect(lidas[0]!.titulo).toContain("consultado");
+    expect(new Set(lidas.map((e) => e.referencia)).size).toBe(2);
   });
 
-  it("needs the day and the hour, and only avec write tools count", () => {
+  it("two visits at the same day and hour keep two keys", () => {
+    const outra = {
+      ...RESULTADO_DO_BOOK,
+      agendamento: { ...RESULTADO_DO_BOOK.agendamento, servico: "Corte" },
+    };
+    const store = criarEvidenciasComerciaisDoTurno([]);
+    store.registrarAgendamento("avec_book", RESULTADO_DO_BOOK);
+    store.registrarAgendamento("avec_book", outra);
+    expect(store.ler("sábado às 14h30").filter((e) => e.origem === "agenda")).toHaveLength(2);
+  });
+
+  it("a failed or partial result is never evidence", () => {
+    expect(evidenciasDaAgenda("avec_book", { ok: false, mensagem: "x" })).toEqual([]);
+    expect(evidenciasDaAgenda("avec_book", { ok: false, parcial: true, handoff: true })).toEqual([]);
+    expect(evidenciasDaAgenda("avec_book", { error: "boom" })).toEqual([]);
+    expect(evidenciasDaAgenda("avec_book", null)).toEqual([]);
+    expect(evidenciasDaAgenda("avec_my_appointments", { ok: true, agendamentos: "x" })).toEqual([]);
+  });
+
+  it("needs the day and the hour, and only avec agenda tools count", () => {
     expect(
-      evidenciaDoAgendamento("avec_book", { ok: true, agendamento: { servico: "Corte" } }),
-    ).toBeNull();
-    expect(evidenciaDoAgendamento("avec_free_slots", RESULTADO_DO_BOOK)).toBeNull();
-    expect(evidenciaDoAgendamento("avec_cancel", RESULTADO_DO_BOOK)).toBeNull();
-    expect([...FERRAMENTAS_QUE_GRAVAM_NO_AVEC].sort()).toEqual(["avec_book", "avec_reschedule"]);
+      evidenciasDaAgenda("avec_book", { ok: true, agendamento: { servico: "Corte" } }),
+    ).toEqual([]);
+    expect(evidenciasDaAgenda("avec_free_slots", RESULTADO_DO_BOOK)).toEqual([]);
+    expect(evidenciasDaAgenda("avec_cancel", RESULTADO_DO_BOOK)).toEqual([]);
+    expect([...FERRAMENTAS_DE_AGENDA_DO_AVEC].sort()).toEqual([
+      "avec_book",
+      "avec_my_appointments",
+      "avec_reschedule",
+    ]);
   });
 });
 
@@ -153,8 +180,8 @@ describe("turnoCaladoPorVetoPedePassagem", () => {
 describe("turn wiring (source contract)", () => {
   const turno = readFileSync(join(process.cwd(), "lib/agent-engine/agent/inbound-turn.ts"), "utf8");
 
-  it("avec write results are registered as evidence after the server answers", () => {
-    const i = turno.indexOf("FERRAMENTAS_QUE_GRAVAM_NO_AVEC.has(name)");
+  it("avec agenda results are registered as evidence after the server answers", () => {
+    const i = turno.indexOf("FERRAMENTAS_DE_AGENDA_DO_AVEC.has(name)");
     expect(i).toBeGreaterThan(-1);
     const bloco = turno.slice(i, i + 700);
     expect(bloco).toContain("const resultado = await executeOriginal(...args);");

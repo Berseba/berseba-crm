@@ -217,7 +217,7 @@ import {
   POR_QUE_DO_TURNO_CALADO,
   turnoCaladoPorVetoPedePassagem,
 } from './turno-calado-por-veto.berseba';
-import { FERRAMENTAS_QUE_GRAVAM_NO_AVEC } from '../guardrails/promise/evidencia-de-agenda.berseba';
+import { FERRAMENTAS_DE_AGENDA_DO_AVEC } from '../guardrails/promise/evidencia-de-agenda.berseba';
 import { criarTravaDeDuplicata } from './near-dup';
 import { vetoReason } from '@/lib/leads/veto-activity';
 import { corposEnviadosDesdeUltimaInbound } from './memoria-envio';
@@ -4622,9 +4622,9 @@ async function executarTurnoDoAgente(
               };
               continue;
             }
-            // Berseba: a visit written in avec is proof for the promise reviewer
+            // Berseba: what avec answered is proof for the promise reviewer
             // (evidencia-de-agenda.berseba.ts). The result comes from the server.
-            if (FERRAMENTAS_QUE_GRAVAM_NO_AVEC.has(name) && typeof mcpTool.execute === 'function') {
+            if (FERRAMENTAS_DE_AGENDA_DO_AVEC.has(name) && typeof mcpTool.execute === 'function') {
               const executeOriginal = mcpTool.execute.bind(mcpTool);
               rawTools[name] = {
                 ...mcpTool,
