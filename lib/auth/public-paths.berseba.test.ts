@@ -8,7 +8,7 @@
  * Discovery by `git ls-files`, like `tests/unit/callback-oauth-alcancavel.test.ts`:
  * the next platform is covered without anyone remembering this file.
  *
- * The Mirae read routes (`/api/v1/mirae/*`, Bearer-only) are pinned at the bottom: same failure
+ * The Mirae routes (`/api/v1/mirae/*`, Bearer-only) are pinned at the bottom: same failure
  * mode (a route test calls the handler directly, the proxy is never in the way).
  */
 import { execFileSync } from "node:child_process";
@@ -105,8 +105,8 @@ describe("through the proxy", () => {
   });
 });
 
-describe("the Mirae read routes get past the proxy, and nothing next to them does", () => {
-  it.each(["/api/v1/mirae/leads", "/api/v1/mirae/pipelines"])(
+describe("the Mirae routes get past the proxy, and nothing next to them does", () => {
+  it.each(["/api/v1/mirae/leads", "/api/v1/mirae/pipelines", "/api/v1/mirae/milestones"])(
     "%s is public (Bearer checked in the route)",
     (path) => {
       expect(isPublicPath(path)).toBe(true);
@@ -119,16 +119,22 @@ describe("the Mirae read routes get past the proxy, and nothing next to them doe
     "/api/v1/mirae/leads/",
     "/api/v1/mirae/leads/11111111-1111-4111-8111-111111111111",
     "/api/v1/mirae/pipelines/x",
+    "/api/v1/mirae/milestones/",
+    "/api/v1/mirae/milestones/x",
     "/api/v1/mirae/contacts",
   ])("%s stays private", (path) => {
     expect(isPublicPath(path)).toBe(false);
   });
 
-  it("every route file under app/api/v1/mirae/ is one of the two", () => {
+  it("every route file under app/api/v1/mirae/ is one of the three", () => {
     const paths = (readdirSync("app/api/v1/mirae", { recursive: true }) as string[])
       .filter((rel) => rel.endsWith("route.ts"))
       .map((rel) => routePath(`app/api/v1/mirae/${rel.split("\\").join("/")}`))
       .sort();
-    expect(paths).toEqual(["/api/v1/mirae/leads", "/api/v1/mirae/pipelines"]);
+    expect(paths).toEqual([
+      "/api/v1/mirae/leads",
+      "/api/v1/mirae/milestones",
+      "/api/v1/mirae/pipelines",
+    ]);
   });
 });
