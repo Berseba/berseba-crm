@@ -212,6 +212,32 @@ describe("joos_evaluation_slots", () => {
     expect(calls).toHaveLength(0);
   });
 
+  it("a slot that already started today is not offered", async () => {
+    // It is Monday 20h in Brasília: 09:00 and 19:30 of today are past, 21:00 is not.
+    answer(200, ok([slot("2026-11-02", "09:00"), slot("2026-11-02", "19:30"), slot("2026-11-02", "21:00")]));
+    const r = await run({ unidade: "1", data: "2026-11-02" });
+    expect((r.opcoes as Args[]).map((o) => o.hora)).toEqual(["21:00"]);
+  });
+
+  it("a day with only past slots hands off instead of offering one", async () => {
+    answer(200, ok([slot("2026-11-02", "09:00")]));
+    const r = await run({ unidade: "1", data: "2026-11-02" });
+    expect(r).toMatchObject({ ok: false, handoff: true, motivo: "sem_horario" });
+  });
+
+  it("a date that does not exist is refused without calling Jo OS", async () => {
+    for (const data of ["2026-13-45", "2026-02-30"]) {
+      const r = await run({ unidade: "1", data });
+      expect(r).toMatchObject({ ok: false, handoff: false });
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("tells the agent the real handoff tool name", () => {
+    expect(tools.joosEvaluationSlots.description).toContain("crm_request_human_handoff");
+    expect(tools.joosEvaluationSlots.description).not.toMatch(/(?<!crm_)request_human_handoff/);
+  });
+
   it("an unknown unit asks the person, naming the units that have slots", async () => {
     answer(200, ok(SEMANA));
     const r = await run({ unidade: "7" });

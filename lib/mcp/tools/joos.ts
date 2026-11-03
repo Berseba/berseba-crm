@@ -24,7 +24,7 @@ export const JOOS_MAX_OPCOES = 3;
 
 const HANDOFF_INSTRUCTION =
   "Não tente de novo. Diga à pessoa, sem falar de erro nem de sistema, que a nossa equipe vai " +
-  "ver o melhor horário e já responde por aqui. Depois passe para a equipe (request_human_handoff) " +
+  "ver o melhor horário e já responde por aqui. Depois passe para a equipe (crm_request_human_handoff) " +
   "com a unidade, o dia e o período que a pessoa quer, e o que a equipe precisa fazer (o campo todo).";
 
 const TODO_DEFAULT = "Ver na agenda de avaliações do Jo OS um horário e responder a pessoa.";
@@ -63,6 +63,15 @@ function alertIntegration(ctx: McpContext, code: string, status: number): void {
 /** Today in Brasília, `YYYY-MM-DD`. */
 export function todayInBrasilia(now = new Date()): string {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);
+}
+
+/** `YYYY-MM-DD` that exists on the calendar: "2026-13-45" and "2026-02-30" do not. */
+export function isRealDate(value: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if (!m) return false;
+  const [y, mo, d] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const t = new Date(Date.UTC(y, mo - 1, d));
+  return t.getUTCFullYear() === y && t.getUTCMonth() === mo - 1 && t.getUTCDate() === d;
 }
 
 const fold = (s: string) =>
@@ -121,6 +130,7 @@ export function pickOptions(slots: readonly JoOsSlot[], oneDay: boolean, max = J
 const date = z
   .string()
   .regex(/^\d{4}-\d{2}-\d{2}$/, "AAAA-MM-DD")
+  .refine(isRealDate, "uma data que exista")
   .optional();
 
 const evaluationSlotsShape = {
@@ -142,7 +152,7 @@ export const joosEvaluationSlots: McpToolDefinition<typeof evaluationSlotsShape>
     'exatamente as opções que vierem, com o texto delas (ex.: "terça, 03/11, às 15h"). Nunca ' +
     "ofereça horário que não veio daqui e nunca diga que está marcado ou confirmado. Quando a " +
     "pessoa escolher, diga que vai pedir para a equipe confirmar o horário e passe para a equipe " +
-    "(request_human_handoff) com unidade, dia e hora escolhidos. Lista vazia ou falha: siga a mensagem.",
+    "(crm_request_human_handoff) com unidade, dia e hora escolhidos. Lista vazia ou falha: siga a mensagem.",
   inputSchema: evaluationSlotsShape,
   category: "read",
   requiresRole: "agent",
@@ -151,6 +161,9 @@ export const joosEvaluationSlots: McpToolDefinition<typeof evaluationSlotsShape>
     const config = joOsConfigFor(ctx.organizationId);
     if (!config) {
       return refusal("joos_indisponivel", false, "esta ferramenta não está disponível nesta empresa.");
+    }
+    if (input.data && !isRealDate(input.data)) {
+      return { ok: false, handoff: false, mensagem: "essa data não existe: confira com a pessoa." };
     }
     const hoje = todayInBrasilia();
     if (input.data && input.data < hoje) {
@@ -186,7 +199,12 @@ export const joosEvaluationSlots: McpToolDefinition<typeof evaluationSlotsShape>
           (units.length ? `As unidades com horário são: ${units.sort().join(", ")}. Confirme com a pessoa.` : "Confirme com a pessoa."),
       };
     }
+    // A slot that already started is not an option: Jo OS answers by day, and today's morning
+    // is still in the list in the afternoon.
+    const agora = Date.now();
     const filtrados = daUnidade.filter((h) => {
+      const comeca = Date.parse(h.inicio);
+      if (!Number.isNaN(comeca) && comeca <= agora) return false;
       if (input.data && h.dia !== input.data) return false;
       return input.periodo ? PERIODOS[input.periodo](Number(h.hora.slice(0, 2))) : true;
     });
@@ -214,7 +232,7 @@ export const joosEvaluationSlots: McpToolDefinition<typeof evaluationSlotsShape>
       })),
       proximo_passo:
         "Ofereça as opções. Quando a pessoa escolher, NÃO diga que está marcado: diga que vai pedir " +
-        "para a equipe confirmar e passe para a equipe (request_human_handoff) com unidade, dia, hora " +
+        "para a equipe confirmar e passe para a equipe (crm_request_human_handoff) com unidade, dia, hora " +
         "e o avaliador_livre da opção escolhida.",
     };
   },
