@@ -12,6 +12,11 @@ export const ApiErrorCodes = {
   invalid_request: "invalid_request",
   validation_failed: "validation_failed", // Zod retornou erros de schema (422 também aceita)
   invalid_cursor: "invalid_cursor",
+  // POST /api/v1/avisos (#1418): `publicar_em` no futuro é recusado
+  // porque nada publica o aviso depois — gravar seria criar um recado que
+  // nunca chega. Código próprio para a tela distinguir de "corpo inválido" e
+  // oferecer o caminho: publicar agora ou enviar sem data.
+  aviso_agendado_nao_suportado: "aviso_agendado_nao_suportado",
 
   // Configuração de agentes: validação/estado ou indisponibilidade do provedor.
   prospecting_agent_session_failed: "prospecting_agent_session_failed",
@@ -116,6 +121,9 @@ export const ApiErrorCodes = {
   // (índice uniq_contacts_org_phone). O corpo traz `details.contact_id` para a
   // tela oferecer o contato existente em vez de só mostrar que deu erro.
   contact_exists: "contact_exists",
+  // POST/PATCH /api/v1/attendants/sectors com nome que já existe na organização
+  // (índice attendant_sectors_org_name_unique, migration 0801).
+  sector_name_taken: "sector_name_taken",
   duplicate_external_id: "duplicate_external_id",
   event_gone: "event_gone", // resend de run cujo event_log original foi apagado (on delete set null)
   no_actions_to_resend: "no_actions_to_resend", // resend de regra que não tem mais nenhuma ação de webhook — reenviar nada não é sucesso
@@ -177,6 +185,11 @@ export const ApiErrorCodes = {
   pagamento_do_periodo_pendente: "pagamento_do_periodo_pendente",
   channel_without_session: "channel_without_session", // operação de sessão (reiniciar, parear) pedida a canal que não tem sessão no transporte — o oficial
   janela_fechada: "janela_fechada", // POST /messages por token/agente com texto livre fora das 24h em canal com restrição (131047) — a saída é modelo aprovado (#1614)
+  // POST /api/v1/messages/{id}/retry (lib/messaging/reenvio.ts): a regra não permite reenviar (403),
+  // a mensagem pode ter chegado e falta a confirmação (409), ou outro toque já travou a linha (409).
+  reenvio_indisponivel: "reenvio_indisponivel",
+  confirmacao_necessaria: "confirmacao_necessaria",
+  reenvio_em_curso: "reenvio_em_curso",
   invalid_state_transition: "invalid_state_transition",
   invalid_owner: "invalid_owner", // novo dono não é membro ativo agent+ da org (bulk assign, G3-04)
   trigger_kind_not_implemented: "trigger_kind_not_implemented", // publish de followup-flow com kind sem motor de enrollment (stage_change/conversation_end)
@@ -338,6 +351,14 @@ export const ApiErrorCodes = {
   campanha_agenda_invalida: "campanha_agenda_invalida", // 422: data no passado
   campanha_conteudo_invalido: "campanha_conteudo_invalido", // 422: texto vazio ou variável que não existe
   campanha_base_legal_invalida: "campanha_base_legal_invalida", // 422: interesse legítimo sem referência da LIA
+  // Migration 0710 (#1330, fatia 4): campanha pelo número oficial com modelo aprovado.
+  campanha_modo_do_canal: "campanha_modo_do_canal", // 422: texto livre em número oficial, ou modelo em número por QR
+  campanha_modelo_um_numero: "campanha_modelo_um_numero", // 422: modelo aprovado sai por um número só
+  campanha_modelo_inexistente: "campanha_modelo_inexistente", // 422: o modelo não existe neste número
+  campanha_modelo_nao_aprovado: "campanha_modelo_nao_aprovado", // 422: modelo pausado, recusado ou em análise
+  campanha_modelo_variaveis: "campanha_modelo_variaveis", // 422: variável sem origem, ou origem que não serve
+  // Migration 0711: envio rápido (rajada) só pelo número oficial, com modelo aprovado.
+  campanha_velocidade_do_canal: "campanha_velocidade_do_canal", // 422: envio rápido pedido num número por QR
 
   // 500 / upstream
   internal_error: "internal_error",

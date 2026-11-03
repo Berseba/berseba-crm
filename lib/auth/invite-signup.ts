@@ -55,6 +55,7 @@
  */
 import { decidirConviteDoSignup } from "@/lib/auth/convite-no-signup";
 import { aplicarConvite } from "@/lib/auth/aplicar-convite";
+import { invalidarUsuario } from "@/lib/auth/cache-curto";
 import type { InvitePayload } from "@/lib/auth/invite-token";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logger } from "@/lib/logger";
@@ -300,5 +301,8 @@ export async function completeInviteSignup(params: {
     // confirmation (`spent` with `accepted_by` = this account).
     return { ok: false, reason: "create_failed", detail: updateError.message };
   }
+  // The metadata changed (name, invite token): another session of this person
+  // must not read the cached user for up to 30 s.
+  invalidarUsuario(existing.id);
   return { ok: true, userId: existing.id, created: false };
 }

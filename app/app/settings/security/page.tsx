@@ -8,6 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { empresaExigeMfa, politicaDaEmpresa, type PapelMinimoDeMfa } from "@/lib/auth/politica-mfa";
 import { NICHO_SAUDE, nichoSchema, type Nicho } from "@/lib/organizacoes/nicho";
 import { CLINICAL_CLAIM_LAYER } from "@/lib/organizacoes/save-niche";
+import { listarDispositivosConfiaveis } from "@/lib/auth/dispositivo-confiavel";
 import { SecurityClient } from "./_client";
 import { traduzir } from "@/lib/i18n/dicionario";
 
@@ -32,6 +33,20 @@ export default async function SecurityPage() {
   const user = await requireAuth();
   const org = await resolveActiveOrg(user);
   const enrolled = await isMfaEnrolled();
+  const dispositivos = enrolled ? await listarDispositivosConfiaveis(user.id) : [];
+  // Quem tem a verificação ligada e nenhum código de recuperação por usar fica
+  // sem saída se perder o celular — e é o estado de todo mundo depois da 0759,
+  // que apagou os códigos da forma antiga. Só o servidor lê a tabela (0755).
+  // Erro na leitura não mostra o aviso: "não sei" não vira "você não tem".
+  let semCodigos = false;
+  if (enrolled) {
+    const { count, error } = await createAdminClient()
+      .from("user_recovery_codes")
+      .select("id", { count: "exact", head: true })
+      .eq("user_id", user.id)
+      .is("used_at", null);
+    semCodigos = !error && count === 0;
+  }
 
   let papelMinimo: PapelMinimoDeMfa = "none";
   let diasDeCarencia = 0;
@@ -97,6 +112,8 @@ export default async function SecurityPage() {
         podeConfigurarNicho={org?.role === "admin"}
         nicho={nicho}
         clinicalClaimLayerOn={clinicalClaimLayerOn}
+        dispositivos={dispositivos}
+        semCodigos={semCodigos}
       />
     </div>
   );

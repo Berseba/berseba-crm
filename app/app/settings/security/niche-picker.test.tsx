@@ -52,6 +52,7 @@ function renderPicker(
       podeExigirDaEquipe={false}
       papelMinimo="none"
       diasDeCarencia={0}
+      dispositivos={[]}
       podeConfigurarNicho={true}
       nicho={nicho}
       clinicalClaimLayerOn={clinicalClaimLayerOn}

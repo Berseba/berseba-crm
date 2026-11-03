@@ -249,6 +249,21 @@ const schema = z.object({
   MIRAE_API_ORG_SLUG: z.string().optional().default(""),
   /** Comma-separated organization ids that get the `mirae_*` agent tools. */
   MIRAE_API_ORG_IDS: z.string().optional().default(""),
+  // ─── Prospecção: engine de scraping self-hosted (local-http, #2942) ───────
+  //
+  // Mesmo desenho de WACALLS_API_BASE_URL: NUNCA `required()`. Vazio = a
+  // instalação não oferece o engine de scraping self-hosted, e a organização
+  // que escolher `local-http` em `settings.prospecting.provider` cai no erro
+  // FECHADO de sempre ("Informe a URL do engine de busca local.").
+  //
+  // A URL é da INSTALAÇÃO — e não da organização, como a #2942 propôs: é isso
+  // que faz a liberação de destino interno valer (`lib/automation/
+  // destinos-internos-autorizados.ts`, regra 2 — endereço escolhido por uma
+  // organização nunca alcança a rede de dentro). Quem lê é
+  // `baseDoEngineDaInstalacao()` em `lib/prospecting/provedor-local-http.ts`,
+  // que ainda passa o endereço pela régua de saída antes de chamar o engine.
+  PROSPECTING_LOCAL_HTTP_URL: z.string().optional().default(""),
+
   // ─── Videochamada (Jitsi Meet, #2440) — OPCIONAL, DESLIGADA POR PADRÃO ───
   //
   // Mesmo desenho de WACALLS_API_BASE_URL: NUNCA `required()`. Vazio = a
