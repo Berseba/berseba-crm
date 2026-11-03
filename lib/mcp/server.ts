@@ -23,6 +23,7 @@ import { allTools } from "./tools";
 import { deCapacidadeDesligada, deModuloDesligado } from "./tools/catalog";
 import { isAvecToolHiddenFor } from "@/lib/integrations/avec/config"; // Berseba
 import { isMiraeToolHiddenFor } from "@/lib/integrations/mirae/config"; // Berseba
+import { isJoOsToolHiddenFor } from "@/lib/integrations/joos/config"; // Berseba
 import { higienizarUuidsDeAterro } from "./uuid-de-aterro";
 import type { McpContext } from "./types";
 
@@ -63,6 +64,7 @@ export function createMcpServer(
     if (deCapacidadeDesligada(tool.name, capacidadesLigadas)) continue;
     if (isAvecToolHiddenFor(tool.name, auth.organizationId)) continue; // Berseba
     if (isMiraeToolHiddenFor(tool.name, auth.organizationId)) continue; // Berseba
+    if (isJoOsToolHiddenFor(tool.name, auth.organizationId)) continue; // Berseba
     server.registerTool(
       tool.name,
       {
