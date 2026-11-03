@@ -58,6 +58,7 @@ describe("POST /api/v1/mirae/milestones", () => {
 
   it.each([
     [{ outcome: "no_contact" }, 200],
+    [{ outcome: "stale", leadId: "l" }, 200],
     [{ outcome: "refused", leadId: "l", code: "required_fields_missing", detail: "x" }, 200],
     [{ outcome: "invalid_stage", code: "stage_not_in_pipeline" }, 422],
     [{ outcome: "conflict", leadId: "l" }, 409],

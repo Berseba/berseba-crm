@@ -6,8 +6,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api/types";
 
-const { move } = vi.hoisted(() => ({ move: vi.fn() }));
+const { move, audit } = vi.hoisted(() => ({ move: vi.fn(), audit: vi.fn() }));
 vi.mock("@/app/api/v1/leads/_handler", () => ({ moveLeadHandler: move }));
+vi.mock("@/lib/audit", () => ({ audit }));
 
 const { applyMiraeMilestone, miraeMilestoneSchema } = await import("./milestone");
 
@@ -138,6 +139,7 @@ function input(over: Row = {}) {
 
 beforeEach(() => {
   move.mockReset().mockResolvedValue({});
+  audit.mockReset().mockResolvedValue(undefined);
 });
 
 describe("applyMiraeMilestone", () => {
@@ -328,6 +330,84 @@ describe("applyMiraeMilestone", () => {
     expect((await applyMiraeMilestone(db(), CTX, input())).outcome).toBe("conflict");
     move.mockRejectedValueOnce(new ApiError(500, "internal_error", undefined, "req-1"));
     expect((await applyMiraeMilestone(db(), CTX, input())).outcome).toBe("unavailable");
+  });
+});
+
+describe("applyMiraeMilestone, ordering and the agent's funnel", () => {
+  it("a read older than the card's last stage change is `stale`: nothing moves, nothing is written", async () => {
+    const tables = () => ({
+      crm_stages: STAGES,
+      contacts: CONTACTS,
+      crm_leads: [lead({ stage_changed_at: "2026-11-03T12:00:00Z" })],
+      lead_state: [{ organization_id: ORG, contact_id: CONTACT, stage: "qualified" }],
+    });
+    const old = fakeDb(tables());
+    const r = await applyMiraeMilestone(
+      old.supabase,
+      CTX,
+      input({ as_of: "2026-11-03T11:59:00Z" }),
+    );
+    expect(r).toEqual({ outcome: "stale", leadId: "lead-1" });
+    expect(move).not.toHaveBeenCalled();
+    expect(old.writes).toEqual([]);
+
+    const fresh = fakeDb(tables());
+    const later = await applyMiraeMilestone(
+      fresh.supabase,
+      CTX,
+      input({ as_of: "2026-11-03T12:00:05Z" }),
+    );
+    expect(later.outcome).toBe("moved");
+  });
+
+  it("an old read for a card already in the stage still aligns the agent's funnel", async () => {
+    const { supabase, writes } = fakeDb({
+      crm_stages: STAGES,
+      contacts: CONTACTS,
+      crm_leads: [lead({ stage_id: ATTENDED, stage_changed_at: "2026-11-03T12:00:00Z" })],
+      lead_state: [{ organization_id: ORG, contact_id: CONTACT, stage: "qualified" }],
+    });
+    const r = await applyMiraeMilestone(supabase, CTX, input({ as_of: "2026-11-03T11:00:00Z" }));
+    expect(r).toMatchObject({ outcome: "already_there", harness: "advanced" });
+    expect(writes.some((w) => w.table === "lead_state")).toBe(true);
+  });
+
+  it("a funnel that could not be written is `unavailable`, so the queue retries", async () => {
+    const { supabase } = fakeDb(
+      { crm_stages: STAGES, contacts: CONTACTS, crm_leads: [lead()] },
+      "lead_state",
+    );
+    const r = await applyMiraeMilestone(supabase, CTX, input());
+    expect(r).toMatchObject({
+      outcome: "unavailable",
+      leadId: "lead-1",
+      code: "agent_funnel_not_written",
+    });
+    expect(move).toHaveBeenCalledOnce();
+  });
+
+  it("a funnel step with no card move is audited as the token; a move is left to the lead rule", async () => {
+    const still = fakeDb({
+      crm_stages: STAGES,
+      contacts: CONTACTS,
+      crm_leads: [lead({ stage_id: ATTENDED })],
+      lead_state: [{ organization_id: ORG, contact_id: CONTACT, stage: "qualified" }],
+    });
+    await applyMiraeMilestone(still.supabase, CTX, input());
+    expect(audit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: "mirae.milestone_applied",
+        actorUserId: null,
+        actorApiTokenId: TOKEN,
+        organizationId: ORG,
+        resourceId: "lead-1",
+        metadata: expect.objectContaining({ milestone: "attended", agent_step: "negotiating" }),
+      }),
+    );
+    audit.mockClear();
+    const moving = fakeDb({ crm_stages: STAGES, contacts: CONTACTS, crm_leads: [lead()] });
+    await applyMiraeMilestone(moving.supabase, CTX, input());
+    expect(audit).not.toHaveBeenCalled();
   });
 });
 

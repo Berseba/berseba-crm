@@ -16,9 +16,14 @@
  *  - the move is `moveLeadHandler`, the rule every non-board writer follows (required fields,
  *    won/lost reason, reopening, optimistic lock, timeline, `lead.stage_changed`, audit). A
  *    business refusal comes back as an outcome, not as an error to retry;
+ *  - Mirae re-reads the person's state at delivery and sends that time as `as_of`. A card whose
+ *    stage changed after `as_of` (a newer milestone, or a person moving it by hand) is `stale`:
+ *    an older read never overwrites a newer move;
  *  - the agent's own funnel (`lead_state`) follows: `negotiating` for a visit, `won` for an
  *    enrollment. From `negotiating` the harness only allows `won`/`lost`, so the agent's hint
- *    mirror cannot pull the card back out of "Avaliação feita" or "Faltou".
+ *    mirror cannot pull the card back out of "Avaliação feita" or "Faltou". That write is part of
+ *    the milestone: if it fails the answer is `unavailable`, and the retry finds the card already
+ *    there and writes only the funnel.
  *
  * Logs carry ids and outcomes only, never the phone.
  */
@@ -27,6 +32,7 @@ import { z } from "zod";
 
 import { moveLeadHandler } from "@/app/api/v1/leads/_handler";
 import { ApiError } from "@/lib/api/types";
+import { audit } from "@/lib/audit";
 import { escolherContatoCanonico } from "@/lib/channels/contato-por-telefone";
 import { normalizePhoneBR, phoneLookupVariants } from "@/lib/channels/phone-variants";
 import { resolveActiveLeadForContact } from "@/lib/leads/active-lead";
@@ -44,7 +50,7 @@ export const miraeMilestoneSchema = z
     phone: z.string().trim().min(8).max(40),
     pipeline_id: z.string().uuid(),
     stage_id: z.string().uuid(),
-    /** When Mirae read the person's state; logged only. */
+    /** When Mirae read the person's state: a card moved after it is not moved back. */
     as_of: z.string().datetime({ offset: true }).optional(),
   })
   .strict();
@@ -63,6 +69,8 @@ export type MilestoneOutcome =
   | "moved"
   /** The card was already there: nothing written. */
   | "already_there"
+  /** The card's stage changed after Mirae read the state (`as_of`): left as is. */
+  | "stale"
   /** No contact with this phone: the person never talked on WhatsApp. */
   | "no_contact"
   /** A personal (team/family) or anonymized contact: never moved. */
@@ -99,6 +107,7 @@ interface LeadRow {
   status: "open" | "won" | "lost";
   created_at: string;
   last_activity_at: string | null;
+  stage_changed_at?: string | null;
 }
 
 /** Pure: which lead this milestone moves, or why none. */
@@ -203,7 +212,9 @@ async function apply(
   // 3. The card: the contact's lead in that funnel.
   const { data: leadRows, error: leadError } = await admin
     .from("crm_leads")
-    .select("id, organization_id, pipeline_id, stage_id, status, created_at, last_activity_at")
+    .select(
+      "id, organization_id, pipeline_id, stage_id, status, created_at, last_activity_at, stage_changed_at",
+    )
     .eq("organization_id", ctx.organizationId)
     .eq("contact_id", contact.id)
     .eq("pipeline_id", input.pipeline_id);
@@ -212,9 +223,17 @@ async function apply(
   if ("outcome" in picked) return { outcome: picked.outcome };
   const lead = picked.lead;
 
-  // 4. Move it, through the lead rule. Already there = nothing to write.
+  // 4. Move it, through the lead rule. Already there = nothing to write. A stage that changed after
+  // Mirae's read wins over that read.
   let outcome: "moved" | "already_there" = "already_there";
   if (lead.stage_id !== stage.id) {
+    if (
+      input.as_of &&
+      lead.stage_changed_at &&
+      Date.parse(input.as_of) < Date.parse(lead.stage_changed_at)
+    ) {
+      return { outcome: "stale", leadId: lead.id };
+    }
     try {
       await moveLeadHandler(
         admin,
@@ -249,5 +268,32 @@ async function apply(
     step: input.milestone === "enrolled" ? "won" : "negotiating",
     reason: `mirae: ${input.milestone}`,
   });
+  if (harness === "failed") {
+    return {
+      outcome: "unavailable",
+      leadId: lead.id,
+      code: "agent_funnel_not_written",
+      detail: outcome === "moved" ? "card moved; agent funnel not written" : undefined,
+    };
+  }
+  // A move is audited by `moveLeadHandler`; a funnel step with no move is audited here.
+  if (outcome === "already_there" && harness === "advanced") {
+    await audit({
+      action: "mirae.milestone_applied",
+      actorUserId: null,
+      actorApiTokenId: ctx.apiTokenId,
+      organizationId: ctx.organizationId,
+      resourceType: "crm_lead",
+      resourceId: lead.id,
+      requestId: ctx.requestId,
+      metadata: {
+        actor_type: "api_token",
+        actor_api_token_id: ctx.apiTokenId,
+        milestone: input.milestone,
+        stage_id: stage.id,
+        agent_step: input.milestone === "enrolled" ? "won" : "negotiating",
+      },
+    });
+  }
   return { outcome, leadId: lead.id, harness };
 }

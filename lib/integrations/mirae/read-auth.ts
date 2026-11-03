@@ -7,9 +7,10 @@
  * the same authenticator `/api/mcp` and `/api/v1/contacts` use, and `organization_id` comes from
  * the TOKEN ROW, never from the query.
  *
- * Missing header or bad token → 401; valid token without `mcp:read` (or below `viewer`) → 403.
+ * Missing header or bad token → 401; valid token without the scope or the rank of the route
+ * (`mcp:read`/`viewer` to read, `mcp:write`/`agent` to write) → 403.
  * The routes are in `PUBLIC_PATHS` (the proxy does not decide), so nothing upstream counts the
- * calls: the read ceilings of the MCP (per token and per organization, `lib/mcp/rate-limit.ts`)
+ * calls: the ceilings of the MCP (per token, per organization and for writes, `lib/mcp/rate-limit.ts`)
  * are applied here, in their own buckets, so a paging loop does not eat the MCP's quota.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
@@ -17,16 +18,34 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
 import { fail } from "@/lib/api/wrappers";
 import { McpAuthError, ensureRole, ensureScope, validateBearerToken } from "@/lib/mcp/auth";
-import { JANELA_SEGUNDOS, TETO_POR_ORGANIZACAO, TETO_POR_TOKEN } from "@/lib/mcp/rate-limit";
+import {
+  JANELA_SEGUNDOS,
+  TETO_DE_ESCRITA,
+  TETO_POR_ORGANIZACAO,
+  TETO_POR_TOKEN,
+} from "@/lib/mcp/rate-limit";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export type MiraeAuth =
   | { ok: true; organizationId: string; apiTokenId: string; supabase: SupabaseClient }
   | { ok: false; response: Response };
 
-/** Reads and writes count in separate buckets: a paging loop never eats the milestone quota. */
-const READ = { scope: "mcp:read", role: "viewer", bucket: "mirae-read" } as const;
-const WRITE = { scope: "mcp:write", role: "agent", bucket: "mirae-write" } as const;
+/**
+ * Reads and writes count in separate buckets: a paging loop never eats the milestone quota. A
+ * write has the write ceiling of every other bearer write (`TETO_DE_ESCRITA`).
+ */
+const READ = {
+  scope: "mcp:read",
+  role: "viewer",
+  bucket: "mirae-read",
+  perToken: TETO_POR_TOKEN,
+} as const;
+const WRITE = {
+  scope: "mcp:write",
+  role: "agent",
+  bucket: "mirae-write",
+  perToken: TETO_DE_ESCRITA,
+} as const;
 
 /** Same codes as `/api/v1/contacts`: a token without the scope or the rank is `forbidden_role`. */
 const ERROR_CODE_BY_STATUS: Record<number, string> = {
@@ -52,7 +71,7 @@ export function authorizeMiraeWrite(
 async function authorizeMirae(
   authHeader: string | null,
   requestId: string,
-  rule: { scope: string; role: "viewer" | "agent"; bucket: string },
+  rule: { scope: string; role: "viewer" | "agent"; bucket: string; perToken: number },
 ): Promise<MiraeAuth> {
   // No pre-check of the header: `validateBearerToken` answers 401 on a missing one itself and,
   // unlike a shortcut here, counts it as a failed attempt like the MCP does.
@@ -73,7 +92,7 @@ async function authorizeMirae(
   // the token ceiling must not spend the organization's quota.
   const perToken = await checkRateLimit(
     `${rule.bucket}:tok:${auth.apiTokenId}`,
-    TETO_POR_TOKEN,
+    rule.perToken,
     JANELA_SEGUNDOS,
   );
   const perOrg = perToken.allowed
