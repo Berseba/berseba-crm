@@ -4,7 +4,8 @@
  * Não recebe histórico, notas do contato, prompt do agente ou argumentos de tool.
  */
 export interface EvidenciaComercial {
-  origem: "catalogo" | "conhecimento";
+  // Berseba: "agenda" = a booking the server wrote this turn (evidencia-de-agenda.berseba.ts).
+  origem: "catalogo" | "conhecimento" | "agenda";
   referencia: string;
   titulo: string;
   conteudo: string;
@@ -12,6 +13,7 @@ export interface EvidenciaComercial {
 
 import { canonizarTipoDeFonte, type TipoDeFonteId } from "@/lib/ai/rag/tipos-de-fonte";
 import type { Queryable } from "../../queue/queue";
+import { evidenciaDoAgendamento } from "./evidencia-de-agenda.berseba";
 
 /**
  * Lista de PERMISSÃO, não de bloqueio: "Conversas anteriores" guarda o que o
@@ -147,9 +149,16 @@ export function criarEvidenciasComerciaisDoTurno(fontesHabilitadas: readonly str
     }
   }
 
+  /** Berseba: only a successful avec write result, as the server returned it. */
+  function registrarAgendamento(ferramenta: string, resultado: unknown) {
+    const evidencia = evidenciaDoAgendamento(ferramenta, resultado);
+    if (evidencia) guardar(evidencia);
+  }
+
   return {
     registrarConhecimento,
     registrarCatalogo,
+    registrarAgendamento,
     // Relevância escolhe o CONTEXTO, nunca concede autorização. O classificador
     // recebe os trechos completos, inclusive condições/negações, e decide.
     ler: (candidata = ""): EvidenciaComercial[] => {
@@ -183,7 +192,7 @@ export function criarEvidenciasComerciaisDoTurno(fontesHabilitadas: readonly str
       // Reserva mínima para cada origem: política e produto complementam-se.
       // O restante segue a relevância global, sem duplicar ou truncar itens.
       for (let i = 0; i < 3; i++)
-        for (const origem of ["conhecimento", "catalogo"] as const) {
+        for (const origem of ["agenda", "conhecimento", "catalogo"] as const) {
           const item = ordenadas.filter(({ e }) => e.origem === origem)[i];
           if (item) adicionar(item.e);
         }
