@@ -5325,9 +5325,10 @@ async function executarTurnoDoAgente(
 
     // Berseba: every reply the promise reviewer saw was vetoed and nothing went
     // out. The conversation goes to the team instead of staying silent.
+    // The preview first: it never reaches `liveJob()` (preview_operational_job_forbidden).
     if (
+      !preview &&
       turnoCaladoPorVetoPedePassagem({
-        preview: Boolean(preview),
         turnoDeResposta: eTurnoDeResposta(liveJob()),
         enviadas: outcomes.length + seq,
         vetosDePromessa,

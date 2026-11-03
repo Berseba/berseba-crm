@@ -12,13 +12,14 @@
  * Releasing the vetoed text is not safe (the promise may be real: a discount, a
  * free service). Passing the conversation to the team is: the client gets the
  * generic handoff notice and a person answers.
+ *
+ * The caller checks the preview before calling: a preview has no live job.
  */
 
 export const POR_QUE_DO_TURNO_CALADO =
   "A revisão de promessas barrou todas as respostas que a IA tentou enviar neste turno, e o cliente ficou sem resposta.";
 
 export function turnoCaladoPorVetoPedePassagem(t: {
-  preview: boolean;
   turnoDeResposta: boolean;
   enviadas: number;
   vetosDePromessa: number;
@@ -27,7 +28,6 @@ export function turnoCaladoPorVetoPedePassagem(t: {
   capDeEnvio: boolean;
 }): boolean {
   return (
-    !t.preview &&
     t.turnoDeResposta &&
     t.enviadas === 0 &&
     t.vetosDePromessa > 0 &&

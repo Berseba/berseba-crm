@@ -125,7 +125,6 @@ describe("the turn's evidence store", () => {
 
 describe("turnoCaladoPorVetoPedePassagem", () => {
   const base = {
-    preview: false,
     turnoDeResposta: true,
     enviadas: 0,
     vetosDePromessa: 5,
@@ -144,7 +143,6 @@ describe("turnoCaladoPorVetoPedePassagem", () => {
   });
 
   it("legitimate silences are exempt", () => {
-    expect(turnoCaladoPorVetoPedePassagem({ ...base, preview: true })).toBe(false);
     expect(turnoCaladoPorVetoPedePassagem({ ...base, turnoDeResposta: false })).toBe(false);
     expect(turnoCaladoPorVetoPedePassagem({ ...base, turnoDescartado: true })).toBe(false);
     expect(turnoCaladoPorVetoPedePassagem({ ...base, passouParaAEquipe: true })).toBe(false);
@@ -175,6 +173,8 @@ describe("turn wiring (source contract)", () => {
     expect(iPassagem).toBeGreaterThan(iRoteiro);
     expect(iFechamento).toBeGreaterThan(iPassagem);
     const bloco = turno.slice(iPassagem, iFechamento);
+    // A preview never reaches liveJob(): the guard comes before the rule's arguments.
+    expect(turno.slice(iPassagem - 40, iPassagem)).toContain("!preview &&");
     expect(bloco).toContain("enviadas: outcomes.length + seq,");
     expect(bloco).toContain("passouParaAEquipe = true;");
     expect(bloco).toContain("motivo: 'outro',");
