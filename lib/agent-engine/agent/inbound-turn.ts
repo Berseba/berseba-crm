@@ -213,6 +213,11 @@ import {
 } from '@/lib/escalacao/briefing-da-passagem';
 import { diffCheckpoint } from '@/lib/leads/checkpoint-diff';
 import { CORRECAO_DO_TURNO_MUDO, turnoMudoPedeCorrecao } from './turno-mudo';
+import {
+  POR_QUE_DO_TURNO_CALADO,
+  turnoCaladoPorVetoPedePassagem,
+} from './turno-calado-por-veto.berseba';
+import { FERRAMENTAS_DE_AGENDA_DO_AVEC } from '../guardrails/promise/evidencia-de-agenda.berseba';
 import { criarTravaDeDuplicata } from './near-dup';
 import { vetoReason } from '@/lib/leads/veto-activity';
 import { corposEnviadosDesdeUltimaInbound } from './memoria-envio';
@@ -2980,6 +2985,8 @@ async function executarTurnoDoAgente(
   // correção do turno que terminou sem falar com o cliente (ver depois da chamada principal).
   let tentativasDeEnvio = 0;
   let passouParaAEquipe = false;
+  // Berseba: semantic promise vetoes this turn (turno-calado-por-veto.berseba.ts).
+  let vetosDePromessa = 0;
   // Teto de mensagens físicas por turno (F2-15b) — `seq` JÁ é a contagem certa: ele só
   // avança quando o envio de fato sai pro canal (send_message + send_template, bolhas
   // incluídas), nunca em veto de gate. Checar `seq` antes de tentar o próximo envio
@@ -4012,6 +4019,7 @@ async function executarTurnoDoAgente(
             ) {
               pacingCapVeto = { code: chain.code, nextAllowedAt: chain.nextAllowedAt };
             }
+            if (chain.code === 'promise_semantic') vetosDePromessa += 1;
             // Erro de ENSINO pt-br (mesmo shape de get_lead_context/breaker): o
             // modelo o vê no turno seguinte. NÃO é exceção — não derruba o run.
             return { ok: false, error: { code: chain.code, message: chain.message } };
@@ -4609,6 +4617,20 @@ async function executarTurnoDoAgente(
                   // A ponte MCP já aplica organização, papel e escopo de leitura.
                   if (name === 'crm_search_products') evidenciasComerciais.registrarCatalogo(resultado);
                   else evidenciasComerciais.registrarConhecimento(resultado);
+                  return resultado;
+                }) as typeof mcpTool.execute,
+              };
+              continue;
+            }
+            // Berseba: what avec answered is proof for the promise reviewer
+            // (evidencia-de-agenda.berseba.ts). The result comes from the server.
+            if (FERRAMENTAS_DE_AGENDA_DO_AVEC.has(name) && typeof mcpTool.execute === 'function') {
+              const executeOriginal = mcpTool.execute.bind(mcpTool);
+              rawTools[name] = {
+                ...mcpTool,
+                execute: (async (...args: Parameters<typeof executeOriginal>) => {
+                  const resultado = await executeOriginal(...args);
+                  evidenciasComerciais.registrarAgendamento(name, resultado);
                   return resultado;
                 }) as typeof mcpTool.execute,
               };
@@ -5299,6 +5321,52 @@ async function executarTurnoDoAgente(
           },
         },
       );
+    }
+
+    // Berseba: every reply the promise reviewer saw was vetoed and nothing went
+    // out. The conversation goes to the team instead of staying silent.
+    // The preview first: it never reaches `liveJob()` (preview_operational_job_forbidden).
+    if (
+      !preview &&
+      turnoCaladoPorVetoPedePassagem({
+        turnoDeResposta: eTurnoDeResposta(liveJob()),
+        enviadas: outcomes.length + seq,
+        vetosDePromessa,
+        turnoDescartado,
+        passouParaAEquipe,
+        capDeEnvio: capDeEnvioAtingido(),
+      })
+    ) {
+      passouParaAEquipe = true;
+      pararDigitando();
+      runLog.warn('turno calado pela revisão de promessas — passando para a equipe', {
+        job_id: liveJob().id,
+        vetos: vetosDePromessa,
+      });
+      try {
+        const aviso = await avisarLeadDaEscalacao(pool, avisoDaEscalacao().ids, {
+          ...avisoDaEscalacao().base,
+          motivo: 'outro',
+        });
+        await applyRequestHumanHandoff(
+          pool,
+          { tenantId, leadId, conversationId: input.conversationId },
+          {
+            conversationSummary: buildHandoffSummary(previous),
+            contextoDoTurno: { checkpoint: previous, pendentesDoCliente: inboundsPendentes },
+            avisoAoLead: aviso,
+            gatilho: { inboundMessageId: input.inboundMessageId },
+            log: runLog,
+          },
+          { motivo_codigo: 'critical_stage', por_que: POR_QUE_DO_TURNO_CALADO },
+        );
+      } catch (err) {
+        // Best-effort: the turn already ended; the error stays visible in the log.
+        runLog.error('passagem do turno calado falhou', {
+          job_id: liveJob().id,
+          error: (err instanceof Error ? err.message : String(err)).slice(0, 160),
+        });
+      }
     }
 
     // F3-10: poda os tool results antigos da fita do run ANTES de reenviá-los no fechamento
