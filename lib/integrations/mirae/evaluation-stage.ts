@@ -19,13 +19,23 @@
  * Never throws and never undoes the booking: the evaluation is already in Mirae. Every outcome
  * is logged (no phone, no name), and the result is returned for the tests.
  */
+import type { SupabaseClient } from "@supabase/supabase-js";
+
 import type { McpContext } from "@/lib/mcp/types";
 import { sincronizaEstagioDoAgente } from "@/lib/leads/agent-stage-sync";
 import { logger } from "@/lib/logger";
 
 const PASSO = "negotiating";
-/** Harness steps past which a booking does not move the agent's funnel. */
-const TERMINAL = new Set(["negotiating", "won", "lost"]);
+/** The harness order (`lib/agent-engine/agent/lead-state.ts`); `won` and `lost` close it. */
+const RANK: Record<string, number> = {
+  new: 0,
+  contacted: 1,
+  qualifying: 2,
+  qualified: 3,
+  negotiating: 4,
+  won: 5,
+  lost: 5,
+};
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export interface EvaluationStageResult {
@@ -54,41 +64,54 @@ async function publishedScope(ctx: McpContext): Promise<readonly string[]> {
   return version?.pipeline_ids ?? [];
 }
 
-async function advanceHarness(
-  ctx: McpContext,
-  contactId: string,
+/**
+ * Moves the agent's own funnel (`lead_state`) forward to `step`, with its transition row. Never
+ * backwards, and never out of `won`/`lost`, except `won`: an enrollment is a fact and closes a
+ * lost harness as won. Shared with the Mirae milestones (`milestone.ts`).
+ */
+export async function advanceAgentFunnel(
+  supabase: SupabaseClient,
+  input: {
+    organizationId: string;
+    contactId: string;
+    step: "negotiating" | "won";
+    reason: string;
+    jobId?: string | null;
+  },
 ): Promise<EvaluationStageResult["harness"]> {
-  const { data, error } = await ctx.supabase
+  const { data, error } = await supabase
     .from("lead_state")
     .select("stage")
-    .eq("organization_id", ctx.organizationId)
-    .eq("contact_id", contactId)
+    .eq("organization_id", input.organizationId)
+    .eq("contact_id", input.contactId)
     .maybeSingle<{ stage: string }>();
   if (error) return "failed";
   const from = data?.stage ?? "new";
-  if (TERMINAL.has(from)) return "already_there";
-  const { error: upsertError } = await ctx.supabase.from("lead_state").upsert(
+  const forward =
+    input.step === "won" ? from !== "won" : (RANK[from] ?? RANK.new!) < RANK[input.step]!;
+  if (!forward) return "already_there";
+  const { error: upsertError } = await supabase.from("lead_state").upsert(
     {
-      organization_id: ctx.organizationId,
-      contact_id: contactId,
-      stage: PASSO,
+      organization_id: input.organizationId,
+      contact_id: input.contactId,
+      stage: input.step,
       updated_at: new Date().toISOString(),
     },
     { onConflict: "organization_id,contact_id" },
   );
   if (upsertError) return "failed";
-  const { error: transitionError } = await ctx.supabase.from("lead_state_transitions").insert({
-    organization_id: ctx.organizationId,
-    contact_id: contactId,
-    job_id: ctx.sourceJobId && UUID.test(ctx.sourceJobId) ? ctx.sourceJobId : null,
+  const { error: transitionError } = await supabase.from("lead_state_transitions").insert({
+    organization_id: input.organizationId,
+    contact_id: input.contactId,
+    job_id: input.jobId && UUID.test(input.jobId) ? input.jobId : null,
     from_stage: from,
-    to_stage: PASSO,
-    reason: "mirae_book: avaliação marcada no Mirae",
+    to_stage: input.step,
+    reason: input.reason,
   });
   // The step itself is written; a missing history row is only logged.
   if (transitionError)
     logger.warn("mirae: lead_state transition row not written", {
-      organization_id: ctx.organizationId,
+      organization_id: input.organizationId,
       error: transitionError.message,
     });
   return "advanced";
@@ -98,7 +121,13 @@ export async function moveCardOnEvaluationBooked(ctx: McpContext): Promise<Evalu
   const contactId = ctx.contatoDoTurno;
   if (!contactId) return { harness: "failed", card: "sem_contato_do_turno" };
   try {
-    const harness = await advanceHarness(ctx, contactId);
+    const harness = await advanceAgentFunnel(ctx.supabase, {
+      organizationId: ctx.organizationId,
+      contactId,
+      step: PASSO,
+      reason: "mirae_book: avaliação marcada no Mirae",
+      jobId: ctx.sourceJobId,
+    });
     const sync = await sincronizaEstagioDoAgente(ctx.supabase, {
       organizationId: ctx.organizationId,
       contactId,
