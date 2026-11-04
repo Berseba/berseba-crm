@@ -18,6 +18,7 @@ import { isoLocalComOffset } from '@/lib/tempo/agora';
 import { logger } from '@/lib/logger';
 import { nomeDoContato } from '@/lib/contacts/rotulo-do-contato';
 import { lerRemetenteDeGrupo } from '@/lib/messaging/remetente-de-grupo';
+import { outboundAuthor, type OutboundAuthor } from './outbound-author.berseba';
 
 /**
  * Heurística conservadora de contagem: ~3,5 chars/token para pt-br (BPE real fica
@@ -40,6 +41,13 @@ export interface LeadContextKnobs {
 /** Uma mensagem do histórico, já curada. */
 export interface LeadContextMessage {
   direction: 'inbound' | 'outbound';
+  /**
+   * Berseba: who wrote an OUTBOUND message (from `messages.sent_via`), so the
+   * model tells its own speech from the team's. Absent on inbound. Optional in
+   * the type for the same reason as `contact_id`: fixtures in
+   * `tests/invariants/**` build messages without it.
+   */
+  author?: OutboundAuthor;
   /** Corpo textual; mídia usa o derivado (transcrição/visão/pdf) ou marcador [tipo]. */
   body: string;
   /**
@@ -228,6 +236,11 @@ interface HistoryRow {
   sent_at: Date;
   /** #2729: `group_sender` do ingest de grupo — a única fonte de quem falou. */
   metadata: Record<string, unknown> | null;
+  /**
+   * Berseba: who sent an outbound (`ai`, `user`, `external_device`…). Always
+   * selected; optional so upstream tests that build rows by hand still compile.
+   */
+  sent_via?: string | null;
 }
 
 export async function getLeadContext(
@@ -280,7 +293,7 @@ export async function getLeadContext(
         ? db
             .query<HistoryRow>(
               `select direction, type, body, media_url, media_storage_path, media_mime,
-                      media_derived_text, sent_at, metadata
+                      media_derived_text, sent_at, metadata, sent_via
                from messages
                where organization_id = $1 and conversation_id = $2
                  and direction in ('inbound', 'outbound')
@@ -461,6 +474,7 @@ function fitToBudget(
     const remetente = m.direction === 'inbound' ? lerRemetenteDeGrupo(m.metadata) : null;
     return {
       direction: m.direction,
+      ...(m.direction === 'outbound' ? { author: outboundAuthor(m.sent_via) } : {}),
       body,
       // Hora de PAREDE do tenant, não UTC cru — ver o comentário de `sent_at` na
       // interface acima e o cabeçalho de `isoLocalComOffset`.

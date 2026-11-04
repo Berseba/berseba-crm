@@ -85,6 +85,7 @@ describe("projeção — o que o Conversador pode ver", () => {
         { direction: "inbound", body: "oi, quero remarcar", sent_at: "2026-08-05T10:00:00Z" },
         {
           direction: "outbound",
+          author: "agent",
           body: "claro!",
           sent_at: "2026-08-05T10:01:00Z",
           type: "image",
@@ -117,9 +118,11 @@ describe("projeção — o que o Conversador pode ver", () => {
       });
     });
 
-    it("'inbound'/'outbound' viram 'cliente'/'nós' — quem fala com gente não pensa em direção", () => {
+    // Berseba: the outbound names its author ('você' for the agent's own),
+    // see tests/unit/history-outbound-author.berseba.test.ts.
+    it("'inbound'/'outbound' viram 'cliente'/'você' — quem fala com gente não pensa em direção", () => {
       const p = projetarContexto(cru);
-      expect(p.mensagens.map((m) => m.de)).toEqual(["cliente", "nós"]);
+      expect(p.mensagens.map((m) => m.de)).toEqual(["cliente", "você"]);
       expect(JSON.stringify(p)).not.toContain("inbound");
     });
 

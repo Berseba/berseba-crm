@@ -14,6 +14,7 @@ import { currentExecutionBoundary } from "@/lib/atendimento/fronteira-server";
 import { rotuloDoRemetente } from "@/lib/messaging/remetente-de-grupo";
 
 import type { LeadContext } from "../../edge/crm/get-lead-context";
+import { historyAuthorshipNote } from "../../edge/crm/outbound-author.berseba";
 import type { LeadStateRow } from "../lead-state";
 import { projetarContexto } from "../projecao";
 
@@ -118,6 +119,8 @@ export function ritualBlocks(
       ? ['## Origem deste contato — o anúncio que ele clicou', origemBlock, '']
       : []),
     '## Contexto do lead (contato + últimas mensagens)',
+    // Berseba: who wrote each outbound (outbound-author.berseba.ts).
+    historyAuthorshipNote(projeta),
     // Campo de cadastro VAZIO não é prova de que a informação não existe.
     //
     // `contact.email: null` chegava como fato, e o modelo o lia com autoridade
