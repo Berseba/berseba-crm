@@ -8,9 +8,11 @@ import {
   decidirDevolucao,
   devolverAoAgenteSePrazoVenceu,
   filtrarClienteAguardando,
+  respostaPeloCelularContaComoEquipe,
   type Pendencia,
 } from "@/lib/escalacao/devolucao-por-pendencia.berseba";
 import type { ConversaEmHandoff } from "@/lib/escalacao/devolucao-automatica";
+import { atendimentoConfigPatchSchema, mesclarSettingsDeAtendimento } from "@/lib/schemas/routing";
 
 /**
  * Berseba: who owes the reply decides when a conversation held by a person
@@ -163,6 +165,8 @@ interface Cenario {
   contato: Record<string, unknown> | null;
   agentePublicadoNaSessao: boolean;
   ultimaRespostaHumana: number | null;
+  /** Latest `external_device` outbound (a reply from the phone). */
+  ultimaRespostaPeloCelular: number | null;
   ultimaMensagemDoCliente: number | null;
   falhaEm?: string;
 }
@@ -192,8 +196,17 @@ function responderCenario(l: Leitura) {
     case "ai_routers":
       return { data: [], error: null };
     case "messages": {
-      const humana = tem(l, "eq", "sent_via", "user");
-      const ms = humana ? cenario.ultimaRespostaHumana : cenario.ultimaMensagemDoCliente;
+      if (tem(l, "eq", "direction", "inbound")) {
+        const ms = cenario.ultimaMensagemDoCliente;
+        return { data: ms === null ? null : { sent_at: iso(ms) }, error: null };
+      }
+      // The latest outbound among the `sent_via` values the query asked for.
+      const comCelular = l.filtros.some(
+        (f) => f[0] === "in" && f[1] === "sent_via" && (f[2] as string[]).includes("external_device"),
+      );
+      const candidatos = [cenario.ultimaRespostaHumana, comCelular ? cenario.ultimaRespostaPeloCelular : null];
+      const validos = candidatos.filter((t): t is number => t !== null);
+      const ms = validos.length === 0 ? null : Math.max(...validos);
       return { data: ms === null ? null : { sent_at: iso(ms) }, error: null };
     }
     default:
@@ -237,6 +250,7 @@ beforeEach(() => {
     contato: { force_human: true, is_blocked: false },
     agentePublicadoNaSessao: true,
     ultimaRespostaHumana: T0 - 60_000,
+    ultimaRespostaPeloCelular: null,
     ultimaMensagemDoCliente: T0 - 6 * H + 60_000,
   };
 });
@@ -346,6 +360,7 @@ describe("the cron's guard", () => {
 
   it("keeps the conversation the team answered last, drops the one whose client is waiting", async () => {
     responder = (l) => {
+      if (l.tabela === "organizations") return { data: [], error: null };
       if (l.tabela === "conversations") {
         const id = l.filtros.find((f) => f[0] === "eq" && f[1] === "id")?.[2];
         return {
@@ -374,6 +389,140 @@ describe("the cron's guard", () => {
   it("a read error keeps the conversation with the person", async () => {
     responder = () => ({ data: null, error: { message: "boom" } });
     expect(await filtrarClienteAguardando(admin(), [vencida("x")], T0 + 25 * H)).toEqual([]);
+  });
+});
+
+/**
+ * Studio Bruno Alves (04/11): the team answers from the phone. With a 120 min
+ * deadline and phone replies ignored, 2 of 101 conversations held by a person
+ * went back to the agent.
+ */
+describe("a reply from the phone (phone_reply_counts_as_team)", () => {
+  const PRAZO = 120;
+  const comOpcao = (ligada: boolean | undefined) => ({
+    routing: {
+      handoff_return_after_minutes: PRAZO,
+      ...(ligada === undefined ? {} : { phone_reply_counts_as_team: ligada }),
+    },
+  });
+
+  beforeEach(() => {
+    // Handoff at T0, the client asked at T0 + 1 min, nobody answered through
+    // the CRM and nobody closed. The team answered from the phone at T0 + 5 min.
+    cenario.conversa = { ...cenario.conversa, last_handoff_at: iso(T0), service_closed_at: null };
+    cenario.ultimaRespostaHumana = null;
+    cenario.ultimaMensagemDoCliente = T0 + 60_000;
+    cenario.ultimaRespostaPeloCelular = T0 + 5 * 60_000;
+  });
+
+  it("the settings PATCH keeps the saved option when the body omits it", () => {
+    const corpo = { mode: "manual", max_retries: 5, backoff_seconds: 60 } as const;
+    const ligada = { routing: { mode: "manual", phone_reply_counts_as_team: true } };
+    const semChave = mesclarSettingsDeAtendimento(ligada, atendimentoConfigPatchSchema.parse(corpo));
+    expect(semChave.routing.phone_reply_counts_as_team).toBe(true);
+    const desligando = mesclarSettingsDeAtendimento(
+      ligada,
+      atendimentoConfigPatchSchema.parse({ ...corpo, phone_reply_counts_as_team: false }),
+    );
+    expect(desligando.routing.phone_reply_counts_as_team).toBe(false);
+    const nova = mesclarSettingsDeAtendimento({}, atendimentoConfigPatchSchema.parse(corpo));
+    expect(nova.routing.phone_reply_counts_as_team).toBe(false);
+  });
+
+  it("reads the option only from the boolean true", () => {
+    expect(respostaPeloCelularContaComoEquipe(comOpcao(true))).toBe(true);
+    expect(respostaPeloCelularContaComoEquipe(comOpcao(false))).toBe(false);
+    expect(respostaPeloCelularContaComoEquipe(comOpcao(undefined))).toBe(false);
+    expect(respostaPeloCelularContaComoEquipe({ routing: { phone_reply_counts_as_team: "true" } })).toBe(false);
+    expect(respostaPeloCelularContaComoEquipe(null)).toBe(false);
+  });
+
+  it("option off (the default): the phone reply does not count, the client is still waiting", async () => {
+    for (const ligada of [undefined, false]) {
+      devolver.mockClear();
+      leituras = [];
+      cenario.settings = comOpcao(ligada);
+      await devolverAoAgenteSePrazoVenceu(admin(), ENTRADA, T0 + 3 * H);
+      expect(devolver).not.toHaveBeenCalled();
+      const daEquipe = leituras.find((l) => l.tabela === "messages" && tem(l, "eq", "direction", "outbound"));
+      expect(daEquipe && tem(daEquipe, "eq", "sent_via", "user")).toBe(true);
+      expect(daEquipe?.filtros.some((f) => f[0] === "in")).toBe(false);
+    }
+  });
+
+  it("option on, the phone reply is the last message and older than the deadline: back to the agent", async () => {
+    cenario.settings = comOpcao(true);
+    await devolverAoAgenteSePrazoVenceu(admin(), ENTRADA, T0 + 5 * 60_000 + PRAZO * 60_000);
+    expect(devolver).toHaveBeenCalledTimes(1);
+    expect(devolver.mock.calls[0]?.[1]).toEqual({
+      conversationId: CONVERSA,
+      origem: { automatica: { minutos: PRAZO } },
+    });
+    const daEquipe = leituras.find((l) => l.tabela === "messages" && tem(l, "eq", "direction", "outbound"));
+    expect(daEquipe?.filtros).toContainEqual(["in", "sent_via", ["user", "external_device"]]);
+  });
+
+  it("option on, inside the deadline: stays with the person", async () => {
+    cenario.settings = comOpcao(true);
+    await devolverAoAgenteSePrazoVenceu(admin(), ENTRADA, T0 + 5 * 60_000 + (PRAZO - 1) * 60_000);
+    expect(devolver).not.toHaveBeenCalled();
+  });
+
+  it("option on, the client wrote after the phone reply: she is waiting, stays with the person", async () => {
+    cenario.settings = comOpcao(true);
+    cenario.ultimaMensagemDoCliente = T0 + 10 * 60_000;
+    await devolverAoAgenteSePrazoVenceu(admin(), ENTRADA, T0 + 3 * 24 * H);
+    expect(devolver).not.toHaveBeenCalled();
+  });
+
+  it("the cron reads the option per organization", async () => {
+    const LIGADA = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const DESLIGADA = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    responder = (l) => {
+      if (l.tabela === "organizations") {
+        return {
+          data: [
+            { id: LIGADA, settings: comOpcao(true) },
+            { id: DESLIGADA, settings: comOpcao(false) },
+          ],
+          error: null,
+        };
+      }
+      if (l.tabela === "conversations") {
+        const id = l.filtros.find((f) => f[0] === "eq" && f[1] === "id")?.[2];
+        return { data: { id, service_closed_at: null, last_handoff_at: iso(T0) }, error: null };
+      }
+      if (l.tabela === "messages") {
+        const conv = l.filtros.find((f) => f[0] === "eq" && f[1] === "conversation_id")?.[2];
+        if (tem(l, "eq", "direction", "inbound")) {
+          // "aguardando": the client wrote after the phone reply.
+          return { data: { sent_at: iso(conv === "aguardando" ? T0 + 10 * 60_000 : T0 + 60_000) }, error: null };
+        }
+        const comCelular = l.filtros.some((f) => f[0] === "in" && f[1] === "sent_via");
+        return { data: comCelular ? { sent_at: iso(T0 + 5 * 60_000) } : null, error: null };
+      }
+      throw new Error(`unexpected table ${l.tabela}`);
+    };
+    const vencida = (id: string, org: string): { conversa: ConversaEmHandoff; minutos: number } => ({
+      conversa: { ...(cenario.conversa as unknown as ConversaEmHandoff), id, organization_id: org },
+      minutos: PRAZO,
+    });
+
+    const out = await filtrarClienteAguardando(
+      admin(),
+      [vencida("respondida-pelo-celular", LIGADA), vencida("aguardando", LIGADA), vencida("desligada", DESLIGADA)],
+      T0 + 3 * H,
+    );
+    expect(out.map((v) => v.conversa.id)).toEqual(["respondida-pelo-celular"]);
+    expect(leituras.filter((l) => l.tabela === "organizations")).toHaveLength(1);
+  });
+
+  it("the cron keeps every conversation when the organizations read fails", async () => {
+    responder = (l) =>
+      l.tabela === "organizations" ? { data: null, error: { message: "boom" } } : responderCenario(l);
+    const v = { conversa: { ...(cenario.conversa as unknown as ConversaEmHandoff) }, minutos: PRAZO };
+    expect(await filtrarClienteAguardando(admin(), [v], T0 + 3 * H)).toEqual([]);
+    expect(logWarn).toHaveBeenCalled();
   });
 });
 
