@@ -234,6 +234,17 @@ commit "$c" "renomeia slug da migration"
 saida="$(gate "$c")"; code=$?
 assert_exit "$code" 0 "renome passa (limite declarado, igual ao do hook: TRIAGEM.md:906)"
 
+echo "5b. (Berseba) moving a base file's timestamp frees it for a new file in the same PR"
+c="$TMP/c5b"; clonar "$c"; git -C "$c" switch -q -c sync/libera-timestamp
+git -C "$c" mv supabase/migrations/20260101120000_0262_existente.sql \
+              supabase/migrations/20260101120001_0262_existente.sql
+printf 'select 5;\n-- arrives from upstream with the freed timestamp\n' \
+  > "$c/supabase/migrations/20260101120000_0270_upstream.sql"
+commit "$c" "sync: move our timestamp, take upstream's file"
+saida="$(gate "$c")"; code=$?
+assert_exit "$code" 0 "a base file the PR moved away no longer collides"
+assert_not_contains "$saida" "CI REPROVADO" "does not report the old name"
+
 echo "6. merge da própria main passa (a main anda e entra na branch)"
 c="$TMP/c6"; clonar "$c"; git -C "$c" switch -q -c fix/merge-main
 migrar "$c" "20260916140000_0265_do_pr.sql"; commit "$c" "migration do PR"

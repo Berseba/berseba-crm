@@ -25,7 +25,7 @@ import * as path from "node:path";
 import { test, expect, type Page } from "./helpers/test";
 import { createClient } from "@supabase/supabase-js";
 
-import { waitForEmail, extractAuthConfirmLink, seguirLinkDeAcesso, uniqueEmail } from "./helpers/auth";
+import { uniqueEmail } from "./helpers/auth";
 
 import { signInviteToken } from "../../lib/auth/invite-token";
 import { generateTotp, msUntilNextTotpWindow } from "./utils/totp";
@@ -656,7 +656,8 @@ function tokenPath(acceptUrl: string): string {
 
 
 // Conta realmente inexistente: não substitui o cadastro por admin.createUser.
-test("convite novo: alternar cadastro/login, confirmar no Mailpit e entrar só na equipe convidada", async ({ browser, baseURL }) => {
+// Berseba: upstream confirms through Mailpit here; ours enters with no email.
+test("convite novo: alternar cadastro/login e entrar só na equipe convidada, sem e-mail de confirmação", async ({ browser }) => {
   test.setTimeout(180_000);
   const email = uniqueEmail("convite-lote");
   const senha = "SenhaForte!123";
@@ -699,15 +700,11 @@ test("convite novo: alternar cadastro/login, confirmar no Mailpit e entrar só n
     await page.getByLabel("Senha", { exact: true }).fill(senha);
     await page.getByLabel("Confirmar senha").fill(senha);
     await page.getByRole("button", { name: "Criar conta", exact: true }).click();
-    await expect(page.getByText("Confirme seu e-mail")).toBeVisible();
-    await page.screenshot({ path: "evidence/lote-bugfixes-01a178b3/convite-03-confirmar-email.png" });
-
-    const html = await waitForEmail(email, "Confirme seu e-mail");
-    const link = extractAuthConfirmLink(html, baseURL!);
-    // Confirmação usa o token_hash real entregue ao endereço do convite.
-    expect(Boolean(new URL(link).searchParams.get("token_hash"))).toBe(true);
-    await seguirLinkDeAcesso(page, link);
-    await expect(page).toHaveURL(/\/app\//);
+    // Berseba: the invite confirms the account, so there is no "Confirme seu
+    // e-mail" step and no Mailpit link (`lib/auth/invite-signup.ts`, incident of
+    // 2026-10-09). The signup lands straight inside the organization.
+    await page.waitForURL(/\/app(\/|$)/, { timeout: 60_000 });
+    await expect(page.getByText("Confirme seu e-mail")).toHaveCount(0);
     const depois = await svc.auth.admin.listUsers({ page: 1, perPage: 1000 });
     expect(depois.error).toBeNull();
     const usuario = depois.data.users.find((u) => u.email === email);
