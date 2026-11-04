@@ -30,6 +30,10 @@
  */
 export const AUDIT_ACTIONS = [
   // ── Berseba ──────────────────────────────────────────────────────────────
+  // A Mirae milestone that found the card already in its stage but advanced the
+  // agent's funnel (`lib/integrations/mirae/milestone.ts`). A milestone that moves
+  // the card is audited as `lead.moved` by `moveLeadHandler`.
+  "mirae.milestone_applied",
   // OUR entry, at the TOP on purpose: upstream appends its own at the END of
   // this list on every release, and that is exactly where the v1.61.0 merge
   // conflicted. At the top, no sync touches this line.
