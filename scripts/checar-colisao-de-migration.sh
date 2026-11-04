@@ -157,6 +157,10 @@ adicionadas_nomes="$(xargs -n1 basename <<<"$adicionadas" | sed '/^$/d')"
 
 base_arvore="$(git ls-tree -r --name-only "$BASE" -- supabase/migrations 2>/dev/null | sed 's#^supabase/migrations/##' || true)"
 head_arvore="$(git ls-tree -r --name-only HEAD -- supabase/migrations 2>/dev/null | sed 's#^supabase/migrations/##' || true)"
+# Berseba: a base file this PR renames or removes is gone after the merge, so it
+# cannot collide. The v1.99.0 upstream sync renamed our 9004 to free a timestamp
+# upstream's 0722 had taken, and the check still reported the old name.
+base_que_fica="$(comm -12 <(printf '%s\n' "$base_arvore" | sort) <(printf '%s\n' "$head_arvore" | sort))"
 
 # ── as outras refs da máquina (issue #1155) ────────────────────────────────────────────
 base_commit="$(git rev-parse "$BASE^{commit}" 2>/dev/null || true)"
@@ -378,8 +382,8 @@ while IFS= read -r nome; do
     continue
   fi
 
-  colisao_n="$(grep -E "^[0-9]{14}_${nnnn}_.+\.sql$" <<<"$base_arvore" || true)"
-  colisao_t="$(grep -E "^${ts}_[0-9]{4}_.+\.sql$" <<<"$base_arvore" || true)"
+  colisao_n="$(grep -E "^[0-9]{14}_${nnnn}_.+\.sql$" <<<"$base_que_fica" || true)"
+  colisao_t="$(grep -E "^${ts}_[0-9]{4}_.+\.sql$" <<<"$base_que_fica" || true)"
   if [ -n "$colisao_n" ]; then
     lista="$(tr '\n' ' ' <<<"$colisao_n" | sed 's/ *$//')"
     echo "::error file=$caminho::NNNN=$nnnn já existe em '$BASE': $lista"

@@ -136,10 +136,6 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response
     return paginaDeSaida(whatsAppUrl(config.whatsappE164, mensagemSemRef));
   }
 
-  // Berseba: `query_raw` keeps only the normalized keys, like the tracked-link
-  // path (`rastreio/links.ts`). The whole query string of an anonymous visitor
-  // was stored uncapped and kept forever, with whatever name, phone or e-mail
-  // the page forwarded. `normalizarUtm` already keeps `fbclid` and `gclid`.
   const criado = await criarClickRef(admin, "meta_ads_click_refs", organizationId, {
     utm,
     query_raw: utm,

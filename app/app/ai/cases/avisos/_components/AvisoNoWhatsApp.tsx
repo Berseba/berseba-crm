@@ -9,7 +9,11 @@
  *    configuração é aceita e nenhum aviso chega. Elas vêm antes do formulário
  *    de propósito — ler "seus números não servem para isso" depois de preencher
  *    tudo é a definição de tela que não avisou.
- * 2. **Salva pelo RPC**, que é quem faz as sete guardas na mesma transação.
+ * 2. **Salva pelo RPC**, que é quem faz as sete guardas na mesma transação — e
+ *    **remove** pelo `DELETE`, a ação que devolve o número à ingestão normal
+ *    (issue #3338). As duas são coisas diferentes de propósito: desligar o
+ *    switch PRESERVA o número e ele continua interno (o que chega dele não vira
+ *    atendimento), remover apaga a configuração e o número volta a ser atendido.
  * 3. **Manda um aviso de teste de verdade**, com o preço escrito antes do
  *    clique: ele gasta uma mensagem do número.
  *
@@ -45,8 +49,12 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { useT } from "@/hooks/i18n/useT";
+import { useTelefoneExemplo } from "@/hooks/contacts/useTelefoneExemplo";
+import { usePaisDaOrgAtiva } from "@/hooks/auth/AuthProvider";
+import { perfilDoPais } from "@/lib/legal/perfil-do-pais";
 import {
   useAvisoDeCaso,
+  useRemoverAvisoDeCaso,
   useSalvarAvisoDeCaso,
   useTestarAvisoDeCaso,
   type EstadoDoAviso,
@@ -71,7 +79,15 @@ const FRASE_EXTRA_DO_TESTE = {
 } as const;
 
 const RASCUNHO_VAZIO = {
-  canal: "", telefone: "", rotulo: "", ligado: false, respostaWhatsappHabilitada: false,
+  canal: "",
+  telefone: "",
+  rotulo: "",
+  ligado: false,
+  respostaWhatsappHabilitada: false,
+  /** COMO escolher quem recebe (#3803). `fixo` é o que a instalação já fazia. */
+  destinoModo: "fixo" as "fixo" | "responsavel",
+  /** `user_id` → WhatsApp do rascunho. Ausente = "não mexi". */
+  whatsapps: {} as Record<string, string>,
 };
 type Rascunho = typeof RASCUNHO_VAZIO;
 
@@ -83,7 +99,22 @@ function rascunhoDoEstado(estado: EstadoDoAviso | undefined): Rascunho {
     rotulo: estado.config.rotulo ?? "",
     ligado: estado.config.ligado,
     respostaWhatsappHabilitada: estado.config.resposta_whatsapp_habilitada,
+    destinoModo: estado.config.destino_modo ?? "fixo",
+    whatsapps: whatsappsDoRascunho(estado),
   };
+}
+
+/**
+ * O rascunho dos números da equipe: o que está GRAVADO, e não o que veio da
+ * tela — quem não cadastrou aparece com campo vazio, e salvar sem digitar nada
+ * não apaga o número de ninguém.
+ */
+function whatsappsDoRascunho(estado: EstadoDoAviso): Record<string, string> {
+  const mapa: Record<string, string> = {};
+  // `?? []`: um estado em cache de antes desta versão não tem `equipe`, e a tela
+  // não pode quebrar por causa de um pacote de JS antigo no navegador de alguém.
+  for (const membro of estado.equipe ?? []) mapa[membro.user_id] = membro.whatsapp ?? "";
+  return mapa;
 }
 
 export function AvisoNoWhatsApp() {
@@ -132,6 +163,11 @@ export function AvisoNoWhatsApp() {
           "O aviso sai quando o assistente abre o caso. Quando o cliente responde e o caso volta a esperar você, o aviso não se repete — acompanhe pela Central de alertas.",
         )}
       </p>
+      <p className="text-xs text-muted-foreground">
+        {t(
+          "Nas transferências para atendimento humano, há uma tentativa de aviso por episódio, sem resumo da conversa. Depois de retomar o atendimento automático, uma nova transferência pode gerar outro aviso. Consulte o resultado na Central de alertas; responda ao cliente pelo CRM.",
+        )}
+      </p>
 
       <EntregasDoAviso entregas={estado.entregas} laco={estado.laco} />
     </div>
@@ -144,16 +180,36 @@ export function AvisoNoWhatsApp() {
  */
 function FormularioDoAviso({ estado }: { estado: EstadoDoAviso }) {
   const t = useT();
+  const telefoneExemplo = useTelefoneExemplo();
+  const noBrasil = perfilDoPais(usePaisDaOrgAtiva()).codigo === "BR";
   const salvar = useSalvarAvisoDeCaso();
   const testar = useTestarAvisoDeCaso();
+  const remover = useRemoverAvisoDeCaso();
 
   const [rascunho, setRascunho] = useState<Rascunho>(() => rascunhoDoEstado(estado));
   /** A pergunta do número que já é cliente. `null` = não foi feita. */
   const [confirmarContato, setConfirmarContato] = useState<string | null>(null);
+  /**
+   * A confirmação da REMOÇÃO. Estado próprio, e não o `confirmarContato`: uma é
+   * sobre um número que vai ENTRAR (e pode ser cancelada escolhendo outro), a
+   * outra sobre a configuração que vai SAIR. Compartilhar as duas faria a
+   * primeira pergunta reagir ao clique da segunda.
+   */
+  const [confirmarRemocao, setConfirmarRemocao] = useState(false);
 
   const oferecidas = estado.conexoes.filter((c) => c.aceitaMensagemLivre);
   const telefoneOk = telefoneDeAvisoValido(rascunho.telefone);
-  const podeSalvar = rascunho.canal !== "" && telefoneOk && !salvar.isPending;
+  /**
+   * Os números da equipe: vazio é ACEITO (a pessoa não cadastrou, e o elo cai
+   * para o próximo); preenchido e incompleto NÃO é — salvar um número torto faria
+   * o aviso falhar no transporte, longe daqui.
+   */
+  const numerosDaEquipeOk = Object.values(rascunho.whatsapps).every(
+    (n) => n.trim() === "" || telefoneDeAvisoValido(n),
+  );
+  const equipe = estado.equipe ?? [];
+  const comNumero = equipe.filter((m) => (rascunho.whatsapps[m.user_id] ?? "").trim() !== "").length;
+  const podeSalvar = rascunho.canal !== "" && telefoneOk && numerosDaEquipeOk && !salvar.isPending;
   /**
    * O switch, e por que ele NÃO é `estado.pode_ligar` sozinho nem um `||` com o
    * rascunho.
@@ -181,6 +237,17 @@ function FormularioDoAviso({ estado }: { estado: EstadoDoAviso }) {
         rotulo: rascunho.rotulo.trim() === "" ? null : rascunho.rotulo.trim(),
         ligado: rascunho.ligado,
         resposta_whatsapp_habilitada: rascunho.respostaWhatsappHabilitada,
+        destino_modo: rascunho.destinoModo,
+        // Todos os membros vão SEMPRE, com `null` para quem está sem número: é
+        // assim que "apague o meu" chega ao banco. Mandar só quem tem número
+        // deixaria o número antigo vivo depois de a pessoa apagá-lo na tela.
+        responsaveis: equipe.map((m) => {
+          const bruto = (rascunho.whatsapps[m.user_id] ?? "").trim();
+          return {
+            user_id: m.user_id,
+            whatsapp: bruto === "" ? null : normalizarTelefoneDeAviso(bruto),
+          };
+        }),
         ...(confirma ? { confirma_contato: true } : {}),
       });
       setConfirmarContato(null);
@@ -220,6 +287,20 @@ function FormularioDoAviso({ estado }: { estado: EstadoDoAviso }) {
     }
   }
 
+  async function removerDestinatario() {
+    try {
+      await remover.mutateAsync();
+      setConfirmarRemocao(false);
+      toast.success(t("Destinatário removido."));
+    } catch (erro) {
+      toast.error(
+        erro instanceof ApiError
+          ? erro.message
+          : t("Não foi possível remover o destinatário. Tente de novo."),
+      );
+    }
+  }
+
   return (
     <Card className="flex flex-col gap-4 p-4">
       <div className="flex flex-col gap-1.5">
@@ -251,7 +332,7 @@ function FormularioDoAviso({ estado }: { estado: EstadoDoAviso }) {
           id="telefone"
           inputMode="tel"
           className="w-full sm:w-72"
-          placeholder="+5531999998888"
+          placeholder={telefoneExemplo}
           value={rascunho.telefone}
           onChange={(e) =>
             setRascunho((r) => ({ ...r, telefone: normalizarTelefoneDeAviso(e.target.value) }))
@@ -259,7 +340,10 @@ function FormularioDoAviso({ estado }: { estado: EstadoDoAviso }) {
           aria-invalid={rascunho.telefone !== "" && !telefoneOk}
         />
         <p className="text-xs text-muted-foreground">
-          {t("Comece pelo código do país. Um celular do Brasil fica assim: +55, DDD e o número.")}
+          {/* A explicação brasileira fica para o Brasil; fora dele, o exemplo do país da organização. */}
+          {noBrasil
+            ? t("Comece pelo código do país. Um celular do Brasil fica assim: +55, DDD e o número.")
+            : t("Comece pelo código do país, por exemplo {exemplo}.").replace("{exemplo}", () => telefoneExemplo)}
         </p>
         {rascunho.telefone !== "" && !telefoneOk ? (
           <p className="text-xs text-destructive" data-testid="telefone-invalido">
@@ -267,6 +351,95 @@ function FormularioDoAviso({ estado }: { estado: EstadoDoAviso }) {
           </p>
         ) : null}
       </div>
+
+      {/* ── PARA QUEM VAI O AVISO (#3803) ────────────────────────────────
+          O modo vem ANTES do switch porque ele muda o significado do número
+          acima: em `fixo` ele é o destinatário; em `responsavel` ele é o último
+          recurso. Ler o número sem saber disso é ler a tela errado. */}
+      <div className="flex flex-col gap-1.5">
+        <Label htmlFor="destino-modo">{t("Quem recebe os avisos")}</Label>
+        <Select
+          value={rascunho.destinoModo}
+          onValueChange={(v) =>
+            setRascunho((r) => ({ ...r, destinoModo: v as Rascunho["destinoModo"] }))
+          }
+        >
+          <SelectTrigger id="destino-modo" className="w-full sm:w-96">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="fixo">{t("Sempre o número da empresa")}</SelectItem>
+            <SelectItem value="responsavel">{t("Quem está com o atendimento")}</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          {rascunho.destinoModo === "responsavel"
+            ? t(
+                "O aviso vai para quem está com a conversa; se essa pessoa não tiver WhatsApp cadastrado, para quem é dono do negócio; depois, para o dono da carteira do contato. Se ninguém tiver, vai para o número acima.",
+              )
+            : t("Todo aviso vai para o número acima, como sempre foi.")}
+        </p>
+      </div>
+
+      {rascunho.destinoModo === "responsavel" ? (
+        <div className="flex flex-col gap-2 rounded-lg border p-3" data-testid="whatsapp-da-equipe">
+          <p className="text-sm font-medium">{t("WhatsApp de cada pessoa da equipe")}</p>
+          <p className="text-xs text-muted-foreground">
+            {t(
+              "É este número que recebe o aviso quando a pessoa é a responsável. Sem número, ela é pulada — o aviso não fica sem destinatário.",
+            )}
+          </p>
+          {equipe.length === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {t("Ainda não há outras pessoas nesta organização.")}
+            </p>
+          ) : (
+            equipe.map((membro) => {
+              const valor = rascunho.whatsapps[membro.user_id] ?? "";
+              const ok = valor.trim() === "" || telefoneDeAvisoValido(valor);
+              return (
+                <div
+                  key={membro.user_id}
+                  className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3"
+                >
+                  <span className="w-full truncate text-sm sm:w-44">
+                    {membro.nome ?? t("Sem nome")}
+                  </span>
+                  <Input
+                    inputMode="tel"
+                    className="w-full sm:w-64"
+                    placeholder={telefoneExemplo}
+                    value={valor}
+                    onChange={(e) =>
+                      setRascunho((r) => ({
+                        ...r,
+                        whatsapps: {
+                          ...r.whatsapps,
+                          [membro.user_id]: normalizarTelefoneDeAviso(e.target.value),
+                        },
+                      }))
+                    }
+                    aria-invalid={!ok}
+                    aria-label={membro.nome ?? membro.user_id}
+                  />
+                  {ok ? null : (
+                    <span className="text-xs text-destructive">
+                      {t("Esse número ainda não está completo.")}
+                    </span>
+                  )}
+                </div>
+              );
+            })
+          )}
+          {comNumero === 0 ? (
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "Ninguém da equipe tem WhatsApp cadastrado: os avisos vão continuar saindo para o número acima.",
+              )}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div className="flex items-start gap-3 rounded-lg border p-3">
         <Switch
@@ -312,7 +485,7 @@ function FormularioDoAviso({ estado }: { estado: EstadoDoAviso }) {
           </Label>
           <p className="text-xs text-muted-foreground">
             {t(
-              "O aviso sai na hora, inclusive fora do horário comercial — sua equipe não é cliente.",
+              "Os avisos podem sair fora do horário comercial e respeitam a conexão e os limites de envio do número.",
             )}
           </p>
         </div>
@@ -364,6 +537,67 @@ function FormularioDoAviso({ estado }: { estado: EstadoDoAviso }) {
           "O teste manda uma mensagem de verdade e conta no limite diário desse número. Salve antes de testar.",
         )}
       </p>
+
+      {/* ── A REMOÇÃO DO DESTINATÁRIO (issue #3338) ────────────────────────
+          No FIM do cartão, e não ao lado de Salvar: uma ação que apaga a
+          configuração não pode ficar a um clique de distância de quem só queria
+          salvar. Só aparece com configuração SALVA — antes disso não há
+          destinatário para remover, e um botão que não faz nada ensina a não
+          confiar nos botões. */}
+      {jaSalvo ? (
+        confirmarRemocao ? (
+          <div
+            className="flex flex-col gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3"
+            data-testid="confirmar-remocao"
+          >
+            <p className="text-sm font-medium">{t("Remover o destinatário dos avisos?")}</p>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "A configuração de avisos é apagada e este número volta a ser um número comum: o que ele mandar passa a virar atendimento no Inbox. O histórico de entregas desta tela continua aqui.",
+              )}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "Também param de sair, até você cadastrar um número de novo: os avisos de transferência para atendimento humano, os avisos da Agenda que usam o mesmo número dos casos e as automações com a ação \"Mensagem para a equipe\".",
+              )}
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => void removerDestinatario()}
+                disabled={remover.isPending}
+              >
+                {remover.isPending ? t("Removendo…") : t("Remover destinatário")}
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmarRemocao(false)}
+                disabled={remover.isPending}
+              >
+                {t("Manter")}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="self-start"
+              onClick={() => setConfirmarRemocao(true)}
+            >
+              {t("Remover destinatário")}
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              {t(
+                "Diferente de desligar os avisos: aqui o número sai da configuração e volta a entrar no Inbox.",
+              )}
+            </p>
+          </div>
+        )
+      ) : null}
     </Card>
   );
 }

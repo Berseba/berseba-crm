@@ -190,7 +190,7 @@ function callsDuring(userId: string, query: string): Record<string, number> {
     select 'calls:' || coalesce(string_agg(funcname || '=' || calls, ',' order by funcname), '')
       from pg_stat_xact_user_functions
      where schemaname = 'public'
-       and funcname in ('fn_conversation_visibility_scope', 'fn_can_view_conversation', 'fn_is_platform_admin');
+       and funcname in ('fn_conversation_visibility_scope', 'fn_conversation_scope', 'fn_can_view_conversation', 'fn_is_platform_admin');
     commit;
   `);
   const calls: Record<string, number> = { rows: Number(idsAfter("rows", out)) };
@@ -242,13 +242,17 @@ describe("conversations_select — scope once per query (migration 9001)", () =>
     expect(divergent).toEqual([]);
   }, 120_000);
 
-  it("a conversation count runs the scope function once, and fn_can_view_conversation never", () => {
+  // Since the sync with upstream v1.99.0 the final `conversations_select` is
+  // upstream's (migrations 0726 and 9016, the same fix: `fn_conversation_scope()`,
+  // at most once per sub-plan, never per row). The parity above still pins our
+  // rules on it; the cost below accepts either scope function.
+  it("a conversation count never calls a visibility function per row", () => {
     const calls = callsDuring(
       AGENT,
       `select count(*) from public.conversations where organization_id in (${orgList});`,
     );
     expect(calls.rows).toBe(7);
-    expect(calls.fn_conversation_visibility_scope).toBe(1);
+    expect((calls.fn_conversation_scope ?? 0) + (calls.fn_conversation_visibility_scope ?? 0)).toBeLessThanOrEqual(3);
     expect(calls.fn_can_view_conversation ?? 0).toBe(0);
   });
 
@@ -259,8 +263,8 @@ describe("conversations_select — scope once per query (migration 9001)", () =>
     );
     // 7 visible conversations x 2 messages: the inheritance still holds.
     expect(calls.rows).toBe(14);
-    expect(calls.fn_is_platform_admin).toBeLessThanOrEqual(2);
-    expect(calls.fn_conversation_visibility_scope).toBe(1);
+    expect(calls.fn_is_platform_admin ?? 0).toBeLessThanOrEqual(2);
+    expect((calls.fn_conversation_scope ?? 0) + (calls.fn_conversation_visibility_scope ?? 0)).toBeLessThanOrEqual(3);
     expect(calls.fn_can_view_conversation ?? 0).toBe(0);
   });
 
