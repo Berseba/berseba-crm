@@ -36,6 +36,8 @@ export interface AtendimentoConfig {
   conversation_stays_with_attendant: boolean;
   /** Minutos de silêncio da IA após resposta pelo celular. `null` = o padrão de 60. */
   manual_reply_silence_minutes: number | null;
+  /** Berseba: a phone reply counts as the team's answer in the handoff return. Off by default. */
+  phone_reply_counts_as_team?: boolean;
 }
 
 /**
@@ -85,6 +87,11 @@ const VISIBILIDADE_COPY: Record<VisibilityMode, { titulo: string; corpo: string 
       "O atendente vê apenas o que foi direcionado a ele — nem a fila. Combine com o " +
       "rodízio: sem alguém distribuindo, ninguém recebe nada e as telas ficam vazias.",
   },
+  own_and_sector: {
+    titulo: "Os seus e os do seu setor",
+    corpo:
+      "O atendente vê a própria carteira e as conversas que estão no setor dele, inclusive as que estão com um colega do mesmo setor — é o modo para cobrir férias e ausências. As conversas dos outros setores continuam fora do alcance dele.",
+  },
 };
 
 function Escolha({
@@ -131,7 +138,14 @@ function Escolha({
   );
 }
 
-export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
+export function AtendimentoForm({
+  initial,
+  setoresLigado = false,
+}: {
+  initial: AtendimentoConfig;
+  /** Módulo opcional `setores` (doc 213): desligado, o modo do setor não é oferecido. */
+  setoresLigado?: boolean;
+}) {
   const t = useT();
   const [form, setForm] = useState<AtendimentoConfig>(initial);
   const [salvo, setSalvo] = useState<AtendimentoConfig>(initial);
@@ -235,7 +249,9 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
           </p>
         </div>
         <div className="space-y-2">
-          {VISIBILITY_MODES.map((v) => (
+          {VISIBILITY_MODES.filter(
+            (v) => v !== "own_and_sector" || setoresLigado || initial.visibility_mode === v,
+          ).map((v) => (
             <Escolha
               key={v}
               nome="visibilidade"
@@ -248,6 +264,17 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
             />
           ))}
         </div>
+
+        {form.visibility_mode === "own_and_sector" ? (
+          <p
+            data-testid="aviso-modo-do-setor"
+            className="rounded-md border border-border bg-muted/40 p-3 text-xs"
+          >
+            {t(
+              "Este modo usa os setores de atendimento: quem não está em nenhum setor vê só as conversas que são dele. No funil, os negócios continuam restritos aos seus.",
+            )}
+          </p>
+        ) : null}
 
         {combinacaoMorta ? (
           <p
@@ -315,6 +342,31 @@ export function AtendimentoForm({ initial }: { initial: AtendimentoConfig }) {
               )}
             </p>
           </div>
+        ) : null}
+        {devolveSozinho ? (
+          // Berseba: phone replies as the team's answer (devolucao-por-pendencia.berseba.ts).
+          <label className="flex cursor-pointer items-start gap-3 border-t pt-4">
+            <input
+              type="checkbox"
+              data-testid="resposta-pelo-celular-conta"
+              checked={form.phone_reply_counts_as_team ?? false}
+              disabled={isPending}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, phone_reply_counts_as_team: e.target.checked }))
+              }
+              className="mt-1 h-4 w-4 shrink-0 accent-primary"
+            />
+            <span className="space-y-1">
+              <span className="block text-sm font-medium">
+                {t("Contar a resposta pelo celular como resposta da equipe")}
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                {t(
+                  "Ligue se a equipe responde os clientes pelo celular. A conversa volta ao agente quando a última mensagem foi da equipe, pelo CRM ou pelo celular, e o prazo passou. Deixe desligado se o celular manda lembretes automáticos de outro sistema: eles contariam como resposta.",
+                )}
+              </span>
+            </span>
+          </label>
         ) : null}
       </Card>
 

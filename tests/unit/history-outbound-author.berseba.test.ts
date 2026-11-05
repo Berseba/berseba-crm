@@ -172,7 +172,7 @@ describe("the opening explains the authors", () => {
   it("projected: the note sits under the history heading and the team's offer is 'equipe'", async () => {
     const { context } = await contextOf(HISTORY);
     const text = buildOpeningMessage(null, null, context, "—", true);
-    const heading = text.indexOf("## Contexto do lead (contato + últimas mensagens)");
+    const heading = text.indexOf("## Contexto do lead (contato + últimas mensagens");
     expect(heading).toBeGreaterThan(-1);
     expect(text.indexOf(historyAuthorshipNote(true))).toBeGreaterThan(heading);
     expect(text).toContain('"de":"equipe","texto":"Sua renovação vence');
@@ -185,5 +185,23 @@ describe("the opening explains the authors", () => {
     expect(text).not.toContain(historyAuthorshipNote(true));
     expect(historyAuthorshipNote(false)).toContain("`author`");
     expect(historyAuthorshipNote(true)).toContain("`de`");
+  });
+
+  it("lines (LEAD_CONTEXT_HISTORY_FORMAT=linhas): each line names the author, raw or projected", async () => {
+    const { context } = await contextOf(HISTORY);
+    for (const projeta of [false, true]) {
+      const text = buildOpeningMessage(null, null, context, "—", projeta, [], "", undefined, undefined, "", "linhas");
+      expect(text).toContain(historyAuthorshipNote(projeta, true));
+      expect(text).toContain('] equipe: "Sua renovação vence');
+      expect(text).toContain('] você: "Oi! Quer que eu');
+      expect(text).not.toMatch(/\] nós:/);
+    }
+  });
+
+  it("the projected and line notes map the three labels to upstream's `de: \"nós\"`", () => {
+    for (const note of [historyAuthorshipNote(true), historyAuthorshipNote(false, true)]) {
+      expect(note).toContain('`de: "nós"` de "Quem disse o quê"');
+    }
+    expect(historyAuthorshipNote(false)).not.toContain("Quem disse o quê");
   });
 });
