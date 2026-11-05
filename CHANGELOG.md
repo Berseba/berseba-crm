@@ -8,6 +8,93 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.12.0] — 2026-11-05
+
+### ⚠️ Requer atenção
+
+- **Sincronização com o DeskcommCRM v1.102.0 (vinha da v1.99.0)** O fornecedor pediu ação do operador nestas versões — leia antes de atualizar:
+
+  **v1.100.0**
+
+  - **Contato do tipo Fornecedor não entra mais no rodízio automático** Quem usa o tipo Fornecedor para um contato que é atendimento de verdade passa a
+    não recebê-lo pelo rodízio: a conversa fica sem dono até alguém atribuí-la à
+    mão. No modo "Só os seus", o atendente não a vê enquanto ela estiver sem dono.
+    Nada muda para quem nunca marcou o tipo — o padrão do contato é Cliente. Crédito: @webtecnica (#3942).
+- **Sincronização com o DeskcommCRM v1.99.0 (vinha da v1.87.0)** O fornecedor pediu ação do operador nestas versões — leia antes de atualizar:
+
+  **v1.98.0**
+
+  - **Conta, recorrência, lançamento manual e parcela de honorários gravam na moeda da organização** A API do catálogo do financeiro (`POST` e `PATCH` em `/api/v1/financeiro/catalogo/contas`) deixa de ler o campo `currency` do corpo. Uma integração que criava conta em moeda diferente da organização passa a ter a conta na moeda da organização, sem erro, porque o campo é ignorado. Também não dá mais para trocar a moeda de uma conta existente por essa rota. Se a sua integração dependia disso, ajuste antes de atualizar.
+
+    As respostas de lançamentos e de parcelas de honorários passam a trazer o campo `currency`.
+
+    Contribuição de @webtecnica (#3459).
+
+  **v1.97.0**
+
+  - **Campos de seleção passam a gravar a opção do funil, não o texto cru** Se uma integração sua (pela API) ou o agente de IA grava num campo do tipo "Lista de uma escolha", "Lista de várias escolhas" ou "Lista pesquisável" (sem "permitir valor novo") um valor que não está entre as opções cadastradas no funil, essa escrita passa a ser recusada com o erro `custom_field_value_not_in_list`, e nada é gravado. Antes de atualizar, cadastre no funil as opções que faltam ou ajuste a integração.
+
+    O valor que casa com uma opção é gravado pelo valor dela (`sp`, não `São Paulo`): se a sua integração lê o campo de volta esperando o texto que enviou, ela passa a receber o valor da opção. Numa lista de várias escolhas, o texto `casa, apartamento` passa a ser gravado como lista (`["casa","apto"]`).
+
+    Formulários de captação não são recusados: o valor fora da lista entra como veio.
+
+  **v1.91.0**
+
+  - **A trava de número novo passa a segurar os retornos automáticos até você liberar o número na Central** Se algum número seu ainda não cumpre essas condições (em geral, o que começou a enviar há menos de 31 dias), os retornos automáticos dele param depois da atualização e esperam na fila, sem se perder. Abra a **Central**, procure o aviso "Número novo aguardando liberação (go-live)" e marque como resolvido quando o número estiver pronto para disparar. Nenhum arquivo precisa ser editado.
+
+  **v1.88.0**
+
+  - **As execuções de IA mostram o provedor configurado no painel** Antes, modelo com barra no nome era registrado como OpenRouter; gasto e teto não mudam. Medido por @eduardosuruagy (#3098) e corrigido por @webtecnica (#3185).
+
+  - **A recusa da inscrição de push aparece na tela, e o interruptor não fica ligado mentindo** Quando o servidor ou o navegador recusa a inscrição, o interruptor desliga e a tela diz o motivo. Sem as chaves VAPID, ele fica ligado e o aviso da página explica. Contribuição de @webtecnica (#3157, #3164).
+
+  - **O restore do backup só diz que deu certo quando confere que os dados voltaram** O `restore.sh` compara, tabela por tabela, as linhas que o backup declara com as do banco; se não bater, para e diz qual tabela, o esperado e o achado. Segue usando a conta de banco da atualização. Conserto de @webtecnica, a partir do problema encontrado por @apoenondigitalmarketing numa VPS real (#2381).
+
+  - **Especialista de um roteador de intenções publica sem número próprio** Atende quando o roteador for ativado. Contribuição de @lucivan212 (#3284).
+
+  - **A instalação atrás de Traefik volta a conferir que a rota do Supabase chegou ao serviço de login** O fim do instalador reprova, com mensagem clara, quando `/auth/v1/*` no seu domínio cai no sistema em vez do serviço de login; sem resposta (certificado ainda saindo), só avisa. Nada muda em instalações no ar nem no proxy padrão. Crédito: @webtecnica.
+
+  - **Transferir a conversa leva o negócio aberto do contato, e assumir dá dono ao negócio sem responsável** Com mais de um negócio aberto visível, nada muda; vale a visibilidade de quem transfere (na padrão, de atendente para atendente o negócio não vai junto; vai quando transfere gerente ou administrador, ou com "todos veem tudo"), e assumir nunca tira o card de um colega nem de um agente de IA. A troca gera `lead.assigned` e o aviso "Lead atribuído a você": se a sua integração escuta `lead.assigned`, ela passa a recebê-lo também nas transferências do Inbox. Refs #3177.
+
+  - **O turno adiado pelo horário do agente não conta roteamento duas vezes** Contribuição de @webtecnica (#3215).
+
+  - **A segunda trava das receitas prontas volta a conferir as tabelas** A primeira trava não mudou. Nada muda para quem usa. Contribuição de @paulolimajr77 (#3203).
+
+  - **Um PDF recebido no WhatsApp não derruba mais o worker** Desde a 1.83.0 a leitura de PDF saiu do processo separado e podia reiniciar o worker, interrompendo respostas e acendendo o alerta "fila de eventos parada"; ela volta a rodar à parte. Contribuição de @Gervanno (#3186).
+
+### Adicionado
+
+- **O Mirae lê o funil de entrada do estúdio** O Mirae passa a ler, com o token de integração do CRM (permissão de leitura), os negócios de um funil num intervalo de datas e a lista de funis com suas etapas. É isso que permite ao Mirae mostrar o funil de ponta a ponta, do primeiro contato até a matrícula. Para cada negócio vão só a etapa, a situação (aberto, ganho ou perdido), o motivo da perda, a origem e a campanha, o telefone, as datas da última mensagem recebida e enviada e o link do card no CRM. Nome, e-mail, CPF, texto das mensagens, campos personalizados e etiquetas nunca saem. Contatos marcados como pessoais ficam de fora, e um token só enxerga a própria empresa. Para quem não usa o Mirae nada muda.
+
+- **Avaliação, presença, falta e matrícula no Mirae movem o card no CRM** O Mirae passa a avisar o CRM quando a avaliação é marcada, quando a pessoa vem ou falta, e quando ela se matricula. O CRM então leva o card dessa pessoa para a etapa que o estúdio escolheu para cada um desses momentos (por exemplo "Avaliação feita", "Faltou" e "Matriculada"), com as mesmas regras de quem move o card pela tela: campos obrigatórios, motivo de ganho e de perda, histórico na linha do tempo e registro de auditoria. A pessoa é reconhecida pelo telefone. O Mirae nunca cria contato nem card, e contatos pessoais ficam de fora. Só a matrícula reabre um card perdido, já como ganho. Para usar, o token de integração do CRM guardado no Mirae precisa da permissão de escrita e do papel de atendente. Para quem não usa o Mirae nada muda.
+
+### Alterado
+
+- **Sincronização com o DeskcommCRM v1.102.0 (vinha da v1.99.0)** O produto passa a incluir tudo o que o fornecedor lançou entre a v1.99.0 e a v1.102.0. As notas de cada versão estão nas releases dele:
+
+  - [v1.102.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.102.0)
+  - [v1.101.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.101.0)
+  - [v1.100.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.100.0)
+
+- **Sincronização com o DeskcommCRM v1.99.0 (vinha da v1.87.0)** O produto passa a incluir tudo o que o fornecedor lançou entre a v1.87.0 e a v1.99.0. As notas de cada versão estão nas releases dele:
+
+  - [v1.99.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.99.0)
+  - [v1.98.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.98.0)
+  - [v1.97.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.97.0)
+  - [v1.96.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.96.0)
+  - [v1.95.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.95.0)
+  - [v1.94.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.94.0)
+  - [v1.93.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.93.0)
+  - [v1.92.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.92.0)
+  - [v1.91.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.91.0)
+  - [v1.90.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.90.0)
+  - [v1.89.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.89.0)
+  - [v1.88.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.88.0)
+
+### Corrigido
+
+- **A confirmação de um agendamento feito pela IA não é mais barrada como promessa** Quando a IA marca ou remarca um horário no avec e em seguida confirma para a cliente ("Prontinho, seu horário está marcado…"), a revisão de promessas passa a ver o agendamento que o sistema acabou de gravar e deixa a confirmação sair. O mesmo vale quando a IA consulta e informa um horário que a cliente já tem. Antes, ela tratava essa confirmação como um horário prometido sem comprovação, barrava todas as tentativas e a cliente ficava sem resposta, mesmo com o horário já marcado. Além disso, se a revisão de promessas barrar todas as respostas de um atendimento e nenhuma mensagem sair, a conversa passa para a equipe com o aviso de transferência, em vez de ficar em silêncio.
+
 ## [2.11.0] — 2026-10-30
 
 ### Adicionado
@@ -9527,7 +9614,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.11.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.12.0...HEAD
+[2.12.0]: https://github.com/berseba/berseba-crm/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/berseba/berseba-crm/compare/v2.10.1...v2.11.0
 [2.10.1]: https://github.com/berseba/berseba-crm/compare/v2.10.0...v2.10.1
 [2.10.0]: https://github.com/berseba/berseba-crm/compare/v2.9.0...v2.10.0
