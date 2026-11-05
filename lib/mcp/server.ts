@@ -89,6 +89,7 @@ export function createMcpServer(
           role: auth.role,
           actor: auth.actor,
           apiTokenId: auth.apiTokenId,
+          tokenScopes: auth.scopes,
           requestId,
           supabase,
         };
