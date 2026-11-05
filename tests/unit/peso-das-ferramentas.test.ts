@@ -37,7 +37,27 @@ import { allTools } from "@/lib/mcp/tools";
 
 const BASE = "linha de base, medida quando a cerca nasceu (2026-10-31)";
 
+// Berseba: baseline of our agenda tools, measured in the v1.102.0 sync (2026-11-05).
+const BERSEBA = "linha de base Berseba, medida no sync da v1.102.0 (2026-11-05)";
+
 const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
+  // ── Berseba ──────────────────────────────────────────────────────────────
+  // OUR entries, at the TOP so an upstream sync never touches them. The avec
+  // tools (salon Mayara Morales) and the Mirae tools (Fiore Pilates) only reach
+  // the organization that has them configured, but the catalog counts them all.
+  "avec_my_appointments": { tokens: 206, motivo: BERSEBA },
+  "avec_find_services": { tokens: 142, motivo: BERSEBA },
+  "avec_free_slots": { tokens: 573, motivo: BERSEBA },
+  "avec_book": { tokens: 252, motivo: BERSEBA },
+  "avec_reschedule": { tokens: 170, motivo: BERSEBA },
+  "avec_cancel": { tokens: 175, motivo: BERSEBA },
+  "mirae_my_appointments": { tokens: 320, motivo: BERSEBA },
+  "mirae_services": { tokens: 127, motivo: BERSEBA },
+  "mirae_free_slots": { tokens: 387, motivo: BERSEBA },
+  "mirae_book": { tokens: 245, motivo: BERSEBA },
+  "mirae_reschedule": { tokens: 250, motivo: BERSEBA },
+  "mirae_cancel": { tokens: 208, motivo: BERSEBA },
+  // ── end of the Berseba block ─────────────────────────────────────────────
   "crm_list_event_types": { tokens: 204, motivo: BASE },
   "crm_find_free_slots": { tokens: 859, motivo: BASE },
   "crm_list_appointments": { tokens: 1478, motivo: BASE },
@@ -132,7 +152,8 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   "schedule_followup (com negócio)": { tokens: 314, motivo: BASE },
 };
 
-const TETO_TOTAL = 29569;
+// Berseba: upstream 29569 + 3055 of our avec/mirae tools (block at the top of TETO).
+const TETO_TOTAL = 32624;
 
 const VARIANTE = "schedule_followup (com negócio)";
 

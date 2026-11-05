@@ -40,7 +40,10 @@ function blocoDoServico(yaml: string, nome: string): string {
 
 const TETOS = [
   { servico: "app", variavel: "APP_MEM_LIMIT", padrao: "768m" },
-  { servico: "worker", variavel: "WORKER_MEM_LIMIT", padrao: "512m" },
+  // Berseba: our worker default is 1g (512m restarted it every ~10 min on our
+  // VPS; BERSEBA.md, "Worker with 1 GB"). Same rule as upstream's: the default
+  // is the measured value, so an update never asks for an `.env` edit.
+  { servico: "worker", variavel: "WORKER_MEM_LIMIT", padrao: "1g" },
   { servico: "waha", variavel: "WAHA_MEM_LIMIT", padrao: "1280m" },
 ] as const;
 
