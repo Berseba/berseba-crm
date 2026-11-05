@@ -44,21 +44,21 @@ export type OutboundAuthorLabel = (typeof OUTBOUND_AUTHOR_LABEL)[OutboundAuthor]
  * (`LEAD_CONTEXT_HISTORY_FORMAT=linhas`) has no field name at all.
  */
 export function historyAuthorshipNote(projected: boolean, lines = false): string {
+  // Upstream's "Quem disse o quê" block (AUTORIA_SYSTEM_BLOCK) calls the
+  // company's speech `de: "nós"`; here that label is split in three. Kept short:
+  // the one-line format exists to be smaller than the JSON one.
   const labels =
-    '"cliente" é o contato; "você" é mensagem que você mesmo enviou; ' +
-    '"equipe" é uma pessoa da equipe (pelo CRM ou pelo celular); "automação" é envio automático (lembrete, campanha, aviso).';
+    '"cliente" é o contato; "você" é você mesmo; "equipe" é uma pessoa da equipe (CRM ou celular); ' +
+    '"automação" é envio automático. As três últimas são o `de: "nós"` de "Quem disse o quê".';
   const who = lines
-    ? `Em cada linha, o rótulo depois da hora diz quem escreveu: ${labels}`
+    ? `Em cada linha, o rótulo após a hora diz quem escreveu: ${labels}`
     : projected
       ? `Em cada mensagem, \`de\` diz quem escreveu: ${labels}`
       : 'Em cada mensagem, `direction: "inbound"` é o contato; nas `outbound`, `author` diz quem escreveu: ' +
-        '"agent" é você mesmo; "team" é uma pessoa da equipe (pelo CRM ou pelo celular); "automation" é envio automático (lembrete, campanha, aviso).';
-  // Upstream's "Quem disse o quê" block (AUTORIA_SYSTEM_BLOCK) calls the
-  // company's speech `de: "nós"`; here that label is split in three.
-  const nos = lines || projected ? 'As três ("você", "equipe" e "automação") são o `de: "nós"` de "Quem disse o quê": fala da empresa. ' : "";
+        '"agent" é você mesmo; "team" é uma pessoa da equipe (CRM ou celular); "automation" é envio automático.';
   return (
-    `(${who} ${nos}` +
-    "Só as mensagens marcadas como suas foram escritas por você. O que a equipe ou a automação escreveu o cliente já leu: " +
+    `(${who} ` +
+    "Só o que é seu foi escrito por você. O que a equipe ou a automação escreveu o cliente já leu: " +
     "não repita, e não trate a oferta, a cobrança ou o combinado delas como se fossem seus.)"
   );
 }
