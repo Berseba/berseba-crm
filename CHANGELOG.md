@@ -8,6 +8,16 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.13.0] — 2026-11-05
+
+### Adicionado
+
+- **A resposta pelo celular pode contar como resposta da equipe na devolução ao agente** Em Configurações › Atendimento, com "Devolver ao agente sozinho" ligado, há uma opção nova: "Contar a resposta pelo celular como resposta da equipe". Ligada, a conversa que está com uma pessoa volta ao agente de IA quando a última mensagem foi da equipe, pelo CRM ou pelo celular, e o prazo passou. Antes, só a resposta pelo CRM e o encerramento contavam, e quem atende pelo celular via as conversas presas com a pessoa. A opção vem desligada: deixe assim se o celular manda lembretes automáticos de outro sistema, porque eles contariam como resposta. Para quem não liga a opção nada muda.
+
+### Corrigido
+
+- **A IA sabe quais mensagens foram dela e quais foram da equipe** No histórico que a IA lê antes de responder, cada mensagem enviada passa a dizer quem a escreveu: a própria IA, uma pessoa da equipe (pelo CRM ou pelo celular) ou uma automação (lembrete, campanha, aviso). Antes, tudo o que saía do número aparecia para a IA como fala dela. Em quem atende pelo mesmo número da equipe, isso fazia a IA continuar uma oferta, uma cobrança ou uma renovação que a equipe tinha começado, como se fosse dela. A IA continua respondendo todas as conversas como antes; só passa a saber o que foi dito por quem.
+
 ## [2.12.0] — 2026-11-05
 
 ### ⚠️ Requer atenção
@@ -9614,7 +9624,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.12.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.13.0...HEAD
+[2.13.0]: https://github.com/berseba/berseba-crm/compare/v2.12.0...v2.13.0
 [2.12.0]: https://github.com/berseba/berseba-crm/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/berseba/berseba-crm/compare/v2.10.1...v2.11.0
 [2.10.1]: https://github.com/berseba/berseba-crm/compare/v2.10.0...v2.10.1
