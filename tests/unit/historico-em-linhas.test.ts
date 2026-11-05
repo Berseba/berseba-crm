@@ -53,6 +53,7 @@ const BASE: LeadContext["messages"] = [
   { direction: "inbound", body: "Oi, tem horário amanhã?", sent_at: "2026-10-30T09:00:00-03:00" },
   {
     direction: "outbound",
+    author: "agent", // Berseba: the outbound names its author (outbound-author.berseba.ts)
     body: "Tenho às 10h.",
     sent_at: "2026-10-30T09:01:00-03:00",
   },
@@ -99,7 +100,7 @@ describe("formato linhas", () => {
     const linhas = linhasDeMensagem(blocoDoContexto(contexto(BASE), false, "linhas"));
     expect(linhas).toEqual([
       '[2026-10-30T09:00:00-03:00] cliente: "Oi, tem horário amanhã?"',
-      '[2026-10-30T09:01:00-03:00] nós: "Tenho às 10h."',
+      '[2026-10-30T09:01:00-03:00] você: "Tenho às 10h."',
       '[2026-10-30T09:02:00-03:00] cliente [image]: "[foto]"',
     ]);
   });
@@ -181,7 +182,7 @@ describe("formato linhas", () => {
       "",
       "linhas",
     );
-    expect(abertura).toContain('[2026-10-30T09:01:00-03:00] nós: "Tenho às 10h."');
+    expect(abertura).toContain('[2026-10-30T09:01:00-03:00] você: "Tenho às 10h."');
     expect(abertura).not.toContain('"direction"');
   });
 });

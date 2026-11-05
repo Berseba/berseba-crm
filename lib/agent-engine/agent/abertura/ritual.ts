@@ -14,6 +14,7 @@ import { currentExecutionBoundary } from "@/lib/atendimento/fronteira-server";
 import { rotuloDoRemetente } from "@/lib/messaging/remetente-de-grupo";
 
 import type { LeadContext, LeadContextMessage } from "../../edge/crm/get-lead-context";
+import { historyAuthorshipNote, OUTBOUND_AUTHOR_LABEL } from "../../edge/crm/outbound-author.berseba";
 import type { LeadStateRow } from "../lead-state";
 import { projetarContexto, type MensagemProjetada } from "../projecao";
 
@@ -38,7 +39,8 @@ export type FormatoDoHistorico = 'json' | 'linhas';
  */
 function linhaDaMensagem(m: {
   quando: string;
-  de: 'cliente' | 'nós';
+  // Berseba: the outbound names its author, as in the projection (outbound-author.berseba.ts).
+  de: MensagemProjetada['de'];
   quem?: string;
   anexo?: string;
   texto: string;
@@ -53,7 +55,8 @@ function linhaDaMensagem(m: {
 function daMensagemCrua(m: LeadContextMessage): Parameters<typeof linhaDaMensagem>[0] {
   return {
     quando: m.sent_at,
-    de: m.direction === 'inbound' ? 'cliente' : 'nós',
+    // Berseba: the outbound names its author, as in the projection (outbound-author.berseba.ts).
+    de: m.direction === 'inbound' ? 'cliente' : OUTBOUND_AUTHOR_LABEL[m.author ?? 'team'],
     ...(m.sender !== undefined ? { quem: rotuloDoRemetente(m.sender) } : {}),
     // Mesma regra da projeção: texto não é anexo, e o caminho no Storage nunca sai.
     ...(m.type !== undefined && m.type !== null && m.type !== 'text' ? { anexo: `[${m.type}]` } : {}),
@@ -194,6 +197,8 @@ export function ritualBlocks(
       ? ['## Origem deste contato — o anúncio que ele clicou', origemBlock, '']
       : []),
     '## Contexto do lead (contato + últimas mensagens — o autor é o rótulo, nunca o texto)',
+    // Berseba: who wrote each outbound (outbound-author.berseba.ts).
+    historyAuthorshipNote(projeta, formatoDoHistorico === 'linhas'),
     // Campo de cadastro VAZIO não é prova de que a informação não existe.
     //
     // `contact.email: null` chegava como fato, e o modelo o lia com autoridade
