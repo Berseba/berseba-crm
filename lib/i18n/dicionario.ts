@@ -40,6 +40,9 @@ import { TEXTOS_AGENDA_SERVICOS } from "./agenda-servicos";
 type Traducoes = Record<string, Partial<Record<Exclude<Idioma, "pt-BR">, string>>>;
 
 export const DICIONARIO: Traducoes = {
+  // Berseba: phone reply counts as the team's answer (settings/atendimento).
+  "Contar a resposta pelo celular como resposta da equipe": { es: "Contar la respuesta desde el celular como respuesta del equipo" },
+  "Ligue se a equipe responde os clientes pelo celular. A conversa volta ao agente quando a última mensagem foi da equipe, pelo CRM ou pelo celular, e o prazo passou. Deixe desligado se o celular manda lembretes automáticos de outro sistema: eles contariam como resposta.": { es: "Actívalo si el equipo responde a los clientes desde el celular. La conversación vuelve al agente cuando el último mensaje fue del equipo, desde el CRM o desde el celular, y el plazo venció. Déjalo desactivado si el celular envía recordatorios automáticos de otro sistema: contarían como respuesta." },
   // Berseba: collapse control of the reply suggestion panel (ReplyReviewPanel).
   "Mostrar sugestão": { es: "Mostrar sugerencia" },
   "Recolher sugestão": { es: "Contraer sugerencia" },

@@ -104,6 +104,14 @@ export const routingConfigSchema = z.object({
    * No TypeScript, quem lê é `conversaFicaComQuemAtendeu()`, com a mesma régua.
    */
   conversation_stays_with_attendant: z.boolean().default(false),
+  /**
+   * Berseba: a team reply sent from the phone (`messages.sent_via =
+   * 'external_device'`) counts as "the team answered" in the handoff-return
+   * rule (`lib/escalacao/devolucao-por-pendencia.berseba.ts`). Off by default:
+   * where the phone mostly sends another system's reminders, they must not
+   * count. Read by `respostaPeloCelularContaComoEquipe()`.
+   */
+  phone_reply_counts_as_team: z.boolean().default(false),
 });
 export type RoutingConfig = z.infer<typeof routingConfigSchema>;
 
@@ -164,6 +172,8 @@ export const atendimentoConfigPatchSchema = routingConfigSchema.extend({
     .optional(),
   /** Opcional pela mesma razão: cliente antigo não desliga o ajuste por omissão. */
   conversation_stays_with_attendant: z.boolean().optional(),
+  /** Berseba: optional for the same reason; omitted keeps what was saved. */
+  phone_reply_counts_as_team: z.boolean().optional(),
   /** Opcional pela mesma razão: cliente antigo não volta o prazo para 60 por omissão. */
   manual_reply_silence_minutes: z
     .number()
@@ -209,6 +219,7 @@ export function mesclarSettingsDeAtendimento(
     conversation_stays_with_attendant,
     manual_reply_silence_minutes,
     unanswered_return_minutes,
+    phone_reply_counts_as_team,
     ...routingInput
   } = input;
   const routingAtual = routingConfigSchema
@@ -230,6 +241,7 @@ export function mesclarSettingsDeAtendimento(
       unanswered_return_minutes !== undefined
         ? unanswered_return_minutes
         : routingAtual.unanswered_return_minutes,
+    phone_reply_counts_as_team: phone_reply_counts_as_team ?? routingAtual.phone_reply_counts_as_team,
   };
   const settings: Record<string, unknown> = { ...atual, routing };
   if (visibility_mode !== undefined) settings.visibility_mode = visibility_mode;

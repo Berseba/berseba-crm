@@ -101,6 +101,7 @@ describe("config de atendimento — routing + visibilidade na mesma porta", () =
       conversation_stays_with_attendant: _fica,
       manual_reply_silence_minutes: _silencio,
       unanswered_return_minutes: _devolveAoRodizio,
+      phone_reply_counts_as_team: _celular, // Berseba
       ...semPrazo
     } = routingConfigSchema.parse(antigo);
     expect(atendimentoConfigPatchSchema.parse(antigo)).toEqual(semPrazo);

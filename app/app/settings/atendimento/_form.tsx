@@ -36,6 +36,8 @@ export interface AtendimentoConfig {
   conversation_stays_with_attendant: boolean;
   /** Minutos de silêncio da IA após resposta pelo celular. `null` = o padrão de 60. */
   manual_reply_silence_minutes: number | null;
+  /** Berseba: a phone reply counts as the team's answer in the handoff return. Off by default. */
+  phone_reply_counts_as_team?: boolean;
 }
 
 /**
@@ -340,6 +342,31 @@ export function AtendimentoForm({
               )}
             </p>
           </div>
+        ) : null}
+        {devolveSozinho ? (
+          // Berseba: phone replies as the team's answer (devolucao-por-pendencia.berseba.ts).
+          <label className="flex cursor-pointer items-start gap-3 border-t pt-4">
+            <input
+              type="checkbox"
+              data-testid="resposta-pelo-celular-conta"
+              checked={form.phone_reply_counts_as_team ?? false}
+              disabled={isPending}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, phone_reply_counts_as_team: e.target.checked }))
+              }
+              className="mt-1 h-4 w-4 shrink-0 accent-primary"
+            />
+            <span className="space-y-1">
+              <span className="block text-sm font-medium">
+                {t("Contar a resposta pelo celular como resposta da equipe")}
+              </span>
+              <span className="block text-xs text-muted-foreground">
+                {t(
+                  "Ligue se a equipe responde os clientes pelo celular. A conversa volta ao agente quando a última mensagem foi da equipe, pelo CRM ou pelo celular, e o prazo passou. Deixe desligado se o celular manda lembretes automáticos de outro sistema: eles contariam como resposta.",
+                )}
+              </span>
+            </span>
+          </label>
         ) : null}
       </Card>
 

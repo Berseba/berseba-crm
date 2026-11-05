@@ -37,10 +37,19 @@
  *
  * - A message a person sent through the CRM (`sent_via = 'user'`).
  * - Closing the conversation (`service_closed_at`).
+ * - A message sent from the phone (`external_device`), only when the organization
+ *   turned on `settings.routing.phone_reply_counts_as_team` ("Contar a resposta
+ *   pelo celular como resposta da equipe" in Configurações › Atendimento).
  *
- * What does not count:
- * - Messages sent from the phone (`external_device`). At the salon almost all of
- *   them are avec's automatic reminders (228 of 239 from 14/10 to 20/10).
+ * Phone messages are off by default. At the Mayara Morales salon almost all of
+ * them are avec's automatic reminders (228 of 239 from 14/10 to 20/10), so they
+ * must not settle the client's debt. At Studio Bruno Alves the team answers from
+ * the phone (4,622 `external_device` against 106 `user` since 14/09): with a
+ * 120 min deadline and phone replies ignored, 2 of 101 conversations held by a
+ * person went back to the agent (04/11), while 56 had a phone reply as the last
+ * message, older than the deadline.
+ *
+ * What never counts:
  * - "Assumir" (`assigned_at`), because it is not an answer. The database also
  *   rewrites `assigned_at` when a closed conversation reopens with its owner.
  *
@@ -61,7 +70,7 @@ import { devolverAtendimentoAoAgente } from "./retomada";
 
 /** What the rule reads about one conversation, as epoch milliseconds. */
 export interface Pendencia {
-  /** Latest message a person sent through the CRM. */
+  /** Latest team reply: through the CRM, or also from the phone when the option is on. */
   ultimaRespostaHumanaMs: number | null;
   /** `conversations.service_closed_at`: the last time someone closed it. */
   fechadaEmMs: number | null;
@@ -69,6 +78,21 @@ export interface Pendencia {
   ultimaPassagemMs: number | null;
   /** Latest client message, not counting the one being ingested right now. */
   ultimaMensagemDoClienteMs: number | null;
+}
+
+/** `sent_via` values that count as the team's reply. */
+const RESPOSTA_PELO_CRM = ["user"] as const;
+const RESPOSTA_PELO_CRM_OU_CELULAR = ["user", "external_device"] as const;
+
+/**
+ * Reads `settings.routing.phone_reply_counts_as_team` without ever throwing.
+ * Only the boolean `true` turns it on, like `conversaFicaComQuemAtendeu`.
+ */
+export function respostaPeloCelularContaComoEquipe(settings: unknown): boolean {
+  if (!settings || typeof settings !== "object") return false;
+  const routing = (settings as Record<string, unknown>).routing;
+  if (!routing || typeof routing !== "object") return false;
+  return (routing as Record<string, unknown>).phone_reply_counts_as_team === true;
 }
 
 export type DecisaoDeDevolucao =
@@ -117,7 +141,7 @@ async function ultimaMensagemEm(
   admin: SupabaseClient,
   organizationId: string,
   conversationId: string,
-  filtro: { direction: "inbound" } | { direction: "outbound"; sent_via: "user" },
+  filtro: { direction: "inbound" } | { direction: "outbound"; sent_via: readonly string[] },
   semMensagemId: string | null,
 ): Promise<number | null> {
   let consulta = admin
@@ -127,7 +151,12 @@ async function ultimaMensagemEm(
     .eq("conversation_id", conversationId)
     .eq("direction", filtro.direction)
     .is("revoked_at", null);
-  if (filtro.direction === "outbound") consulta = consulta.eq("sent_via", filtro.sent_via);
+  if (filtro.direction === "outbound") {
+    consulta =
+      filtro.sent_via.length === 1
+        ? consulta.eq("sent_via", filtro.sent_via[0] as string)
+        : consulta.in("sent_via", [...filtro.sent_via]);
+  }
   if (semMensagemId) consulta = consulta.neq("id", semMensagemId);
   const { data, error } = await consulta
     .order("sent_at", { ascending: false })
@@ -137,15 +166,20 @@ async function ultimaMensagemEm(
   return epoch((data as { sent_at?: string } | null)?.sent_at);
 }
 
-/** Reads the four timestamps of the rule for one conversation. Throws on a read error. */
+/**
+ * Reads the four timestamps of the rule for one conversation. Throws on a read
+ * error. `celularContaComoEquipe` comes from `respostaPeloCelularContaComoEquipe`.
+ */
 export async function lerPendencia(
   admin: SupabaseClient,
   organizationId: string,
   conversa: { id: string; service_closed_at: string | null; last_handoff_at: string | null },
   semMensagemId: string | null = null,
+  celularContaComoEquipe = false,
 ): Promise<Pendencia> {
+  const sentVia = celularContaComoEquipe ? RESPOSTA_PELO_CRM_OU_CELULAR : RESPOSTA_PELO_CRM;
   const [ultimaRespostaHumanaMs, ultimaMensagemDoClienteMs] = await Promise.all([
-    ultimaMensagemEm(admin, organizationId, conversa.id, { direction: "outbound", sent_via: "user" }, null),
+    ultimaMensagemEm(admin, organizationId, conversa.id, { direction: "outbound", sent_via: sentVia }, null),
     ultimaMensagemEm(admin, organizationId, conversa.id, { direction: "inbound" }, semMensagemId),
   ]);
   return {
@@ -154,6 +188,24 @@ export async function lerPendencia(
     ultimaPassagemMs: epoch(conversa.last_handoff_at),
     ultimaMensagemDoClienteMs,
   };
+}
+
+/** Each organization's `phone_reply_counts_as_team`, read once per cron round. */
+async function celularContaPorOrganizacao(
+  admin: SupabaseClient,
+  orgIds: readonly string[],
+): Promise<Map<string, boolean>> {
+  const out = new Map<string, boolean>();
+  if (orgIds.length === 0) return out;
+  const { data, error } = await admin
+    .from("organizations")
+    .select("id, settings")
+    .in("id", [...orgIds]);
+  if (error) throw new Error(`organizations: ${error.message}`);
+  for (const row of (data ?? []) as Array<{ id: string; settings: unknown }>) {
+    out.set(row.id, respostaPeloCelularContaComoEquipe(row.settings));
+  }
+  return out;
 }
 
 /**
@@ -165,6 +217,19 @@ export async function filtrarClienteAguardando<T extends { conversa: ConversaEmH
   vencidas: readonly T[],
   agoraMs: number,
 ): Promise<T[]> {
+  if (vencidas.length === 0) return [];
+  let celularConta: Map<string, boolean>;
+  try {
+    celularConta = await celularContaPorOrganizacao(admin, [
+      ...new Set(vencidas.map((v) => v.conversa.organization_id)),
+    ]);
+  } catch (err) {
+    // Without the option we cannot tell who answered: every conversation stays.
+    logger.warn("[devolucao-por-pendencia] cron: conversations kept with the person (organizations read failed)", {
+      detail: err instanceof Error ? err.message.slice(0, 160) : "unknown",
+    });
+    return [];
+  }
   const out: T[] = [];
   for (const v of vencidas) {
     try {
@@ -180,6 +245,8 @@ export async function filtrarClienteAguardando<T extends { conversa: ConversaEmH
         admin,
         v.conversa.organization_id,
         data as { id: string; service_closed_at: string | null; last_handoff_at: string | null },
+        null,
+        celularConta.get(v.conversa.organization_id) === true,
       );
       if (decidirDevolucao(pendencia, v.minutos, agoraMs).devolver) out.push(v);
     } catch (err) {
@@ -251,7 +318,8 @@ export async function devolverAoAgenteSePrazoVenceu(
       .eq("id", entrada.organizationId)
       .maybeSingle();
     if (orgErr) throw new Error(`organizations: ${orgErr.message}`);
-    const prazo = lerPrazoDeDevolucaoMinutos((org as { settings?: unknown } | null)?.settings);
+    const settings = (org as { settings?: unknown } | null)?.settings;
+    const prazo = lerPrazoDeDevolucaoMinutos(settings);
     if (prazo === null) return;
 
     const { data: convData, error: convErr } = await admin
@@ -279,7 +347,13 @@ export async function devolverAoAgenteSePrazoVenceu(
     if (!conversa.channel_session_id) return;
     if (!(await sessaoTemAgente(admin, entrada.organizationId, conversa.channel_session_id))) return;
 
-    const pendencia = await lerPendencia(admin, entrada.organizationId, conversa, entrada.messageId);
+    const pendencia = await lerPendencia(
+      admin,
+      entrada.organizationId,
+      conversa,
+      entrada.messageId,
+      respostaPeloCelularContaComoEquipe(settings),
+    );
     const decisao = decidirDevolucao(pendencia, prazo, agoraMs);
     if (!decisao.devolver) {
       logger.info("[devolucao-por-pendencia] stays with the person", {
