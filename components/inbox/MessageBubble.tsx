@@ -34,6 +34,7 @@ import { resolveSharedContact } from "@/lib/messaging/contact-card";
 import { lerAnuncioDaMensagem } from "@/lib/leads/atribuicao-de-anuncio";
 import { marcadorDaApagada, textoDaApagadaApareceNaInbox } from "@/lib/messaging/apagada";
 import { AnuncioCard } from "@/components/inbox/AnuncioCard";
+import { managerMayAlterAiMessage } from "@/lib/messaging/ai-message-correction.berseba";
 import {
   extractCitations,
   isAiGeneratedMessage,
@@ -78,6 +79,12 @@ interface Props {
   onReenviar?: (confirmado: boolean) => Promise<void>;
   /** Gerente para cima reenvia mensagem de colega — a mesma régua da rota. */
   podeReenviarDeOutros?: boolean;
+  /**
+   * Berseba: the viewer's role in the active organization. A manager or admin
+   * may edit or delete-for-everyone what the AI agent sent; same rule as the
+   * route (`managerMayAlterAiMessage`).
+   */
+  viewerRole?: string | null;
 }
 
 /** Quem tem um motor que reenvia sozinho quando a conexão volta (`redriveQueued`). */
@@ -129,6 +136,7 @@ export function MessageBubble({
   onRestaurar,
   onReenviar,
   podeReenviarDeOutros = false,
+  viewerRole = null,
 }: Props) {
   const [editando, setEditando] = useState(false);
   const [texto, setTexto] = useState(message.body ?? "");
@@ -190,7 +198,8 @@ export function MessageBubble({
   const textoApagadoVisivel = apagada && textoDaApagadaApareceNaInbox(message.direction);
   const ocultaNoCrm = Boolean(message.metadata?.crm_hidden_at);
   const editada = Boolean(message.edited_at) && !apagada;
-  const enviadaPeloAtendente = isOutbound && ["user", "crm"].includes(message.sent_via)
+  const enviadaPeloAtendente = isOutbound
+    && (["user", "crm"].includes(message.sent_via) || managerMayAlterAiMessage(message.sent_via, viewerRole))
     && Boolean(message.external_id) && !apagada
     && ["sent", "delivered", "read"].includes(message.status);
   const podeEditar = enviadaPeloAtendente && message.type === "text" && Boolean(message.body)

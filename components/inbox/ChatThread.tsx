@@ -25,6 +25,7 @@ import { ROLE_RANK } from "@/lib/auth/types";
 import { capabilitiesOf, transportaMensagem, type ChannelProvider } from "@/lib/channels/capabilities";
 import { montarCartoesDaPassagem, type CartaoDaPassagem } from "@/lib/escalacao/cartao-da-passagem";
 import type { Message, Note } from "@/lib/types/messaging";
+import { managerMayAlterAiMessage } from "@/lib/messaging/ai-message-correction.berseba";
 
 interface Props {
   conversationId: string | null;
@@ -355,10 +356,12 @@ export function ChatThread({
                   // CRM — inclusive nas do colega, porque `sent_via='user'` só
                   // registra que um humano digitou, nunca qual.
                   viewerUserId={currentUser.id}
-                  onEditar={canalAlteraEnviada && item.data.sent_by_user_id === currentUser.id
+                  onEditar={canalAlteraEnviada && (item.data.sent_by_user_id === currentUser.id
+                    || managerMayAlterAiMessage(item.data.sent_via, activeOrg?.role))
                     ? (text) => editar.mutateAsync({ id: item.data.id, text }).then(() => undefined)
                     : undefined}
-                  onApagar={canalAlteraEnviada && item.data.sent_by_user_id === currentUser.id
+                  onApagar={canalAlteraEnviada && (item.data.sent_by_user_id === currentUser.id
+                    || managerMayAlterAiMessage(item.data.sent_via, activeOrg?.role))
                     ? () => apagar.mutateAsync(item.data.id).then(() => undefined)
                     : undefined}
                   onOcultar={canManage && item.data.direction === "inbound"
@@ -371,6 +374,7 @@ export function ChatThread({
                     ? (confirmado) => reenviar.mutateAsync({ id: item.data.id, confirmado }).then(() => undefined)
                     : undefined}
                   podeReenviarDeOutros={canManage}
+                  viewerRole={activeOrg?.role ?? null}
                 />
               ),
             )}

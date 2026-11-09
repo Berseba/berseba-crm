@@ -17,6 +17,7 @@ import {
 } from "@/lib/channels";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { previaDaMensagem } from "@/lib/messaging/previa-da-mensagem";
+import { managerMayAlterAiMessage } from "@/lib/messaging/ai-message-correction.berseba";
 import { createClient } from "@/lib/supabase/server";
 import { enderecoDaUltimaRecebida } from "@/lib/channels/endereco-da-ultima-recebida";
 
@@ -49,8 +50,10 @@ async function alterar(req: NextRequest, ctx: Ctx, acao: "edit" | "revoke"): Pro
 
   // O WhatsApp só deixa o autor alterar uma mensagem própria. A UI esconde o
   // gesto dos demais, mas esta guarda no servidor impede chamar a rota à mão.
-  if (message.direction !== "outbound" || !["user", "crm"].includes(message.sent_via)
-    || message.sent_by_user_id !== authz.user.id || !message.external_id
+  // Berseba: a manager+ may also alter what the AI agent sent (Jordão go-live supervision).
+  const ownMessage = ["user", "crm"].includes(message.sent_via) && message.sent_by_user_id === authz.user.id;
+  const aiMessageByManager = managerMayAlterAiMessage(message.sent_via, authz.org.role);
+  if (message.direction !== "outbound" || !(ownMessage || aiMessageByManager) || !message.external_id
     || message.revoked_at || !["sent", "delivered", "read"].includes(message.status)
     || (acao === "edit" && message.type !== "text")) {
     return fail("forbidden", t("Esta mensagem não pode ser alterada."), 403, { requestId });
@@ -147,6 +150,8 @@ async function alterar(req: NextRequest, ctx: Ctx, acao: "edit" | "revoke"): Pro
       conversation_id: message.conversation_id,
       direction: message.direction,
       external_id: message.external_id,
+      // Berseba: shows when a person altered a message the AI agent sent.
+      sent_via: message.sent_via,
       // O CORPO NÃO ENTRA AQUI, de propósito: `api_audit_log` é append-only, com
       // retenção de 5 anos, e sobrevive ao apagamento da organização — copiar o
       // texto criaria dado pessoal fora do alcance da cascata de anonimização. A
