@@ -8,6 +8,14 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.14.0] — 2026-11-12
+
+### Adicionado
+
+- **Ferramentas de leitura da agenda do Atos para a RBCOR** A assistente da RBCOR passa a ter duas ferramentas de leitura da agenda do Atos Clínicas: ver até 12 horários de aula com vaga, já com as regras do estúdio e do plano da aluna, e ver as próximas aulas da aluna da conversa, sempre pelo telefone do contato. Elas não marcam nada: a vaga é informação e quem confirma a aula continua sendo a recepção. As ferramentas só existem para as organizações configuradas na instalação e só entram em uso quando alguém as liga na tela do agente; para as demais empresas nada muda. Quando o Atos não consegue responder, o agente passa a conversa para a recepção com um resumo do que falta fazer.
+
+- **Gerente e administrador podem editar ou apagar uma mensagem enviada pela IA** Na conversa, quem é gerente ou administrador agora vê "Editar mensagem" e "Apagar para todos" também nas mensagens que o agente de IA enviou. Assim dá para corrigir uma resposta errada da IA depois que ela saiu, do mesmo jeito que o atendente já faz com as próprias mensagens: editar só texto e só nos primeiros 15 minutos, apagar para todos enquanto o WhatsApp aceitar, e só nos canais que permitem (WhatsApp). Atendentes continuam sem esses botões nas mensagens da IA, e mensagens de automação seguem sem edição. O registro de auditoria passa a dizer que a mensagem alterada era da IA, sem guardar o texto.
+
 ## [2.13.0] — 2026-11-05
 
 ### Adicionado
@@ -9624,7 +9632,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.13.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.14.0...HEAD
+[2.14.0]: https://github.com/berseba/berseba-crm/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/berseba/berseba-crm/compare/v2.12.0...v2.13.0
 [2.12.0]: https://github.com/berseba/berseba-crm/compare/v2.11.0...v2.12.0
 [2.11.0]: https://github.com/berseba/berseba-crm/compare/v2.10.1...v2.11.0
