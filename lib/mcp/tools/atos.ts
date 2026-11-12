@@ -494,6 +494,8 @@ async function write(
     return {
       ok: true,
       ...(result.booking ? { aula: bookingView(result.booking) } : {}),
+      ...(result.bookings ? { aulas: result.bookings.map(bookingView) } : {}),
+      ...(result.student_created === undefined ? {} : { cadastro_novo: result.student_created }),
       ...(result.makeup_eligible === undefined ? {} : { tem_reposicao: result.makeup_eligible }),
       mensagem: done,
     };
@@ -668,6 +670,10 @@ const bookShape = {
   slot_id: slotId,
   name: personName.optional(),
   birth_date: birthDate.optional(),
+  plan: z
+    .enum(ATOS_PLANS)
+    .optional()
+    .describe("rbcor, totalpass_tp2, totalpass_tp3 ou wellhub_silver (Silver+)."),
 };
 
 export const atosBookClass: McpToolDefinition<typeof bookShape> = {
@@ -675,7 +681,8 @@ export const atosBookClass: McpToolDefinition<typeof bookShape> = {
   description:
     "Marca uma aula pontual (avulsa) para a pessoa DESTA conversa no slot_id de atos_free_slots, " +
     "buscado com o plano dela. Pessoa nova no Atos leva name e birth_date (pergunte; nunca " +
-    "invente). " +
+    "invente). Mande plan quando a pessoa disser o aplicativo ou a etiqueta do contato mostrar " +
+    "(sem plan, pessoa nova entra como plano RBCOR). " +
     APP_CHOICE +
     " " +
     CONFIRM_FIRST +
@@ -697,6 +704,7 @@ export const atosBookClass: McpToolDefinition<typeof bookShape> = {
           slotId: input.slot_id,
           name: input.name,
           birthDate: input.birth_date,
+          plan: input.plan,
           idempotencyKey: key,
         }),
       "aula marcada. Confirme à pessoa o dia e o horário e lembre a política de faltas.",

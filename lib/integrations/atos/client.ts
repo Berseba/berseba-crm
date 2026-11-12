@@ -166,8 +166,10 @@ export async function listBookings(
 // ---------------------------------------------------------------------------
 
 const writeResultSchema = z.object({
-  // A recurring plan answers its first class here, when the bridge sends one.
   booking: bookingSchema.optional().catch(undefined),
+  // `POST /v1/recurring-plans` answers the classes it booked and whether it registered the student.
+  bookings: z.array(bookingSchema).optional().catch(undefined),
+  student_created: z.boolean().optional().catch(undefined),
   makeup_eligible: z.boolean().optional().catch(undefined),
 });
 export type AtosWriteResult = z.infer<typeof writeResultSchema>;
@@ -246,6 +248,7 @@ export function bookClass(
     slotId: string;
     name?: string;
     birthDate?: string;
+    plan?: AtosPlan;
     idempotencyKey: string;
   },
 ): Promise<AtosWriteResult> {
@@ -257,6 +260,7 @@ export function bookClass(
       slot_id: input.slotId,
       name: input.name,
       birth_date: input.birthDate,
+      plan: input.plan,
     }),
     input.idempotencyKey,
   );

@@ -65,7 +65,7 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   "atos_cancel_class": { tokens: 252, motivo: BERSEBA_ATOS },
   "atos_reschedule_class": { tokens: 199, motivo: BERSEBA_ATOS },
   "atos_book_makeup": { tokens: 225, motivo: BERSEBA_ATOS },
-  "atos_book_class": { tokens: 273, motivo: BERSEBA_ATOS },
+  "atos_book_class": { tokens: 351, motivo: BERSEBA_ATOS },
   "atos_book_trial": { tokens: 297, motivo: BERSEBA_ATOS },
   "atos_create_recurring_plan": { tokens: 472, motivo: BERSEBA_ATOS },
   // ── end of the Berseba block ─────────────────────────────────────────────
@@ -163,9 +163,9 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   "schedule_followup (com negócio)": { tokens: 314, motivo: BASE },
 };
 
-// Berseba: upstream 29569 + 3055 of our avec/mirae tools + 2374 of the Atos tools (block at the
+// Berseba: upstream 29569 + 3055 of our avec/mirae tools + 2452 of the Atos tools (block at the
 // top of TETO).
-const TETO_TOTAL = 34998;
+const TETO_TOTAL = 35076;
 
 const VARIANTE = "schedule_followup (com negócio)";
 

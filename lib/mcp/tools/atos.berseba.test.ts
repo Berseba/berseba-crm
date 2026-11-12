@@ -812,18 +812,44 @@ describe("writes", () => {
     expect(calls[0]!.body).toMatchObject({ plan: "totalpass_tp3", months: 6 });
   });
 
-  it("book_class sends name and birth date only when given", async () => {
+  it("book_class sends name, birth date and plan only when given", async () => {
     done();
     await run(tools.atosBookClass, {
       slot_id: "2026-11-14-1800",
       name: "Marina Souza",
       birth_date: "1990-05-20",
+      plan: "wellhub_silver",
     });
     expect(calls[0]!.body).toEqual({
       phone: PHONE,
       slot_id: "2026-11-14-1800",
       name: "Marina Souza",
       birth_date: "1990-05-20",
+      plan: "wellhub_silver",
+    });
+  });
+
+  it("recurring plan returns the classes booked and whether the student was registered", async () => {
+    answer(200, {
+      bookings: [booking("2026-11-16", "07:00"), booking("2026-11-18", "07:00")],
+      student_created: true,
+    });
+    const r = await run(tools.atosCreateRecurringPlan, {
+      name: "Marina Souza",
+      birth_date: "1990-05-20",
+      plan: "wellhub_silver",
+      weekly: [
+        { weekday: "monday", start_time: "07:00" },
+        { weekday: "wednesday", start_time: "07:00" },
+      ],
+    });
+    expect(r).toMatchObject({
+      ok: true,
+      cadastro_novo: true,
+      aulas: [
+        { booking_id: "2026-11-16-0700", dia_semana: "segunda-feira" },
+        { booking_id: "2026-11-18-0700", dia_semana: "quarta-feira" },
+      ],
     });
   });
 
