@@ -40,6 +40,14 @@ interface Oferta {
 interface Profissional {
   id: string;
   nome: string;
+  /**
+   * Weekdays the professional is in the salon (0 Sunday … 6 Saturday). Missing = every day the
+   * salon opens. avec's own schedule is sometimes left open on a day the person does not come,
+   * so the agent never offers that day, whoever she is in the visit (principal or helper).
+   */
+  dias?: number[];
+  /** Offered only when the client asks for this professional by name (Ruth, 2026-11-12). */
+  soSePedir?: boolean;
 }
 
 export interface Salao {
@@ -83,9 +91,9 @@ const so = (servico: ServicoRef): Etapa[] => [{ servico, inicio: 0, papel: "prin
  * (R$ 30 more, 30 min, by Júnior himself: Matheus, 2026-10-23). The service is ~2 h at any
  * length; avec has the extra-long one at 2h30, so the drying starts after it there.
  */
-function quimica(id: string, rotulo: string, servico: ServicoRef): Oferta[] {
+function quimica(id: string, rotulo: string, servico: ServicoRef, duracao = 120): Oferta[] {
   const comprimento = typeof servico !== "string";
-  const fim = comprimento ? { curto: 120, medio: 120, longo: 120, extra_longo: 150 } : 120;
+  const fim = comprimento ? { curto: 120, medio: 120, longo: 120, extra_longo: 150 } : duracao;
   const base = { comprimento, semSabado: true };
   return [
     {
@@ -122,12 +130,14 @@ const cada = (profissionais: string[], etapas: Etapa[]) =>
 const SALAO_MAYARA: Salao = {
   profissionais: {
     [MAYARA]: { id: MAYARA, nome: "Mayara Morales" },
-    [ELITON]: { id: ELITON, nome: "Eliton" },
+    // Eliton and Suellen come on Saturdays only, and Eliton cuts only for whoever asks for him
+    // (Ruth, 2026-11-12; Johnny, 2026-11-06: a weekday drying booked with Suellen).
+    [ELITON]: { id: ELITON, nome: "Eliton", dias: [6], soSePedir: true },
     [REBECA]: { id: REBECA, nome: "Rebeca" },
     [SIMONE]: { id: SIMONE, nome: "Simone" },
     [GIOVANNA]: { id: GIOVANNA, nome: "Giovanna" },
     [JUNIOR]: { id: JUNIOR, nome: "Júnior" },
-    [SUELLEN]: { id: SUELLEN, nome: "Suellen" },
+    [SUELLEN]: { id: SUELLEN, nome: "Suellen", dias: [6] },
     [JULIA]: { id: JULIA, nome: "Júlia" },
   },
   auxiliares: [JULIA, JUNIOR, SIMONE, GIOVANNA, SUELLEN],
@@ -139,7 +149,7 @@ const SALAO_MAYARA: Salao = {
     {
       id: "corte_feminino",
       rotulo: "Corte feminino, sem secagem (inclui a lavagem)",
-      perguntar: "se quer finalizar com secagem e se tem preferência de profissional",
+      perguntar: "se quer finalizar com secagem",
       comprimento: false,
       porProfissional: [
         {
@@ -155,7 +165,7 @@ const SALAO_MAYARA: Salao = {
     {
       id: "corte_feminino_com_secagem",
       rotulo: "Corte feminino com secagem (lavagem, corte e secagem)",
-      perguntar: "o comprimento do cabelo e se tem preferência de profissional",
+      perguntar: "o comprimento do cabelo",
       comprimento: true,
       porProfissional: [
         {
@@ -190,7 +200,7 @@ const SALAO_MAYARA: Salao = {
     {
       id: "corte_infantil",
       rotulo: "Corte infantil, sem secagem (inclui a lavagem)",
-      perguntar: "se quer finalizar com secagem e se tem preferência de profissional",
+      perguntar: "se quer finalizar com secagem",
       comprimento: false,
       porProfissional: [
         { profissional: MAYARA, etapas: comLavagem("2128713") },
@@ -200,7 +210,7 @@ const SALAO_MAYARA: Salao = {
     {
       id: "corte_infantil_com_secagem",
       rotulo: "Corte infantil com secagem (lavagem, corte e secagem)",
-      perguntar: "o comprimento do cabelo e se tem preferência de profissional",
+      perguntar: "o comprimento do cabelo",
       comprimento: true,
       porProfissional: [
         {
@@ -373,6 +383,9 @@ const SALAO_MAYARA: Salao = {
       extra_longo: "2129401",
     }),
     ...quimica("selamento_raiz", "Selamento só na raiz (retoque)", "2310921"),
+    // The arco (the hairline only) is 30 min; with the wash and drying, 1 h (Ruth, 2026-11-03).
+    ...quimica("progressiva_arco", "Progressiva só no arco (contorno)", "2129166", 30),
+    ...quimica("selamento_arco", "Selamento só no arco (contorno)", "2129362", 30),
   ],
   comAEquipe: [
     "mechas",
@@ -387,7 +400,7 @@ const SALAO_MAYARA: Salao = {
     "maquiagem",
     "massagem, tratamento facial, visagismo",
     "alongamento",
-    "corte de franja, progressiva/selamento de franja ou arco",
+    "corte de franja, progressiva/selamento de franja",
   ],
 };
 
@@ -413,6 +426,18 @@ interface EtapaResolvida {
   servico: string;
   inicio: number;
   papel: "principal" | "auxiliar";
+}
+
+/** Whether the professional is in the salon on this day (`YYYY-MM-DD`). */
+export function trabalhaNoDia(salao: Salao, profissional: string, data: string): boolean {
+  const dias = salao.profissionais[profissional]?.dias;
+  return !dias || dias.includes(new Date(`${data}T12:00:00Z`).getUTCDay());
+}
+
+/** The professionals offered when the client named none: all but those offered on request. */
+export function semPedido(salao: Salao, profissionais: string[]): string[] {
+  const livres = profissionais.filter((id) => !salao.profissionais[id]?.soSePedir);
+  return livres.length ? livres : profissionais;
 }
 
 /** The steps of an oferta for one professional and length, or `null` when a length is missing. */
@@ -525,6 +550,8 @@ export function montarOpcoes(
   slots: AvecSlot[],
   auxiliares: string[] = salao.auxiliares,
 ): Opcao[] {
+  // A day the person does not come is never offered, even when avec's schedule is open.
+  slots = slots.filter((s) => trabalhaNoDia(salao, s.professional_id, s.date));
   const livres = new Map<string, AvecSlot>();
   for (const s of slots) {
     livres.set(slotKey(s.professional_id, s.service_id, s.date, toMinutes(s.start_time)), s);

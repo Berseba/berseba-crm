@@ -10,7 +10,9 @@ import {
   montarOpcoes,
   ofertaPorId,
   salaoDa,
+  semPedido,
   servicosAvulsos,
+  trabalhaNoDia,
   validarOpcao,
   type Opcao,
 } from "./ofertas";
@@ -243,5 +245,66 @@ describe("escolherOpcoes", () => {
       hoje,
     );
     expect(r).toHaveLength(1);
+  });
+});
+
+describe("who comes on which day (Ruth, 2026-11-12)", () => {
+  const ELITON = "447143";
+  const SUELLEN = "444090";
+  const MAYARA = "430008";
+  const SEXTA = "2026-11-13";
+  const SABADO = "2026-11-14";
+
+  it("Eliton and Suellen are in the salon on Saturdays only; the others every open day", () => {
+    expect(trabalhaNoDia(salao, ELITON, SEXTA)).toBe(false);
+    expect(trabalhaNoDia(salao, ELITON, SABADO)).toBe(true);
+    expect(trabalhaNoDia(salao, SUELLEN, SEXTA)).toBe(false);
+    expect(trabalhaNoDia(salao, MAYARA, SEXTA)).toBe(true);
+  });
+
+  it("a Friday Eliton has open in avec is never offered; his Saturday is", () => {
+    const o = oferta("corte_infantil_com_secagem");
+    const slots = [SEXTA, SABADO].flatMap((d) => [
+      slot(ELITON, "3238948", d, "12:30"),
+      slot(ELITON, "2129311", d, "13:00"),
+      slot("797917", "2128749", d, "12:30"),
+    ]);
+    const datas = montarOpcoes(salao, o, [ELITON], "curto", slots).map((x) => x.data);
+    expect(datas).toEqual([SABADO]);
+  });
+
+  it("Suellen never dries on a weekday, even with her schedule open in avec", () => {
+    const o = oferta("tintura_raiz");
+    const slots = [
+      slot(MAYARA, "2181246", SEXTA, "10:00"),
+      slot(SUELLEN, "2129312", SEXTA, "11:30"),
+    ];
+    expect(montarOpcoes(salao, o, [MAYARA], null, slots, [SUELLEN])).toEqual([]);
+  });
+
+  it("without a name, a corte is searched with Mayara only; Eliton only when asked for", () => {
+    const quem = oferta("corte_feminino").porProfissional.map((p) => p.profissional);
+    expect(semPedido(salao, quem)).toEqual([MAYARA]);
+    expect(semPedido(salao, [ELITON])).toEqual([ELITON]);
+    expect(oferta("corte_feminino").perguntar).not.toMatch(/profissional/);
+  });
+});
+
+describe("progressiva and selamento on the arco (Ruth, 2026-11-03)", () => {
+  it("30 min with Júnior; with the wash and drying, the drying right after: 1 h in all", () => {
+    for (const [id, servico] of [
+      ["progressiva_arco", "2129166"],
+      ["selamento_arco", "2129362"],
+    ] as const) {
+      expect(etapasDe(oferta(id), "444091", null), id).toEqual([
+        { servico, inicio: 0, papel: "principal" },
+      ]);
+      expect(etapasDe(oferta(`${id}_com_lavar_e_secar`), "444091", null), id).toEqual([
+        { servico, inicio: 0, papel: "principal" },
+        { servico: "2129312", inicio: 30, papel: "principal" },
+      ]);
+      expect(oferta(id).semSabado, id).toBe(true);
+    }
+    expect(salao.comAEquipe.join(" ")).not.toMatch(/arco/);
   });
 });

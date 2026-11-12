@@ -41,7 +41,9 @@ import {
   ofertaPorId,
   parseSlotId,
   salaoDa,
+  semPedido,
   servicosAvulsos,
+  trabalhaNoDia,
   validarOpcao,
   type Opcao,
   type Salao,
@@ -422,14 +424,14 @@ export const avecFindServices: McpToolDefinition<typeof findServicesShape> = {
   },
 };
 
-/** The professionals of an oferta the client accepts: all, or the one she named. */
+/** The professionals of an oferta the client accepts: the usual ones, or the one she named. */
 function principaisPara(
   salao: Salao,
   oferta: NonNullable<ReturnType<typeof ofertaPorId>>,
   profissional: string | undefined,
 ): string[] | null {
   const todas = oferta.porProfissional.map((p) => p.profissional);
-  if (!profissional) return todas;
+  if (!profissional) return semPedido(salao, todas);
   const alvo = fold(profissional);
   const achadas = todas.filter((id) => {
     const nome = fold(salao.profissionais[id]?.nome ?? "");
@@ -552,8 +554,8 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
     `Busca até ${MAX_OPCOES} opções de horário na agenda do salão (avec), já escolhidas pela ` +
     "regra do salão: primeiro o que a cliente pediu, depois horários colados em clientes que a " +
     "profissional já tem no dia. Cada opção traz dia da semana, data, hora, profissional, as " +
-    "etapas com outra pessoa (tambem, tambem_com: lavagem e secagem) e um opcao_id. Pergunte a " +
-    "preferência de profissional ANTES de buscar. Ofereça com dia, data, hora e profissional " +
+    "etapas com outra pessoa (tambem, tambem_com: lavagem e secagem) e um opcao_id. " +
+    "profissional: só se a cliente pediu uma pelo nome. Ofereça com dia, data, hora e profissional " +
     '(ex.: "sexta, 30/10, às 15h com a Giovanna, e a secagem às 16h30 com a Júlia"). Se a ' +
     "cliente recusar a pessoa da secagem, busque de novo com auxiliar. Use só opcao_id que " +
     "veio daqui. Para marcar: servico (+ comprimento " +
@@ -600,19 +602,21 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
           from,
           to,
         });
-        opcoes = slots.map((s) => ({
-          opcao_id: `${OPCAO_REMARCAR}:-:${s.id}`,
-          data: s.date,
-          inicio: s.start_time,
-          fim: s.end_time,
-          profissional: s.professional_id,
-          agrupamento:
-            (s.gap_before_minutes ?? 99) <= 30 || (s.gap_after_minutes ?? 99) <= 30
-              ? 0
-              : (s.bookings_that_day ?? 0) > 0
-                ? 1
-                : 2,
-        }));
+        opcoes = slots
+          .filter((s) => trabalhaNoDia(salao, s.professional_id, s.date))
+          .map((s) => ({
+            opcao_id: `${OPCAO_REMARCAR}:-:${s.id}`,
+            data: s.date,
+            inicio: s.start_time,
+            fim: s.end_time,
+            profissional: s.professional_id,
+            agrupamento:
+              (s.gap_before_minutes ?? 99) <= 30 || (s.gap_after_minutes ?? 99) <= 30
+                ? 0
+                : (s.bookings_that_day ?? 0) > 0
+                  ? 1
+                  : 2,
+          }));
       } else {
         const oferta = input.servico ? ofertaPorId(salao, input.servico) : null;
         if (!oferta) {
