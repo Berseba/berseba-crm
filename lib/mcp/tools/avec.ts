@@ -555,9 +555,9 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
     "regra do salão: primeiro o que a cliente pediu, depois horários colados em clientes que a " +
     "profissional já tem no dia. Cada opção traz dia da semana, data, hora, profissional, as " +
     "etapas com outra pessoa (tambem, tambem_com: lavagem e secagem) e um opcao_id. " +
-    "profissional: só se a cliente pediu uma pelo nome. Ofereça com dia, data, hora e profissional " +
-    '(ex.: "sexta, 30/10, às 15h com a Giovanna, e a secagem às 16h30 com a Júlia"). Se a ' +
-    "cliente recusar a pessoa da secagem, busque de novo com auxiliar. Use só opcao_id que " +
+    "profissional: só se a cliente pediu uma pelo nome. Ofereça com dia, data e hora, sem nome " +
+    'de quem atende, lava ou seca (ex.: "sexta, 30/10, às 15h"), salvo a que ela pediu. ' +
+    "Use só opcao_id que " +
     "veio daqui. Para marcar: servico (+ comprimento " +
     "quando precisa). Para remarcar: remarcar_appointment_id. Sem preferência de dia, olha as " +
     "próximas 2 semanas.",
@@ -819,7 +819,7 @@ export const avecReschedule: McpToolDefinition<typeof rescheduleShape> = {
   description:
     "Remarca um agendamento da cliente DESTA conversa no avec para outro horário, com a mesma " +
     "profissional e o mesmo serviço. Antes: busque opções com avec_free_slots " +
-    "(remarcar_appointment_id) e confirme com ela o novo dia, hora e profissional. Depois de " +
+    "(remarcar_appointment_id) e confirme com ela o novo dia e hora. Depois de " +
     "remarcar, o appointment_id muda: use o novo.",
   inputSchema: rescheduleShape,
   category: "write",
@@ -905,7 +905,7 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
   description:
     "Marca no avec a visita de uma opção de avec_free_slots para a cliente DESTA conversa, pelo " +
     "telefone dela, com todas as etapas (ex.: corte, lavagem e secagem). Antes: confirme com " +
-    "ela o serviço, o dia, a hora e a profissional, e espere o sim. Se o horário for para outra " +
+    "ela o serviço, o dia e a hora, e espere o sim. Se o horário for para outra " +
     "pessoa (filha, mãe), mande o nome completo dela em nome_completo. Se o avec não conhecer a " +
     "cliente, a resposta pede para passar para a equipe cadastrá-la.",
   inputSchema: bookShape,
