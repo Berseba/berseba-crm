@@ -249,6 +249,15 @@ const schema = z.object({
   MIRAE_API_ORG_SLUG: z.string().optional().default(""),
   /** Comma-separated organization ids that get the `mirae_*` agent tools. */
   MIRAE_API_ORG_IDS: z.string().optional().default(""),
+
+  // ─── Berseba: Atos agenda API (RBCOR) — OPTIONAL, OFF BY DEFAULT ───
+  //
+  // Install level, like the avec block above. Off unless all three are set; parsed (and refused
+  // when malformed) by `lib/integrations/atos/config.ts`, never here.
+  ATOS_API_URL: z.string().optional().default(""),
+  ATOS_API_KEY: z.string().optional().default(""),
+  /** Comma-separated organization ids that get the `atos_*` agent tools. */
+  ATOS_API_ORG_IDS: z.string().optional().default(""),
   // ─── Prospecção: engine de scraping self-hosted (local-http, #2942) ───────
   //
   // Mesmo desenho de WACALLS_API_BASE_URL: NUNCA `required()`. Vazio = a
