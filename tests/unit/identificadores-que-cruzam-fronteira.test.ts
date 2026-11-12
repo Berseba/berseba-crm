@@ -31,6 +31,7 @@ import { TETO_NOME_DE_SESSAO_WAHA, nomeCurtoDaSessao, nomeDaSessaoNovo } from "@
 import { randomId } from "@/lib/random-id";
 import { avecIdempotencyKey } from "@/lib/mcp/tools/avec";
 import { miraeIdempotencyKey } from "@/lib/mcp/tools/mirae";
+import { atosIdempotencyKey } from "@/lib/mcp/tools/atos"; // Berseba
 import { nomeDaSessaoDeVoz } from "@/lib/wacalls/nome-da-sessao";
 
 const RAIZ = process.cwd();
@@ -128,6 +129,30 @@ const FRONTEIRAS: Fronteira[] = [
           miraeIdempotencyKey({ sourceJobId: VERSAO } as never, tool, {
             appointmentId: "8ClDgOSe2sTXOwZA2O8tM",
             startsAt: "2026-10-27T15:00:00-03:00",
+          }) ?? "",
+      ),
+  },
+  // Berseba: the key the Atos tools send to the Atos API (RBCOR).
+  {
+    id: "atos.idempotency-key",
+    terceiro: "API do Atos (Berseba/berseba-rbcor)",
+    teto: 128,
+    forma: /^[!-~]{8,128}$/,
+    fonte:
+      "Berseba/berseba-rbcor — todo POST exige Idempotency-Key; o CRM manda no máximo 128 caracteres visíveis, como no avec",
+    medir: () =>
+      [
+        "atos_cancel_class",
+        "atos_reschedule_class",
+        "atos_book_makeup",
+        "atos_book_class",
+        "atos_book_trial",
+        "atos_create_recurring_plan",
+      ].map(
+        (tool) =>
+          atosIdempotencyKey({ sourceJobId: VERSAO } as never, tool, {
+            booking_id: "2026-11-13-0700",
+            slot_id: "2026-11-14-1800",
           }) ?? "",
       ),
   },
@@ -264,6 +289,8 @@ const SITES: { arquivo: string; fronteira: string; papel?: "gerador" | "validado
   { arquivo: "lib/integrations/avec/client.ts", fronteira: "avec.idempotency-key" },
   // Berseba: sends the key `lib/mcp/tools/mirae.ts` derives per job (stable on retry, not a uuid).
   { arquivo: "lib/integrations/mirae/client.ts", fronteira: "mirae.idempotency-key" },
+  // Berseba: sends the key `lib/mcp/tools/atos.ts` derives per job (stable on retry, not a uuid).
+  { arquivo: "lib/integrations/atos/client.ts", fronteira: "atos.idempotency-key" },
 ];
 
 describe("todo identificador que cruza fronteira cabe no que o terceiro aceita", () => {
@@ -405,7 +432,7 @@ describe("a varredura é de classe: site novo de fronteira reprova", () => {
     // Só o cabeçalho como tal (`'Idempotency-Key'`/`"Idempotency-Key"`), não a
     // prosa dos comentários: o que cruza fronteira é o cabeçalho.
     const achados = caminhosCom(/['"]Idempotency-Key['"]/);
-    const registrados = SITES.filter((s) => s.fronteira === "api.idempotency-key" || s.fronteira === "avec.idempotency-key" || s.fronteira === "mirae.idempotency-key").map((s) => s.arquivo); // Berseba: avec, Mirae
+    const registrados = SITES.filter((s) => s.fronteira === "api.idempotency-key" || s.fronteira === "avec.idempotency-key" || s.fronteira === "mirae.idempotency-key" || s.fronteira === "atos.idempotency-key").map((s) => s.arquivo); // Berseba: avec, Mirae, Atos
     expect(achados.sort()).toEqual([...registrados].sort());
   });
 

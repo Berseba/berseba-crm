@@ -60,6 +60,14 @@ export const ESCOPO_DAS_ESCRITAS: Readonly<Record<string, Readonly<Record<string
   mirae_book: { opcao_id: "configuracao" },
   mirae_reschedule: { appointment_id: "configuracao", opcao_id: "configuracao" },
   mirae_cancel: { appointment_id: "configuracao" },
+  // ---- Berseba: Atos agenda (RBCOR). Same reason: Atos ids (date + time), scoped by the bridge
+  // to the phone of the turn's contact, see lib/mcp/tools/atos.ts.
+  atos_cancel_class: { booking_id: "configuracao" },
+  atos_reschedule_class: { booking_id: "configuracao", slot_id: "configuracao" },
+  atos_book_makeup: { missed_booking_id: "configuracao", slot_id: "configuracao" },
+  atos_book_class: { slot_id: "configuracao" },
+  atos_book_trial: { slot_id: "configuracao" },
+  atos_create_recurring_plan: {},
 
   // ---- agenda ----
   crm_book_appointment: { contact_id: "contato", owner_user_id: "configuracao" },
