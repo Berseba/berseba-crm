@@ -807,9 +807,14 @@ describe("writes", () => {
     expect(calls).toHaveLength(0);
     done();
     expect(
-      await run(tools.atosCreateRecurringPlan, { ...base, plan: "totalpass_tp3", months: 6 }),
+      await run(tools.atosCreateRecurringPlan, {
+        ...base,
+        plan: "totalpass_tp3",
+        months: 6,
+        pregnant: false,
+      }),
     ).toMatchObject({ ok: true });
-    expect(calls[0]!.body).toMatchObject({ plan: "totalpass_tp3", months: 6 });
+    expect(calls[0]!.body).toMatchObject({ plan: "totalpass_tp3", months: 6, pregnant: false });
   });
 
   it("book_class sends name, birth date and plan only when given", async () => {
@@ -819,6 +824,7 @@ describe("writes", () => {
       name: "Marina Souza",
       birth_date: "1990-05-20",
       plan: "wellhub_silver",
+      pregnant: true,
     });
     expect(calls[0]!.body).toEqual({
       phone: PHONE,
@@ -826,6 +832,7 @@ describe("writes", () => {
       name: "Marina Souza",
       birth_date: "1990-05-20",
       plan: "wellhub_silver",
+      pregnant: true,
     });
   });
 
@@ -856,6 +863,15 @@ describe("writes", () => {
   it("cancel is about one class, never the plan", () => {
     expect(tools.atosCancelClass.description).toMatch(/nunca o plano/);
     expect(tools.atosCancelClass.description).toMatch(/handoff/);
+  });
+
+  it("pregnant stays out of the audit in every tool that takes it", () => {
+    for (const t of [tools.atosBookClass, tools.atosCreateRecurringPlan, tools.atosBookTrial]) {
+      expect(Object.keys(t.inputSchema), t.name).toContain("pregnant");
+      expect(t.redigirParaAuditoria!({ pregnant: true }), t.name).toEqual({
+        pregnant: "[redacted]",
+      });
+    }
   });
 
   it("every write is declared in both write-scope tables", () => {

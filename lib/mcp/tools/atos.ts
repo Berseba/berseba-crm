@@ -662,6 +662,11 @@ const birthDate = z
 /** Personal data and free text the student gave never reach `api_audit_log`. */
 const PERSONAL = ["name", "birth_date", "pregnant", "needs"] as const;
 
+const pregnant = z
+  .boolean()
+  .optional()
+  .describe("true só se a pessoa disse NESTA conversa que está grávida.");
+
 const APP_CHOICE =
   "Quem vem por TotalPass ou Wellhub escolhe entre aula pontual (atos_book_class) e horários " +
   "fixos (atos_create_recurring_plan); a unidade trabalha com horários fixos.";
@@ -674,6 +679,7 @@ const bookShape = {
     .enum(ATOS_PLANS)
     .optional()
     .describe("rbcor, totalpass_tp2, totalpass_tp3 ou wellhub_silver (Silver+)."),
+  pregnant,
 };
 
 export const atosBookClass: McpToolDefinition<typeof bookShape> = {
@@ -705,6 +711,7 @@ export const atosBookClass: McpToolDefinition<typeof bookShape> = {
           name: input.name,
           birthDate: input.birth_date,
           plan: input.plan,
+          pregnant: input.pregnant,
           idempotencyKey: key,
         }),
       "aula marcada. Confirme à pessoa o dia e o horário e lembre a política de faltas.",
@@ -718,7 +725,7 @@ const trialShape = {
   name: personName,
   birth_date: birthDate,
   slot_id: slotId,
-  pregnant: z.boolean().optional().describe("true se a pessoa disse que está grávida."),
+  pregnant,
   needs: freeText("Dor, lesão ou cuidado que a pessoa contou, em poucas palavras."),
 };
 
@@ -785,6 +792,7 @@ const recurringShape = {
     .max(3)
     .describe("Os horários fixos da semana: até 2 dias (TP2+ e Wellhub) ou 3 (TP3)."),
   months: z.number().int().min(1).max(12).optional().describe("Duração em meses. Sem: 12."),
+  pregnant,
 };
 
 export const atosCreateRecurringPlan: McpToolDefinition<typeof recurringShape> = {
@@ -824,6 +832,7 @@ export const atosCreateRecurringPlan: McpToolDefinition<typeof recurringShape> =
           plan: input.plan,
           weekly: input.weekly,
           months: input.months,
+          pregnant: input.pregnant,
           idempotencyKey: key,
         }),
       "horários fixos criados. Confirme à pessoa os dias e o horário e lembre a política de faltas.",
