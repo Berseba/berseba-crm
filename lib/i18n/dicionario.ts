@@ -40,6 +40,26 @@ import { TEXTOS_AGENDA_SERVICOS } from "./agenda-servicos";
 type Traducoes = Record<string, Partial<Record<Exclude<Idioma, "pt-BR">, string>>>;
 
 export const DICIONARIO: Traducoes = {
+  // Berseba: "Ligar com a Bia" (Voz) on the lead card and its route.
+  "Ligar com a Bia": { es: "Llamar con Bia" },
+  "Confirmar: a Bia liga agora": { es: "Confirmar: Bia llama ahora" },
+  "A Bia está ligando": { es: "Bia está llamando" },
+  "Pedindo…": { es: "Solicitando…" },
+  "A Bia liga pelo WhatsApp e deixa o resumo aqui.": { es: "Bia llama por WhatsApp y deja el resumen aquí." },
+  "O resumo aparece na linha do tempo quando a ligação terminar.": { es: "El resumen aparece en la línea de tiempo cuando termine la llamada." },
+  "A Bia vai ligar em instantes. O resumo aparece na linha do tempo.": { es: "Bia llamará en instantes. El resumen aparece en la línea de tiempo." },
+  "Não foi possível pedir a ligação.": { es: "No fue posible solicitar la llamada." },
+  "A Bia não está disponível nesta organização.": { es: "Bia no está disponible en esta organización." },
+  "Este negócio não tem contato com telefone.": { es: "Este negocio no tiene contacto con teléfono." },
+  "Este número pediu para não receber ligações.": { es: "Este número pidió no recibir llamadas." },
+  "A Bia já está ligando para este número.": { es: "Bia ya está llamando a este número." },
+  "A Bia está pausada. Ative-a no console da Voz.": { es: "Bia está en pausa. Actívala en la consola de Voz." },
+  "A linha da Bia chegou ao limite de ligações de hoje.": { es: "La línea de Bia llegó al límite de llamadas de hoy." },
+  "A chave da Voz não vale mais. Avise quem administra o CRM.": { es: "La clave de Voz ya no es válida. Avisa a quien administra el CRM." },
+  "A Bia não tem uma linha de WhatsApp ativa.": { es: "Bia no tiene una línea de WhatsApp activa." },
+  "O telefone do contato não parece um celular válido.": { es: "El teléfono del contacto no parece un celular válido." },
+  "A Voz não respondeu. Tente de novo em instantes.": { es: "Voz no respondió. Inténtalo de nuevo en instantes." },
+  "Ligação da Bia": { es: "Llamada de Bia" },
   // Berseba: phone reply counts as the team's answer (settings/atendimento).
   "Contar a resposta pelo celular como resposta da equipe": { es: "Contar la respuesta desde el celular como respuesta del equipo" },
   "Ligue se a equipe responde os clientes pelo celular. A conversa volta ao agente quando a última mensagem foi da equipe, pelo CRM ou pelo celular, e o prazo passou. Deixe desligado se o celular manda lembretes automáticos de outro sistema: eles contariam como resposta.": { es: "Actívalo si el equipo responde a los clientes desde el celular. La conversación vuelve al agente cuando el último mensaje fue del equipo, desde el CRM o desde el celular, y el plazo venció. Déjalo desactivado si el celular envía recordatorios automáticos de otro sistema: contarían como respuesta." },

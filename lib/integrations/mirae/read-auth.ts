@@ -58,20 +58,32 @@ export function authorizeMiraeRead(
   authHeader: string | null,
   requestId: string,
 ): Promise<MiraeAuth> {
-  return authorizeMirae(authHeader, requestId, READ);
+  return authorizeServerBearer(authHeader, requestId, READ);
 }
 
 export function authorizeMiraeWrite(
   authHeader: string | null,
   requestId: string,
 ): Promise<MiraeAuth> {
-  return authorizeMirae(authHeader, requestId, WRITE);
+  return authorizeServerBearer(authHeader, requestId, WRITE);
 }
 
-async function authorizeMirae(
+/** A server-to-server rule: the scope and rank a route needs, and its own rate-limit bucket. */
+export type ServerBearerRule = {
+  scope: string;
+  role: "viewer" | "agent";
+  bucket: string;
+  perToken: number;
+};
+
+/**
+ * The bearer check of every Berseba server-to-server route (Mirae here, Voz in
+ * `lib/integrations/voz/auth.ts`): the same authenticator, codes and ceilings, one bucket each.
+ */
+export async function authorizeServerBearer(
   authHeader: string | null,
   requestId: string,
-  rule: { scope: string; role: "viewer" | "agent"; bucket: string; perToken: number },
+  rule: ServerBearerRule,
 ): Promise<MiraeAuth> {
   // No pre-check of the header: `validateBearerToken` answers 401 on a missing one itself and,
   // unlike a shortcut here, counts it as a failed attempt like the MCP does.
