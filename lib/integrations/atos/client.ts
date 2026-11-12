@@ -22,6 +22,11 @@ export const ATOS_PLANS = ["rbcor", "totalpass_tp2", "totalpass_tp3", "wellhub_s
 export const ATOS_PERIODS = ["manha", "tarde"] as const;
 export type AtosPlan = (typeof ATOS_PLANS)[number];
 export type AtosPeriod = (typeof ATOS_PERIODS)[number];
+/** The app plans (TotalPass, Wellhub) that book fixed weekly hours. */
+export const ATOS_APP_PLANS = ["totalpass_tp2", "totalpass_tp3", "wellhub_silver"] as const;
+export type AtosAppPlan = (typeof ATOS_APP_PLANS)[number];
+export const ATOS_WEEKDAYS = ["monday", "tuesday", "wednesday", "thursday", "friday"] as const;
+export type AtosWeekday = (typeof ATOS_WEEKDAYS)[number];
 
 export class AtosApiError extends Error {
   constructor(
@@ -161,6 +166,7 @@ export async function listBookings(
 // ---------------------------------------------------------------------------
 
 const writeResultSchema = z.object({
+  // A recurring plan answers its first class here, when the bridge sends one.
   booking: bookingSchema.optional().catch(undefined),
   makeup_eligible: z.boolean().optional().catch(undefined),
 });
@@ -232,20 +238,59 @@ export function bookMakeup(
   );
 }
 
-/** `POST /v1/bookings`: a student who already exists books a class. */
+/** `POST /v1/bookings`: a one-off class; a new person also sends name and birth date. */
 export function bookClass(
   config: AtosConfig,
-  input: { phone: string; slotId: string; idempotencyKey: string },
+  input: {
+    phone: string;
+    slotId: string;
+    name?: string;
+    birthDate?: string;
+    idempotencyKey: string;
+  },
 ): Promise<AtosWriteResult> {
   return post(
     config,
     "/v1/bookings",
-    { phone: input.phone, slot_id: input.slotId },
+    withoutUndefined({
+      phone: input.phone,
+      slot_id: input.slotId,
+      name: input.name,
+      birth_date: input.birthDate,
+    }),
     input.idempotencyKey,
   );
 }
 
-/** `POST /v1/trial-bookings`: the bridge registers the student and books the first class. */
+/** `POST /v1/recurring-plans`: fixed weekly hours for a TotalPass or Wellhub student. */
+export function createRecurringPlan(
+  config: AtosConfig,
+  input: {
+    phone: string;
+    name: string;
+    birthDate: string;
+    plan: AtosAppPlan;
+    weekly: ReadonlyArray<{ weekday: AtosWeekday; start_time: string }>;
+    months?: number;
+    idempotencyKey: string;
+  },
+): Promise<AtosWriteResult> {
+  return post(
+    config,
+    "/v1/recurring-plans",
+    withoutUndefined({
+      phone: input.phone,
+      name: input.name,
+      birth_date: input.birthDate,
+      plan: input.plan,
+      weekly: input.weekly.map((w) => ({ weekday: w.weekday, start_time: w.start_time })),
+      months: input.months,
+    }),
+    input.idempotencyKey,
+  );
+}
+
+/** `POST /v1/trial-bookings`: first class of an RBCOR plan; the bridge registers the student. */
 export function bookTrial(
   config: AtosConfig,
   input: {
@@ -253,7 +298,6 @@ export function bookTrial(
     name: string;
     birthDate: string;
     slotId: string;
-    plan: AtosPlan;
     pregnant?: boolean;
     needs?: string;
     idempotencyKey: string;
@@ -267,7 +311,6 @@ export function bookTrial(
       name: input.name,
       birth_date: input.birthDate,
       slot_id: input.slotId,
-      plan: input.plan,
       pregnant: input.pregnant,
       needs: input.needs,
     }),

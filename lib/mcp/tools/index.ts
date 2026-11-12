@@ -34,6 +34,7 @@ import {
   atosBookMakeup,
   atosBookTrial,
   atosCancelClass,
+  atosCreateRecurringPlan,
   atosFreeSlots,
   atosMyClasses,
   atosRescheduleClass,
@@ -152,6 +153,7 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   atosBookMakeup,
   atosBookClass,
   atosBookTrial,
+  atosCreateRecurringPlan,
   // read
   crmListEventTypes,
   crmFindFreeSlots,

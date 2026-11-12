@@ -67,6 +67,7 @@ export const ESCOPO_DAS_ESCRITAS: Readonly<Record<string, Readonly<Record<string
   atos_book_makeup: { missed_booking_id: "configuracao", slot_id: "configuracao" },
   atos_book_class: { slot_id: "configuracao" },
   atos_book_trial: { slot_id: "configuracao" },
+  atos_create_recurring_plan: {},
 
   // ---- agenda ----
   crm_book_appointment: { contact_id: "contato", owner_user_id: "configuracao" },

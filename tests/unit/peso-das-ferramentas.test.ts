@@ -62,11 +62,12 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   "mirae_cancel": { tokens: 208, motivo: BERSEBA },
   "atos_free_slots": { tokens: 404, motivo: BERSEBA_ATOS },
   "atos_my_classes": { tokens: 252, motivo: BERSEBA_ATOS },
-  "atos_cancel_class": { tokens: 214, motivo: BERSEBA_ATOS },
+  "atos_cancel_class": { tokens: 252, motivo: BERSEBA_ATOS },
   "atos_reschedule_class": { tokens: 199, motivo: BERSEBA_ATOS },
   "atos_book_makeup": { tokens: 225, motivo: BERSEBA_ATOS },
-  "atos_book_class": { tokens: 176, motivo: BERSEBA_ATOS },
-  "atos_book_trial": { tokens: 352, motivo: BERSEBA_ATOS },
+  "atos_book_class": { tokens: 273, motivo: BERSEBA_ATOS },
+  "atos_book_trial": { tokens: 297, motivo: BERSEBA_ATOS },
+  "atos_create_recurring_plan": { tokens: 472, motivo: BERSEBA_ATOS },
   // ── end of the Berseba block ─────────────────────────────────────────────
   "crm_list_event_types": { tokens: 204, motivo: BASE },
   "crm_find_free_slots": { tokens: 859, motivo: BASE },
@@ -162,9 +163,9 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   "schedule_followup (com negócio)": { tokens: 314, motivo: BASE },
 };
 
-// Berseba: upstream 29569 + 3055 of our avec/mirae tools + 1822 of the Atos tools (block at the
+// Berseba: upstream 29569 + 3055 of our avec/mirae tools + 2374 of the Atos tools (block at the
 // top of TETO).
-const TETO_TOTAL = 34446;
+const TETO_TOTAL = 34998;
 
 const VARIANTE = "schedule_followup (com negócio)";
 

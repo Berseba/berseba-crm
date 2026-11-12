@@ -147,6 +147,7 @@ const FRONTEIRAS: Fronteira[] = [
         "atos_book_makeup",
         "atos_book_class",
         "atos_book_trial",
+        "atos_create_recurring_plan",
       ].map(
         (tool) =>
           atosIdempotencyKey({ sourceJobId: VERSAO } as never, tool, {

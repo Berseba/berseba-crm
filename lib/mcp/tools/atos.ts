@@ -18,7 +18,8 @@
  *    studio's rule, in `detail`). Writes are never retried: a lost answer may mean Atos wrote it.
  *
  * Reads (`atos_free_slots`, `atos_my_classes`) and writes (`atos_cancel_class`,
- * `atos_reschedule_class`, `atos_book_makeup`, `atos_book_class`, `atos_book_trial`) are separate
+ * `atos_reschedule_class`, `atos_book_makeup`, `atos_book_class`, `atos_book_trial`,
+ * `atos_create_recurring_plan`) are separate
  * switches on the agent screen; the writes are `critico`, so no bundle ever turns them on.
  *
  * Refusals carry `permitido: false` + `motivo`, so the runtime audits them as failures
@@ -32,13 +33,17 @@ import {
   ATOS_PERIODS,
   ATOS_PLANS,
   AtosApiError,
+  ATOS_APP_PLANS,
+  ATOS_WEEKDAYS,
   bookClass,
   bookMakeup,
+  createRecurringPlan,
   bookTrial,
   cancelBooking,
   listBookings,
   listSlots,
   rescheduleBooking,
+  type AtosAppPlan,
   type AtosBooking,
   type AtosSlot,
   type AtosWriteResult,
@@ -534,9 +539,10 @@ const cancelShape = {
 export const atosCancelClass: McpToolDefinition<typeof cancelShape> = {
   name: "atos_cancel_class",
   description:
-    "Desmarca uma aula da aluna DESTA conversa no Atos; serve também para avisar falta (no Atos " +
-    "as duas são Desmarcado). Use o booking_id de atos_my_classes; se ela tiver mais de uma " +
-    "aula, pergunte qual. " +
+    "Desmarca UMA AULA da aluna DESTA conversa no Atos, nunca o plano; serve também para avisar " +
+    "falta (no Atos as duas são Desmarcado). Cancelar plano ou contrato é sempre da equipe: " +
+    "faça handoff com o resumo. Se não estiver claro se ela fala da aula ou do plano, pergunte " +
+    "antes. Use o booking_id de atos_my_classes; se tiver mais de uma aula, pergunte qual. " +
     CONFIRM_FIRST +
     " A resposta diz se a aula dá direito a reposição (tem_reposicao); se sim, ofereça marcar " +
     "com atos_book_makeup.",
@@ -640,28 +646,60 @@ export const atosBookMakeup: McpToolDefinition<typeof makeupShape> = {
 
 // ---- atos_book_class ------------------------------------------------------
 
-const bookShape = { slot_id: slotId };
+const personName = z
+  .string()
+  .trim()
+  .min(3)
+  .max(120)
+  .describe("Nome completo, como a pessoa escreveu.");
+const birthDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, "use AAAA-MM-DD")
+  .describe("Data de nascimento, AAAA-MM-DD.");
+
+/** Personal data and free text the student gave never reach `api_audit_log`. */
+const PERSONAL = ["name", "birth_date", "pregnant", "needs"] as const;
+
+const APP_CHOICE =
+  "Quem vem por TotalPass ou Wellhub escolhe entre aula pontual (atos_book_class) e horários " +
+  "fixos (atos_create_recurring_plan); a unidade trabalha com horários fixos.";
+
+const bookShape = {
+  slot_id: slotId,
+  name: personName.optional(),
+  birth_date: birthDate.optional(),
+};
 
 export const atosBookClass: McpToolDefinition<typeof bookShape> = {
   name: "atos_book_class",
   description:
-    "Marca uma aula para a aluna DESTA conversa, que já é aluna no Atos (o caso comum: aluna de " +
-    "TotalPass ou Wellhub marcando a aula da semana), no slot_id de atos_free_slots, buscado " +
-    "com o plano dela. Para quem ainda não é aluna, use atos_book_trial. " +
-    CONFIRM_FIRST,
+    "Marca uma aula pontual (avulsa) para a pessoa DESTA conversa no slot_id de atos_free_slots, " +
+    "buscado com o plano dela. Pessoa nova no Atos leva name e birth_date (pergunte; nunca " +
+    "invente). " +
+    APP_CHOICE +
+    " " +
+    CONFIRM_FIRST +
+    " No fim, lembre a política de faltas.",
   inputSchema: bookShape,
   category: "write",
   requiresRole: "ai_operator",
   requiresScope: "mcp:write",
-  redigirParaAuditoria: keepOnly(Object.keys(bookShape)),
+  redigirParaAuditoria: redactFields(Object.keys(bookShape), PERSONAL),
   handler: async (input, ctx) => {
     const ready = await prepareWrite(ctx, "atos_book_class", input);
     if (isRefusal(ready)) return ready;
     const { config, phone, key } = ready;
     return write(
       ctx,
-      () => bookClass(config, { phone, slotId: input.slot_id, idempotencyKey: key }),
-      "aula marcada. Confirme à aluna o dia e o horário.",
+      () =>
+        bookClass(config, {
+          phone,
+          slotId: input.slot_id,
+          name: input.name,
+          birthDate: input.birth_date,
+          idempotencyKey: key,
+        }),
+      "aula marcada. Confirme à pessoa o dia e o horário e lembre a política de faltas.",
     );
   },
 };
@@ -669,38 +707,26 @@ export const atosBookClass: McpToolDefinition<typeof bookShape> = {
 // ---- atos_book_trial ------------------------------------------------------
 
 const trialShape = {
-  name: z.string().trim().min(3).max(120).describe("Nome completo da aluna, como ela escreveu."),
-  birth_date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "use AAAA-MM-DD")
-    .describe("Data de nascimento, AAAA-MM-DD."),
+  name: personName,
+  birth_date: birthDate,
   slot_id: slotId,
-  plan: z
-    .enum(ATOS_PLANS)
-    .describe(
-      "Plano: rbcor (particular), totalpass_tp2, totalpass_tp3 ou wellhub_silver (Silver+).",
-    ),
-  pregnant: z.boolean().optional().describe("true se a aluna disse que está grávida."),
-  needs: freeText("Dor, lesão ou cuidado que a aluna contou, em poucas palavras."),
+  pregnant: z.boolean().optional().describe("true se a pessoa disse que está grávida."),
+  needs: freeText("Dor, lesão ou cuidado que a pessoa contou, em poucas palavras."),
 };
 
 export const atosBookTrial: McpToolDefinition<typeof trialShape> = {
   name: "atos_book_trial",
   description:
-    "Marca a primeira vivência de quem ainda não é aluna: cadastra no Atos com o telefone DESTA " +
-    "conversa e agenda no slot_id de atos_free_slots, buscado com o mesmo plano. Pergunte antes " +
-    "o nome completo, a data de nascimento e o plano; nunca invente nenhum deles. " +
-    CONFIRM_FIRST,
+    "Marca a primeira vivência de quem vai entrar num plano da RBCOR (não TotalPass nem " +
+    "Wellhub): cadastra no Atos com o telefone DESTA conversa e agenda no slot_id de " +
+    "atos_free_slots. Pergunte antes o nome completo e a data de nascimento; nunca invente. " +
+    CONFIRM_FIRST +
+    " No fim, lembre a política de faltas.",
   inputSchema: trialShape,
   category: "write",
   requiresRole: "ai_operator",
   requiresScope: "mcp:write",
-  redigirParaAuditoria: redactFields(Object.keys(trialShape), [
-    "name",
-    "birth_date",
-    "pregnant",
-    "needs",
-  ]),
+  redigirParaAuditoria: redactFields(Object.keys(trialShape), PERSONAL),
   handler: async (input, ctx) => {
     const ready = await prepareWrite(ctx, "atos_book_trial", input);
     if (isRefusal(ready)) return ready;
@@ -713,12 +739,86 @@ export const atosBookTrial: McpToolDefinition<typeof trialShape> = {
           name: input.name,
           birthDate: input.birth_date,
           slotId: input.slot_id,
-          plan: input.plan,
           pregnant: input.pregnant,
           needs: input.needs,
           idempotencyKey: key,
         }),
-      "vivência marcada. Confirme à aluna o dia e o horário.",
+      "vivência marcada. Confirme à pessoa o dia e o horário e lembre a política de faltas.",
+    );
+  },
+};
+
+// ---- atos_create_recurring_plan -------------------------------------------
+
+/** Days per week each app plan allows (Beatriz, 2026-11-12): TP3 three, TP2+ and Wellhub two. */
+export const MAX_WEEKLY_BY_PLAN: Record<AtosAppPlan, number> = {
+  totalpass_tp2: 2,
+  totalpass_tp3: 3,
+  wellhub_silver: 2,
+};
+
+const recurringShape = {
+  name: personName,
+  birth_date: birthDate,
+  plan: z
+    .enum(ATOS_APP_PLANS)
+    .describe("totalpass_tp2, totalpass_tp3 ou wellhub_silver (Silver+)."),
+  weekly: z
+    .array(
+      z.object({
+        weekday: z.enum(ATOS_WEEKDAYS).describe("monday a friday."),
+        start_time: z
+          .string()
+          .regex(/^\d{2}:\d{2}$/, "use HH:MM")
+          .describe("Início, HH:MM (hora cheia)."),
+      }),
+    )
+    .min(1)
+    .max(3)
+    .describe("Os horários fixos da semana: até 2 dias (TP2+ e Wellhub) ou 3 (TP3)."),
+  months: z.number().int().min(1).max(12).optional().describe("Duração em meses. Sem: 12."),
+};
+
+export const atosCreateRecurringPlan: McpToolDefinition<typeof recurringShape> = {
+  name: "atos_create_recurring_plan",
+  description:
+    "Cria os horários fixos semanais de quem vem por TotalPass ou Wellhub, para a pessoa DESTA " +
+    "conversa (cadastra no Atos se for nova): por padrão 12 meses, com até 2 dias por semana " +
+    "(TP2+ e Wellhub) ou 3 (TP3), na faixa do plano. Confira as vagas antes com atos_free_slots " +
+    "e o mesmo plan. " +
+    APP_CHOICE +
+    ' Antes de chamar, confirme com a pessoa os dias e o horário ("Confirma segunda e quarta ' +
+    'às 7h?") e só chame depois do sim. No fim, lembre a política de faltas.',
+  inputSchema: recurringShape,
+  category: "write",
+  requiresRole: "ai_operator",
+  requiresScope: "mcp:write",
+  redigirParaAuditoria: redactFields(Object.keys(recurringShape), PERSONAL),
+  handler: async (input, ctx) => {
+    const ready = await prepareWrite(ctx, "atos_create_recurring_plan", input);
+    if (isRefusal(ready)) return ready;
+    const max = MAX_WEEKLY_BY_PLAN[input.plan];
+    if (input.weekly.length > max) {
+      return refusal(
+        "dias_demais",
+        false,
+        `esse plano permite até ${max} dias por semana; peça à pessoa para escolher e chame de novo.`,
+      );
+    }
+    const { config, phone, key } = ready;
+    return write(
+      ctx,
+      () =>
+        createRecurringPlan(config, {
+          phone,
+          name: input.name,
+          birthDate: input.birth_date,
+          plan: input.plan,
+          weekly: input.weekly,
+          months: input.months,
+          idempotencyKey: key,
+        }),
+      "horários fixos criados. Confirme à pessoa os dias e o horário e lembre a política de faltas.",
     );
   },
 };

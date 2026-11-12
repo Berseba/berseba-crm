@@ -155,6 +155,7 @@ const WRITES = [
   "atos_book_makeup",
   "atos_book_class",
   "atos_book_trial",
+  "atos_create_recurring_plan",
 ];
 
 describe("gates", () => {
@@ -555,7 +556,6 @@ describe("writes", () => {
         name: "Marina Souza",
         birth_date: "1990-05-20",
         slot_id: "2026-11-14-1800",
-        plan: "wellhub_silver",
         pregnant: true,
         needs: "Dor lombar",
       },
@@ -566,9 +566,32 @@ describe("writes", () => {
         name: "Marina Souza",
         birth_date: "1990-05-20",
         slot_id: "2026-11-14-1800",
-        plan: "wellhub_silver",
         pregnant: true,
         needs: "Dor lombar",
+      },
+    },
+    {
+      tool: "atosCreateRecurringPlan",
+      args: {
+        name: "Marina Souza",
+        birth_date: "1990-05-20",
+        plan: "totalpass_tp3",
+        weekly: [
+          { weekday: "monday", start_time: "07:00" },
+          { weekday: "wednesday", start_time: "07:00" },
+        ],
+      },
+      method: "POST",
+      path: "/v1/recurring-plans",
+      body: {
+        phone: PHONE,
+        name: "Marina Souza",
+        birth_date: "1990-05-20",
+        plan: "totalpass_tp3",
+        weekly: [
+          { weekday: "monday", start_time: "07:00" },
+          { weekday: "wednesday", start_time: "07:00" },
+        ],
       },
     },
   ];
@@ -757,7 +780,6 @@ describe("writes", () => {
       name: "[redacted]",
       birth_date: "[redacted]",
       slot_id: "2026-11-14-1800",
-      plan: "wellhub_silver",
       pregnant: "[redacted]",
       needs: "[redacted]",
     });
@@ -767,6 +789,47 @@ describe("writes", () => {
         reason: "Gripe",
       }),
     ).toEqual({ booking_id: "2026-11-13-0700", reason: "[redacted]" });
+  });
+
+  it("recurring plan: at most 2 days for TP2+ and Wellhub, 3 for TP3, checked before calling", async () => {
+    const three = [
+      { weekday: "monday", start_time: "07:00" },
+      { weekday: "wednesday", start_time: "07:00" },
+      { weekday: "friday", start_time: "07:00" },
+    ];
+    const base = { name: "Marina Souza", birth_date: "1990-05-20", weekly: three };
+    for (const plan of ["totalpass_tp2", "wellhub_silver"]) {
+      expect(await run(tools.atosCreateRecurringPlan, { ...base, plan }), plan).toMatchObject({
+        code: "dias_demais",
+        handoff: false,
+      });
+    }
+    expect(calls).toHaveLength(0);
+    done();
+    expect(
+      await run(tools.atosCreateRecurringPlan, { ...base, plan: "totalpass_tp3", months: 6 }),
+    ).toMatchObject({ ok: true });
+    expect(calls[0]!.body).toMatchObject({ plan: "totalpass_tp3", months: 6 });
+  });
+
+  it("book_class sends name and birth date only when given", async () => {
+    done();
+    await run(tools.atosBookClass, {
+      slot_id: "2026-11-14-1800",
+      name: "Marina Souza",
+      birth_date: "1990-05-20",
+    });
+    expect(calls[0]!.body).toEqual({
+      phone: PHONE,
+      slot_id: "2026-11-14-1800",
+      name: "Marina Souza",
+      birth_date: "1990-05-20",
+    });
+  });
+
+  it("cancel is about one class, never the plan", () => {
+    expect(tools.atosCancelClass.description).toMatch(/nunca o plano/);
+    expect(tools.atosCancelClass.description).toMatch(/handoff/);
   });
 
   it("every write is declared in both write-scope tables", () => {
@@ -779,7 +842,7 @@ describe("writes", () => {
   it("every write asks the agent to confirm day and time first", () => {
     for (const name of WRITES) {
       expect(allTools.find((t) => t.name === name)?.description, name).toMatch(
-        /Confirma sexta às 7h/,
+        /Confirma (sexta|segunda)/,
       );
     }
   });

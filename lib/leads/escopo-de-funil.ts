@@ -74,6 +74,7 @@ export const ALVO_DE_FUNIL: Record<string, AlvoDeFunil> = {
   atos_book_makeup: "sem_funil",
   atos_book_class: "sem_funil",
   atos_book_trial: "sem_funil",
+  atos_create_recurring_plan: "sem_funil",
   // ---- escrevem em crm_leads: o coração do escopo ----
   crm_create_lead: "pipeline_no_argumento",
   crm_update_lead: "funil_vem_do_lead",

@@ -66,7 +66,7 @@ export const TOOLS_ATOS = declararTools([
     category: "write",
     rotulo: "Marcar aula no Atos",
     explicacao:
-      "Marca uma aula para quem já é aluna, como a aula da semana de quem vem pelo TotalPass ou Wellhub, depois de ela confirmar dia e horário.",
+      "Marca uma aula pontual (avulsa), inclusive para quem vem pelo TotalPass ou Wellhub; pessoa nova leva nome e data de nascimento. Antes, confirma dia e horário.",
     oQueToca: AGENDA,
     risco: "critico",
     pacotes: ["atender"],
@@ -76,7 +76,17 @@ export const TOOLS_ATOS = declararTools([
     category: "write",
     rotulo: "Marcar a primeira vivência no Atos",
     explicacao:
-      "Cadastra a pessoa no Atos com nome, data de nascimento e plano, e marca a primeira aula. Com TotalPass ou Wellhub, a ponte reserva o plano antes.",
+      "Para quem vai entrar num plano da RBCOR: cadastra a pessoa no Atos com nome e data de nascimento e marca a primeira aula.",
+    oQueToca: AGENDA,
+    risco: "critico",
+    pacotes: ["atender"],
+  },
+  {
+    name: "atos_create_recurring_plan",
+    category: "write",
+    rotulo: "Criar horários fixos no Atos (TotalPass e Wellhub)",
+    explicacao:
+      "Cria os horários fixos semanais de quem vem pelo TotalPass ou Wellhub (12 meses por padrão, até 2 ou 3 dias por semana conforme o plano), depois de a pessoa confirmar dias e horário.",
     oQueToca: AGENDA,
     risco: "critico",
     pacotes: ["atender"],
