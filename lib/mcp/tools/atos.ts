@@ -1,8 +1,7 @@
 /**
- * Berseba: read-only agenda tools over Atos Clínicas, for the studio RBCOR (agent "Clara").
+ * Berseba: agenda tools over Atos Clínicas, for the studio RBCOR (agent "Clara").
  *
- * RBCOR keeps its class agenda in Atos; `Berseba/berseba-rbcor` exposes a small read-only REST
- * API over it (`lib/integrations/atos/client.ts`). The CRM orchestrates; the API has no model
+ * RBCOR keeps its class agenda in Atos; `Berseba/berseba-rbcor` exposes a small REST API over it (`lib/integrations/atos/client.ts`). The CRM orchestrates; the API has no model
  * and no conversation, and it already applies the studio's rules to the free places (40-minute
  * classes on the hour, Monday to Friday, never at 13h, the plan's window, at least 1 h ahead).
  * The CRM's native agenda (`calendar_*`, `crm_find_free_slots`) is not used for this studio.
@@ -13,23 +12,36 @@
  *    API only shows the classes of the student whose mobile in Atos is that phone. No contact
  *    of the turn (HTTP route, external MCP) = refused.
  *  - Only the organizations in `ATOS_API_ORG_IDS` (install level) have these tools.
- *  - Every API failure answers `{ok: false, code, handoff: true}`: the agent tells the student
- *    the front desk will continue and calls `crm_request_human_handoff`. In this phase a free
- *    place is information only; booking stays with the front desk.
+ *  - An API failure the agent cannot fix answers `{ok: false, code, handoff: true}`: the agent
+ *    tells the student the front desk will continue and calls `crm_request_human_handoff`. The
+ *    two it can fix: `slot_unavailable` (search again, once) and `rule_violation` (repeat the
+ *    studio's rule, in `detail`). Writes are never retried: a lost answer may mean Atos wrote it.
+ *
+ * Reads (`atos_free_slots`, `atos_my_classes`) and writes (`atos_cancel_class`,
+ * `atos_reschedule_class`, `atos_book_makeup`, `atos_book_class`, `atos_book_trial`) are separate
+ * switches on the agent screen; the writes are `critico`, so no bundle ever turns them on.
  *
  * Refusals carry `permitido: false` + `motivo`, so the runtime audits them as failures
  * (`recusaDoHandler` in `lib/ai/runtime/tools.ts`): the handoffs these tools cause are counted.
  */
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
 
 import {
   ATOS_PERIODS,
   ATOS_PLANS,
   AtosApiError,
+  bookClass,
+  bookMakeup,
+  bookTrial,
+  cancelBooking,
   listBookings,
   listSlots,
+  rescheduleBooking,
   type AtosBooking,
   type AtosSlot,
+  type AtosWriteResult,
 } from "@/lib/integrations/atos/client";
 import { atosConfigFor, type AtosConfig } from "@/lib/integrations/atos/config";
 import { logger } from "@/lib/logger";
@@ -54,6 +66,12 @@ const TODO_BY_CODE: Record<string, string> = {
   ambiguous_student:
     "Duas alunas no Atos com este celular: confirmar no Atos qual é (pelo nome) e responder.",
   contato_sem_telefone: "O contato não tem telefone no CRM: consultar a agenda pelo nome.",
+  not_found: "A aula citada não foi achada para este celular no Atos: conferir com a aluna.",
+  not_enabled: "Esta alteração ainda não está ligada na ponte do Atos: fazer manualmente.",
+  slot_unavailable: "Os horários oferecidos foram ocupados: oferecer outro horário à aluna.",
+  atos_write_unconfirmed:
+    "Conferir no Atos se a alteração entrou; não repetir pelo sistema. Se não entrou, fazer manualmente.",
+  sem_chave_de_idempotencia: "Fazer manualmente no Atos o que a aluna pediu.",
 };
 const TODO_DEFAULT = "A agenda do Atos não respondeu: consultar no Atos e responder à aluna.";
 
@@ -69,6 +87,7 @@ type Refusal = {
   handoff: boolean;
   mensagem: string;
   todo?: string;
+  detail?: string;
 };
 
 function refusal(code: string, handoff: boolean, mensagem: string): Refusal {
@@ -117,10 +136,18 @@ function gate(ctx: McpContext): AtosConfig | Refusal {
   return config;
 }
 
-const isRefusal = (v: AtosConfig | Refusal): v is Refusal => "ok" in v;
+const isRefusal = <T extends object>(v: T | Refusal): v is Refusal => "ok" in v;
 
-/** Every API failure hands off; `ambiguous_student` first asks the student's name. */
-function failure(err: unknown): Refusal {
+/**
+ * Every API failure hands off, except the two the agent fixes itself: `rule_violation` (it
+ * repeats the studio's rule) and the first `slot_unavailable` (it searches again).
+ * `ambiguous_student` first asks the student's name. For a write, no answer (or
+ * `atos_write_unconfirmed`) may mean Atos wrote it: the front desk checks, nothing is repeated.
+ */
+function failure(
+  err: unknown,
+  options: { isWrite?: boolean; slotTakenTwice?: boolean } = {},
+): Refusal {
   if (!(err instanceof AtosApiError)) {
     logger.warn("atos: unexpected tool failure", {
       error: err instanceof Error ? err.message : String(err),
@@ -128,6 +155,41 @@ function failure(err: unknown): Refusal {
     return refusal("internal_error", true, HANDOFF_INSTRUCTION);
   }
   logger.warn("atos: API refused", { status: err.status, code: err.code });
+  if (err.code === "rule_violation") {
+    return {
+      ...refusal(
+        err.code,
+        false,
+        "o estúdio não permite essa alteração. Explique à aluna, com suas palavras, a regra em " +
+          "detail e ofereça o que for possível. Não transfira e não tente de novo igual.",
+      ),
+      detail: err.detail ?? "",
+    };
+  }
+  if (err.code === "slot_unavailable" && !options.slotTakenTwice) {
+    return refusal(
+      err.code,
+      false,
+      "alguém acabou de pegar esse horário. Busque de novo com atos_free_slots, ofereça outro " +
+        "horário à aluna e confirme antes de gravar.",
+    );
+  }
+  // No HTTP answer to a write is the same as `atos_write_unconfirmed`: Atos may have written it.
+  // Other 5xx (`not_enabled`, `atos_login_failed`, …) answer before any write.
+  const unconfirmed =
+    err.code === "atos_write_unconfirmed" || (options.isWrite === true && err.status === 0);
+  if (unconfirmed) {
+    return {
+      ...refusal(
+        "atos_write_unconfirmed",
+        true,
+        "o Atos pode ter gravado essa alteração, mas a resposta se perdeu. NUNCA repita. " +
+          HANDOFF_INSTRUCTION,
+      ),
+      motivo: err.code,
+      code: err.code,
+    };
+  }
   if (err.code === "ambiguous_student") {
     return refusal(
       err.code,
@@ -215,6 +277,7 @@ const date = (what: string) =>
 
 function slotView(s: AtosSlot) {
   return {
+    slot_id: s.id,
     dia_semana: weekdayOf(s.date),
     data: dataBr(s.date),
     inicio: s.start_time,
@@ -247,8 +310,9 @@ export const atosFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
     "Aulas de 40 min, começando na hora cheia, de segunda a sexta, nunca às 13h. Faixa por " +
     "plano: TotalPass TP2 das 8h às 17h; TP3, Wellhub Silver+ e planos RBCOR das 6h às 19h. " +
     "Para o mesmo dia, só até 1 h antes. A ferramenta já aplica essas regras: repita o que vier. " +
-    "Mande plan pelo que a aluna disse ou pela etiqueta do contato. A vaga é informação: quem " +
-    "confirma a aula é a recepção. Nunca diga com qual instrutora a aluna vai ficar.",
+    "Mande plan pelo que a aluna disse ou pela etiqueta do contato. O slot_id é o que as " +
+    "ferramentas de marcar pedem; sem elas, a vaga é só informação e quem marca é a recepção. " +
+    "Nunca diga com qual instrutora a aluna vai ficar.",
   inputSchema: freeSlotsShape,
   redigirParaAuditoria: keepOnly(Object.keys(freeSlotsShape)),
   category: "read",
@@ -276,7 +340,6 @@ export const atosFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
         aulas: sorted.slice(0, MAX_SLOTS).map(slotView),
         total: slots.length,
         ...(slots.length > MAX_SLOTS ? { mais_horarios: true } : {}),
-        aviso: "vaga não é aula marcada: quem confirma é a recepção.",
       };
     } catch (err) {
       return failure(err);
@@ -290,6 +353,7 @@ export const atosFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
 
 function bookingView(b: AtosBooking) {
   return {
+    booking_id: b.id,
     dia_semana: weekdayOf(b.date),
     data: dataBr(b.date),
     inicio: b.start_time,
@@ -311,8 +375,9 @@ export const atosMyClasses: McpToolDefinition<typeof myClassesShape> = {
     "do contato: você não informa telefone. Sem datas, de hoje até 13 dias à frente (no máximo " +
     "14 dias; o Atos traz só as próximas 10 aulas). Use quando a aluna perguntar quando é a aula " +
     'dela. Fale dia e horário. Sobre o status, não afirme nada além de "aula marcada" ' +
-    "(o significado de cada status ainda não foi confirmado). Falta, troca e reposição são com " +
-    "a recepção. Nunca diga com qual instrutora é a aula.",
+    "(o significado de cada status ainda não foi confirmado). O booking_id é o que as " +
+    "ferramentas de desmarcar, remarcar e reposição pedem; sem elas, isso é com a recepção. " +
+    "Nunca diga com qual instrutora é a aula.",
   inputSchema: myClassesShape,
   redigirParaAuditoria: keepOnly(Object.keys(myClassesShape)),
   category: "read",
@@ -344,5 +409,316 @@ export const atosMyClasses: McpToolDefinition<typeof myClassesShape> = {
     } catch (err) {
       return failure(err);
     }
+  },
+};
+
+// ---------------------------------------------------------------------------
+// writes
+// ---------------------------------------------------------------------------
+
+const SLOT_TAKEN_TTL_MS = 30 * 60_000;
+
+const CONFIRM_FIRST =
+  'Antes de chamar, confirme com a aluna o dia e o horário ("Confirma sexta às 7h?") e só ' +
+  "chame depois do sim dela.";
+
+/**
+ * The `Idempotency-Key` of a write: stable per intended write, so a retry of the same turn
+ * replays the first answer instead of writing twice. The job id is the conversation's turn; the
+ * args hash is in the key because in one turn the agent may try a second slot after the first
+ * was taken, and one key with two bodies is a different write. The phone is not hashed: it
+ * comes from the turn's contact, the same for the whole job.
+ */
+export function atosIdempotencyKey(ctx: McpContext, tool: string, args: unknown): string | null {
+  const job = ctx.sourceJobId ?? ctx.idempotencyKey;
+  if (!job) return null;
+  const hash = createHash("sha256").update(JSON.stringify(args)).digest("hex").slice(0, 16);
+  return `atos:${job}:${tool}:${hash}`.slice(0, 128);
+}
+
+/** One `slot_unavailable` per contact is retried by the agent; the second one hands off. */
+const slotTaken = new Map<string, number>();
+
+function slotTakenBefore(ctx: McpContext): boolean {
+  const key = `${ctx.organizationId}:${ctx.contatoDoTurno}`;
+  const now = Date.now();
+  for (const [k, at] of slotTaken) if (now - at > SLOT_TAKEN_TTL_MS) slotTaken.delete(k);
+  const before = slotTaken.has(key);
+  slotTaken.set(key, now);
+  return before;
+}
+
+export function resetAtosSlotTakenForTests(): void {
+  slotTaken.clear();
+}
+
+/** Gate, trusted phone and idempotency key: what every write needs before it calls the API. */
+async function prepareWrite(
+  ctx: McpContext,
+  tool: string,
+  args: unknown,
+): Promise<{ config: AtosConfig; phone: string; key: string } | Refusal> {
+  const config = gate(ctx);
+  if (isRefusal(config)) return config;
+  const key = atosIdempotencyKey(ctx, tool, args);
+  if (!key) {
+    return refusal(
+      "sem_chave_de_idempotencia",
+      true,
+      "não consigo garantir que esta alteração não seja gravada duas vezes. " + HANDOFF_INSTRUCTION,
+    );
+  }
+  const phone = await turnContactPhone(ctx);
+  if (!phone) {
+    return refusal(
+      "contato_sem_telefone",
+      true,
+      "não sei o telefone desta aluna, então não consigo alterar a agenda. " + HANDOFF_INSTRUCTION,
+    );
+  }
+  return { config, phone, key };
+}
+
+async function write(
+  ctx: McpContext,
+  run: () => Promise<AtosWriteResult>,
+  done: string,
+): Promise<Record<string, unknown>> {
+  try {
+    const result = await run();
+    return {
+      ok: true,
+      ...(result.booking ? { aula: bookingView(result.booking) } : {}),
+      ...(result.makeup_eligible === undefined ? {} : { tem_reposicao: result.makeup_eligible }),
+      mensagem: done,
+    };
+  } catch (err) {
+    const twice =
+      err instanceof AtosApiError && err.code === "slot_unavailable" && slotTakenBefore(ctx);
+    return failure(err, { isWrite: true, slotTakenTwice: twice });
+  }
+}
+
+const bookingId = (what: string) =>
+  z
+    .string()
+    .trim()
+    .regex(/^\d{4}-\d{2}-\d{2}-\d{4}$/, "use o booking_id de atos_my_classes")
+    .describe(what);
+
+const slotId = z
+  .string()
+  .trim()
+  .regex(/^\d{4}-\d{2}-\d{2}-\d{4}$/, "use o slot_id de atos_free_slots")
+  .describe("O slot_id do horário escolhido, de atos_free_slots.");
+
+const freeText = (what: string) => z.string().trim().max(300).optional().describe(what);
+
+/** Free text and personal data the student gave never reach `api_audit_log`. */
+function redactFields(keys: readonly string[], fields: readonly string[]) {
+  const keep = keepOnly(keys);
+  return (args: Record<string, unknown>) => {
+    const out = keep(args);
+    for (const f of fields) if (f in out) out[f] = "[redacted]";
+    return out;
+  };
+}
+
+// ---- atos_cancel_class ----------------------------------------------------
+
+const cancelShape = {
+  booking_id: bookingId("O booking_id da aula, de atos_my_classes."),
+  reason: freeText("O motivo em poucas palavras, se a aluna disse."),
+};
+
+export const atosCancelClass: McpToolDefinition<typeof cancelShape> = {
+  name: "atos_cancel_class",
+  description:
+    "Desmarca uma aula da aluna DESTA conversa no Atos; serve também para avisar falta (no Atos " +
+    "as duas são Desmarcado). Use o booking_id de atos_my_classes; se ela tiver mais de uma " +
+    "aula, pergunte qual. " +
+    CONFIRM_FIRST +
+    " A resposta diz se a aula dá direito a reposição (tem_reposicao); se sim, ofereça marcar " +
+    "com atos_book_makeup.",
+  inputSchema: cancelShape,
+  category: "write",
+  requiresRole: "ai_operator",
+  requiresScope: "mcp:write",
+  redigirParaAuditoria: redactFields(Object.keys(cancelShape), ["reason"]),
+  handler: async (input, ctx) => {
+    const ready = await prepareWrite(ctx, "atos_cancel_class", input);
+    if (isRefusal(ready)) return ready;
+    const { config, phone, key } = ready;
+    return write(
+      ctx,
+      () =>
+        cancelBooking(config, {
+          bookingId: input.booking_id,
+          phone,
+          reason: input.reason,
+          idempotencyKey: key,
+        }),
+      "aula desmarcada. Confirme à aluna o dia e o horário desmarcados.",
+    );
+  },
+};
+
+// ---- atos_reschedule_class ------------------------------------------------
+
+const rescheduleShape = {
+  booking_id: bookingId("O booking_id da aula que muda, de atos_my_classes."),
+  slot_id: slotId,
+};
+
+export const atosRescheduleClass: McpToolDefinition<typeof rescheduleShape> = {
+  name: "atos_reschedule_class",
+  description:
+    "Troca o horário de uma aula da aluna DESTA conversa no Atos: a aula do booking_id (de " +
+    "atos_my_classes) vai para o slot_id (de atos_free_slots). " +
+    CONFIRM_FIRST,
+  inputSchema: rescheduleShape,
+  category: "write",
+  requiresRole: "ai_operator",
+  requiresScope: "mcp:write",
+  redigirParaAuditoria: keepOnly(Object.keys(rescheduleShape)),
+  handler: async (input, ctx) => {
+    const ready = await prepareWrite(ctx, "atos_reschedule_class", input);
+    if (isRefusal(ready)) return ready;
+    const { config, phone, key } = ready;
+    return write(
+      ctx,
+      () =>
+        rescheduleBooking(config, {
+          bookingId: input.booking_id,
+          phone,
+          slotId: input.slot_id,
+          idempotencyKey: key,
+        }),
+      "aula remarcada. Confirme à aluna o novo dia e horário.",
+    );
+  },
+};
+
+// ---- atos_book_makeup -----------------------------------------------------
+
+const makeupShape = {
+  missed_booking_id: bookingId(
+    "O booking_id da aula desmarcada que dá direito à reposição (de atos_cancel_class ou atos_my_classes).",
+  ),
+  slot_id: slotId,
+};
+
+export const atosBookMakeup: McpToolDefinition<typeof makeupShape> = {
+  name: "atos_book_makeup",
+  description:
+    "Marca a reposição de uma aula desmarcada da aluna DESTA conversa no Atos, no slot_id de " +
+    "atos_free_slots. A regra de quem tem direito e do prazo é do Atos: se vier recusa, " +
+    "explique. " +
+    CONFIRM_FIRST,
+  inputSchema: makeupShape,
+  category: "write",
+  requiresRole: "ai_operator",
+  requiresScope: "mcp:write",
+  redigirParaAuditoria: keepOnly(Object.keys(makeupShape)),
+  handler: async (input, ctx) => {
+    const ready = await prepareWrite(ctx, "atos_book_makeup", input);
+    if (isRefusal(ready)) return ready;
+    const { config, phone, key } = ready;
+    return write(
+      ctx,
+      () =>
+        bookMakeup(config, {
+          phone,
+          missedBookingId: input.missed_booking_id,
+          slotId: input.slot_id,
+          idempotencyKey: key,
+        }),
+      "reposição marcada. Confirme à aluna o dia e o horário.",
+    );
+  },
+};
+
+// ---- atos_book_class ------------------------------------------------------
+
+const bookShape = { slot_id: slotId };
+
+export const atosBookClass: McpToolDefinition<typeof bookShape> = {
+  name: "atos_book_class",
+  description:
+    "Marca uma aula para a aluna DESTA conversa, que já é aluna no Atos (o caso comum: aluna de " +
+    "TotalPass ou Wellhub marcando a aula da semana), no slot_id de atos_free_slots, buscado " +
+    "com o plano dela. Para quem ainda não é aluna, use atos_book_trial. " +
+    CONFIRM_FIRST,
+  inputSchema: bookShape,
+  category: "write",
+  requiresRole: "ai_operator",
+  requiresScope: "mcp:write",
+  redigirParaAuditoria: keepOnly(Object.keys(bookShape)),
+  handler: async (input, ctx) => {
+    const ready = await prepareWrite(ctx, "atos_book_class", input);
+    if (isRefusal(ready)) return ready;
+    const { config, phone, key } = ready;
+    return write(
+      ctx,
+      () => bookClass(config, { phone, slotId: input.slot_id, idempotencyKey: key }),
+      "aula marcada. Confirme à aluna o dia e o horário.",
+    );
+  },
+};
+
+// ---- atos_book_trial ------------------------------------------------------
+
+const trialShape = {
+  name: z.string().trim().min(3).max(120).describe("Nome completo da aluna, como ela escreveu."),
+  birth_date: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "use AAAA-MM-DD")
+    .describe("Data de nascimento, AAAA-MM-DD."),
+  slot_id: slotId,
+  plan: z
+    .enum(ATOS_PLANS)
+    .describe(
+      "Plano: rbcor (particular), totalpass_tp2, totalpass_tp3 ou wellhub_silver (Silver+).",
+    ),
+  pregnant: z.boolean().optional().describe("true se a aluna disse que está grávida."),
+  needs: freeText("Dor, lesão ou cuidado que a aluna contou, em poucas palavras."),
+};
+
+export const atosBookTrial: McpToolDefinition<typeof trialShape> = {
+  name: "atos_book_trial",
+  description:
+    "Marca a primeira vivência de quem ainda não é aluna: cadastra no Atos com o telefone DESTA " +
+    "conversa e agenda no slot_id de atos_free_slots, buscado com o mesmo plano. Pergunte antes " +
+    "o nome completo, a data de nascimento e o plano; nunca invente nenhum deles. " +
+    CONFIRM_FIRST,
+  inputSchema: trialShape,
+  category: "write",
+  requiresRole: "ai_operator",
+  requiresScope: "mcp:write",
+  redigirParaAuditoria: redactFields(Object.keys(trialShape), [
+    "name",
+    "birth_date",
+    "pregnant",
+    "needs",
+  ]),
+  handler: async (input, ctx) => {
+    const ready = await prepareWrite(ctx, "atos_book_trial", input);
+    if (isRefusal(ready)) return ready;
+    const { config, phone, key } = ready;
+    return write(
+      ctx,
+      () =>
+        bookTrial(config, {
+          phone,
+          name: input.name,
+          birthDate: input.birth_date,
+          slotId: input.slot_id,
+          plan: input.plan,
+          pregnant: input.pregnant,
+          needs: input.needs,
+          idempotencyKey: key,
+        }),
+      "vivência marcada. Confirme à aluna o dia e o horário.",
+    );
   },
 };

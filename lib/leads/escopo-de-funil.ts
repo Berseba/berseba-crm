@@ -68,6 +68,12 @@ export const ALVO_DE_FUNIL: Record<string, AlvoDeFunil> = {
   mirae_book: "sem_funil",
   mirae_reschedule: "sem_funil",
   mirae_cancel: "sem_funil",
+  // Berseba: Atos agenda writes (RBCOR) touch no lead
+  atos_cancel_class: "sem_funil",
+  atos_reschedule_class: "sem_funil",
+  atos_book_makeup: "sem_funil",
+  atos_book_class: "sem_funil",
+  atos_book_trial: "sem_funil",
   // ---- escrevem em crm_leads: o coração do escopo ----
   crm_create_lead: "pipeline_no_argumento",
   crm_update_lead: "funil_vem_do_lead",

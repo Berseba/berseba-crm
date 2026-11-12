@@ -39,7 +39,8 @@ const BASE = "linha de base, medida quando a cerca nasceu (2026-10-31)";
 
 // Berseba: baseline of our agenda tools, measured in the v1.102.0 sync (2026-11-05).
 const BERSEBA = "linha de base Berseba, medida no sync da v1.102.0 (2026-11-05)";
-const BERSEBA_ATOS = "linha de base Berseba, medida ao nascer das ferramentas do Atos (2026-11-12)";
+const BERSEBA_ATOS =
+  "linha de base Berseba das ferramentas do Atos, com a gravação na agenda (2026-11-12)";
 
 const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   // ── Berseba ──────────────────────────────────────────────────────────────
@@ -59,8 +60,13 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   "mirae_book": { tokens: 245, motivo: BERSEBA },
   "mirae_reschedule": { tokens: 250, motivo: BERSEBA },
   "mirae_cancel": { tokens: 208, motivo: BERSEBA },
-  "atos_free_slots": { tokens: 389, motivo: BERSEBA_ATOS },
-  "atos_my_classes": { tokens: 234, motivo: BERSEBA_ATOS },
+  "atos_free_slots": { tokens: 404, motivo: BERSEBA_ATOS },
+  "atos_my_classes": { tokens: 252, motivo: BERSEBA_ATOS },
+  "atos_cancel_class": { tokens: 214, motivo: BERSEBA_ATOS },
+  "atos_reschedule_class": { tokens: 199, motivo: BERSEBA_ATOS },
+  "atos_book_makeup": { tokens: 225, motivo: BERSEBA_ATOS },
+  "atos_book_class": { tokens: 176, motivo: BERSEBA_ATOS },
+  "atos_book_trial": { tokens: 352, motivo: BERSEBA_ATOS },
   // ── end of the Berseba block ─────────────────────────────────────────────
   "crm_list_event_types": { tokens: 204, motivo: BASE },
   "crm_find_free_slots": { tokens: 859, motivo: BASE },
@@ -156,9 +162,9 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   "schedule_followup (com negócio)": { tokens: 314, motivo: BASE },
 };
 
-// Berseba: upstream 29569 + 3055 of our avec/mirae tools + 623 of the Atos tools (block at the
+// Berseba: upstream 29569 + 3055 of our avec/mirae tools + 1822 of the Atos tools (block at the
 // top of TETO).
-const TETO_TOTAL = 33247;
+const TETO_TOTAL = 34446;
 
 const VARIANTE = "schedule_followup (com negócio)";
 

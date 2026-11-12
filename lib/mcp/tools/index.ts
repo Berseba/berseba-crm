@@ -28,8 +28,16 @@ import {
   miraeReschedule,
   miraeServices,
 } from "./mirae";
-// Berseba: Atos agenda tools (RBCOR), read only
-import { atosFreeSlots, atosMyClasses } from "./atos";
+// Berseba: Atos agenda tools (RBCOR)
+import {
+  atosBookClass,
+  atosBookMakeup,
+  atosBookTrial,
+  atosCancelClass,
+  atosFreeSlots,
+  atosMyClasses,
+  atosRescheduleClass,
+} from "./atos";
 import { TOOL_CATALOG, VALID_TOOL_IDS } from "./catalog";
 import { crmSearchContacts, crmGetContact, crmProposeContactField } from "./contacts";
 import {
@@ -136,9 +144,14 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   miraeBook,
   miraeReschedule,
   miraeCancel,
-  // Berseba: Atos agenda (read only)
+  // Berseba: Atos agenda (read, then write)
   atosFreeSlots,
   atosMyClasses,
+  atosCancelClass,
+  atosRescheduleClass,
+  atosBookMakeup,
+  atosBookClass,
+  atosBookTrial,
   // read
   crmListEventTypes,
   crmFindFreeSlots,
