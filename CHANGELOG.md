@@ -8,6 +8,12 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.16.0] — 2026-11-12
+
+### Adicionado
+
+- **Limite de idade do histórico que o agente de IA lê, por empresa** Cada empresa pode ter um limite, em horas, para o histórico da conversa que o agente de IA lê. Com o limite ligado, o agente ignora as mensagens enviadas mais de tantas horas antes da última mensagem da pessoa. Isso vale também para conversas que nunca foram encerradas, em que antes ele podia repetir assuntos de dias atrás. A última mensagem da pessoa sempre entra. Sem o limite configurado, nada muda. Por enquanto o limite é ajustado pelo suporte, não por uma tela.
+
 ## [2.15.0] — 2026-11-12
 
 ### Adicionado
@@ -9640,7 +9646,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.15.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.16.0...HEAD
+[2.16.0]: https://github.com/berseba/berseba-crm/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/berseba/berseba-crm/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/berseba/berseba-crm/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/berseba/berseba-crm/compare/v2.12.0...v2.13.0
