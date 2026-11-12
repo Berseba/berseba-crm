@@ -11,19 +11,23 @@
  *     função pura do conteúdo);
  *   - is_blocked lido DIRETO da fonte (contacts) — não existe mais cache.
  */
-import type { Queryable } from '../../queue/queue';
-import type { CrmEdgeConfig } from './mcp-client';
-import { deriveLgpdFromContact, type LgpdInput } from '../../guardrails/lgpd/legal-basis';
-import { isoLocalComOffset } from '@/lib/tempo/agora';
-import { logger } from '@/lib/logger';
-import { nomeDoContato } from '@/lib/contacts/rotulo-do-contato';
-import { lerRemetenteDeGrupo } from '@/lib/messaging/remetente-de-grupo';
-import { outboundAuthor, type OutboundAuthor } from './outbound-author.berseba';
-import { frameMediaBody, INICIO_DA_MOLDURA_DE_MIDIA, MARCADOR_IMAGEM_NAO_VISTA } from './moldura-de-midia';
+import type { Queryable } from "../../queue/queue";
+import type { CrmEdgeConfig } from "./mcp-client";
+import { deriveLgpdFromContact, type LgpdInput } from "../../guardrails/lgpd/legal-basis";
+import { isoLocalComOffset } from "@/lib/tempo/agora";
+import { logger } from "@/lib/logger";
+import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
+import { lerRemetenteDeGrupo } from "@/lib/messaging/remetente-de-grupo";
+import { outboundAuthor, type OutboundAuthor } from "./outbound-author.berseba";
+import {
+  frameMediaBody,
+  INICIO_DA_MOLDURA_DE_MIDIA,
+  MARCADOR_IMAGEM_NAO_VISTA,
+} from "./moldura-de-midia";
 
 // A régua mora num módulo folha para a tela usar a mesma conta (ver o cabeçalho de lá).
-import { countPayloadTokens } from '@/lib/ai/estimativa-de-tokens';
-export { CHARS_PER_TOKEN, countPayloadTokens } from '@/lib/ai/estimativa-de-tokens';
+import { countPayloadTokens } from "@/lib/ai/estimativa-de-tokens";
+export { CHARS_PER_TOKEN, countPayloadTokens } from "@/lib/ai/estimativa-de-tokens";
 
 /** Knobs do payload (env LEAD_CONTEXT_*; defaults documentados no .env.example). */
 export interface LeadContextKnobs {
@@ -42,7 +46,7 @@ export interface LeadContextKnobs {
 
 /** Uma mensagem do histórico, já curada. */
 export interface LeadContextMessage {
-  direction: 'inbound' | 'outbound';
+  direction: "inbound" | "outbound";
   /**
    * Berseba: who wrote an OUTBOUND message (from `messages.sent_via`), so the
    * model tells its own speech from the team's. Absent on inbound. Optional in
@@ -96,7 +100,7 @@ export interface LeadContextMessage {
  */
 export interface UltimaDecisaoHumana {
   action: string;
-  decision: 'approved' | 'dismissed';
+  decision: "approved" | "dismissed";
   at: string;
 }
 
@@ -172,7 +176,7 @@ export interface LeadContext {
   messages: LeadContextMessage[];
 }
 
-export type LeadContextErrorCode = 'lead_not_found' | 'crm_error' | 'crm_unavailable';
+export type LeadContextErrorCode = "lead_not_found" | "crm_error" | "crm_unavailable";
 
 /**
  * Resultado da tool. `ok:false` é a mensagem de ensino pro modelo — pt-br,
@@ -217,19 +221,18 @@ interface DecisionRow {
  * estruturado ao lado.
  */
 function paraDecisao(row: DecisionRow): UltimaDecisaoHumana | null {
-  const acao =
-    typeof row.payload?.next_action === 'string' ? row.payload.next_action.trim() : '';
-  if (acao === '') return null; // sem O QUÊ, dizer "aprovado" não ajuda ninguém.
+  const acao = typeof row.payload?.next_action === "string" ? row.payload.next_action.trim() : "";
+  if (acao === "") return null; // sem O QUÊ, dizer "aprovado" não ajuda ninguém.
   return {
     action: acao,
-    decision: row.type === 'next_action_approved' ? 'approved' : 'dismissed',
+    decision: row.type === "next_action_approved" ? "approved" : "dismissed",
     at: row.performed_at,
   };
 }
 
 interface HistoryRow {
   id?: string;
-  direction: 'inbound' | 'outbound';
+  direction: "inbound" | "outbound";
   type: string;
   body: string | null;
   media_url: string | null;
@@ -270,6 +273,29 @@ interface HistoryRow {
  */
 const MODELO_FIXADO_DIAS = 30;
 
+/**
+ * Berseba: a hard age limit on the conversation history, per organization.
+ *
+ * `organizations.settings.ai.history_max_age_hours` (whole hours, 1–9999): the window above also
+ * drops every message sent more than N hours before the conversation's latest inbound — the
+ * message the turn answers, which therefore always stays in. Anchored there and not on `now()`
+ * so a follow-up that fires a day after the last reply still sees that last exchange. Absent or
+ * malformed = no limit (upstream behaviour). The pinned template below is not cut: it is a
+ * deliberate 30-day carry-over.
+ *
+ * Why: a conversation that is never closed keeps one `service_started_at`, and a prompt rule
+ * ("old history") did not stop the agent from quoting a test from days before (RBCOR, 2026-11-12).
+ */
+const HISTORY_MAX_AGE_SQL = `messages.sent_at >= coalesce(
+                     (select (select max(m0.sent_at) from messages m0
+                               where m0.organization_id = $1 and m0.conversation_id = $2
+                                 and m0.direction = 'inbound')
+                             - make_interval(hours => (o.settings->'ai'->>'history_max_age_hours')::int)
+                        from organizations o
+                       where o.id = $1
+                         and (o.settings->'ai'->>'history_max_age_hours') ~ '^[1-9][0-9]{0,3}$'),
+                     '-infinity'::timestamptz)`;
+
 /** Ordem cronológica, sem a cópia fixada de um modelo que já está na janela. */
 export function historicoComOModeloFixado(linhasDaMaisNova: HistoryRow[]): HistoryRow[] {
   const naJanela = new Set(linhasDaMaisNova.filter((l) => !l.fixado && l.id).map((l) => l.id));
@@ -290,8 +316,8 @@ export async function getLeadContext(
   const contact = contactRows[0];
   if (!contact) {
     return teach(
-      'lead_not_found',
-      'não encontrei esse lead nesta organização — confira o lead antes de continuar; se o problema persistir, peça handoff humano.',
+      "lead_not_found",
+      "não encontrei esse lead nesta organização — confira o lead antes de continuar; se o problema persistir, peça handoff humano.",
     );
   }
 
@@ -335,6 +361,7 @@ export async function getLeadContext(
                      and ((messages.direction='inbound' and messages.service_revision=c.service_revision
                        and messages.demanda_id is not distinct from c.current_demanda_id)
                        or (messages.direction='outbound' and messages.sent_at >= c.service_started_at)))
+                   and ${HISTORY_MAX_AGE_SQL}
                  order by sent_at desc, id desc
                  limit $3)
                 union all
@@ -355,7 +382,8 @@ export async function getLeadContext(
       db.query<{ desfecho: string }>(
         `select distinct d.desfecho from demandas d join demanda_conversas dc on dc.demanda_id=d.id and dc.organization_id=d.organization_id
          where d.organization_id=$1 and dc.conversation_id=$2 and d.fechada_em is not null limit 5`,
-        [input.tenantId, conversationId]),
+        [input.tenantId, conversationId],
+      ),
     ]);
     return { conversationId, history, previousOutcomes };
   };
@@ -400,7 +428,7 @@ export async function getLeadContext(
       );
       return propostaRows[0] ?? null;
     } catch (err) {
-      logger.warn('lead-context: consulta de proposta falhou — contexto segue sem ela', {
+      logger.warn("lead-context: consulta de proposta falhou — contexto segue sem ela", {
         organizationId: input.tenantId,
         erro: err instanceof Error ? err.message : String(err),
       });
@@ -425,7 +453,11 @@ export async function getLeadContext(
 
   const context = fitToBudget(
     {
-      previous_service: { label: 'Histórico encerrado. Desfechos anteriores não são tarefas ou compromissos pendentes.', outcomes: previousOutcomes.map((d) => d.desfecho) },
+      previous_service: {
+        label:
+          "Histórico encerrado. Desfechos anteriores não são tarefas ou compromissos pendentes.",
+        outcomes: previousOutcomes.map((d) => d.desfecho),
+      },
       // ⚠️ `lead_id` aqui é, e sempre foi, o id do CONTATO (ver o comentário da
       // consulta acima e `inbound-turn.ts:1121`). O nome mente, e o modelo
       // acreditava: passava este valor ao parâmetro `lead_id` das ferramentas
@@ -493,9 +525,11 @@ export function corpoDaMensagem(m: CorpoDaMensagemRow, verImagens = true): strin
   // leu (17/09, ver `MARCADOR_NAO_LIDA`); o aviso diz que chegou e que ele não viu.
   // Só na foto que o CLIENTE mandou: na que nós mandamos, a legenda é nossa, e
   // rotulá-la "do cliente" atribuiria a ele o que dissemos.
-  if (!verImagens && m.type === 'image' && m.direction !== 'outbound') {
-    const legenda = (m.body ?? '').trim();
-    return legenda === '' ? MARCADOR_IMAGEM_NAO_VISTA : `${MARCADOR_IMAGEM_NAO_VISTA}\nLegenda do cliente: ${legenda}`;
+  if (!verImagens && m.type === "image" && m.direction !== "outbound") {
+    const legenda = (m.body ?? "").trim();
+    return legenda === ""
+      ? MARCADOR_IMAGEM_NAO_VISTA
+      : `${MARCADOR_IMAGEM_NAO_VISTA}\nLegenda do cliente: ${legenda}`;
   }
   const hasMedia = Boolean(m.media_storage_path || m.media_url);
   const derived = m.media_derived_text;
@@ -504,7 +538,7 @@ export function corpoDaMensagem(m: CorpoDaMensagemRow, verImagens = true): strin
   // "não consigo ver mídia" mesmo tendo o conteúdo. Sem derivado, marcador [tipo].
   return derived
     ? frameMediaBody(m.type, m.body, derived)
-    : (m.body ?? (hasMedia ? `[${m.type}]` : ''));
+    : (m.body ?? (hasMedia ? `[${m.type}]` : ""));
 }
 
 /**
@@ -515,7 +549,7 @@ export function corpoDaMensagem(m: CorpoDaMensagemRow, verImagens = true): strin
  *      repetidamente até caber. Nunca erro fatal.
  */
 function fitToBudget(
-  base: Omit<LeadContext, 'messages'>,
+  base: Omit<LeadContext, "messages">,
   history: HistoryRow[],
   maxTokens: number,
   fuso: string,
@@ -530,10 +564,10 @@ function fitToBudget(
     // #2729 — quem falou, quando há mais de uma pessoa na conversa. Só o
     // recebido de grupo traz `group_sender` (o ingest grava só nesse sentido);
     // nas demais linhas o campo fica AUSENTE, e o prompt não ganha ruído.
-    const remetente = m.direction === 'inbound' ? lerRemetenteDeGrupo(m.metadata) : null;
+    const remetente = m.direction === "inbound" ? lerRemetenteDeGrupo(m.metadata) : null;
     return {
       direction: m.direction,
-      ...(m.direction === 'outbound' ? { author: outboundAuthor(m.sent_via) } : {}),
+      ...(m.direction === "outbound" ? { author: outboundAuthor(m.sent_via) } : {}),
       body,
       // Hora de PAREDE do tenant, não UTC cru — ver o comentário de `sent_at` na
       // interface acima e o cabeçalho de `isoLocalComOffset`.
@@ -541,7 +575,9 @@ function fitToBudget(
       ...(remetente !== null && (remetente.name !== null || remetente.phone !== null)
         ? { sender: { name: remetente.name, phone: remetente.phone } }
         : {}),
-      ...(hasMedia ? { type: m.type, media_storage_path: m.media_storage_path, media_mime: m.media_mime } : {}),
+      ...(hasMedia
+        ? { type: m.type, media_storage_path: m.media_storage_path, media_mime: m.media_mime }
+        : {}),
     };
   });
   const build = (msgs: LeadContextMessage[]): LeadContext => ({ ...base, messages: msgs });
@@ -556,11 +592,15 @@ function fitToBudget(
   }
   if (fixado && messages.length === 2 && over(messages)) messages = messages.slice(1);
   while (messages.length === 1 && messages[0]!.body.length > 0 && over(messages)) {
-    messages = [{ ...messages[0]!, body: messages[0]!.body.slice(0, Math.floor(messages[0]!.body.length / 2)) }];
+    messages = [
+      {
+        ...messages[0]!,
+        body: messages[0]!.body.slice(0, Math.floor(messages[0]!.body.length / 2)),
+      },
+    ];
   }
   return build(messages);
 }
-
 
 // A moldura e o seu desembrulho moram juntos em `moldura-de-midia.ts` (o cartão
 // da passagem precisa ler a mesma moldura de volta). Reexportado aqui porque é
@@ -583,8 +623,9 @@ export { frameMediaBody, MARCADOR_IMAGEM_NAO_VISTA };
  * composto, então comparar os dois ali não seria a mesma pergunta.
  */
 export function textoDoClienteNaUltimaMensagem(messages: readonly LeadContextMessage[]): string {
-  const ultima = messages.findLast((m) => m.direction === 'inbound');
-  if (!ultima || ultima.type !== undefined || ultima.body.startsWith(INICIO_DA_MOLDURA_DE_MIDIA)) return '';
+  const ultima = messages.findLast((m) => m.direction === "inbound");
+  if (!ultima || ultima.type !== undefined || ultima.body.startsWith(INICIO_DA_MOLDURA_DE_MIDIA))
+    return "";
   return ultima.body;
 }
 
