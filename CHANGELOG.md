@@ -8,6 +8,12 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.15.0] — 2026-11-12
+
+### Adicionado
+
+- **Gestação informada ao marcar aula avulsa e horários fixos no Atos** Na RBCOR, a assistente passa a informar ao Atos que a pessoa está grávida também quando marca uma aula avulsa ou cria horários fixos de TotalPass ou Wellhub, como já fazia na primeira vivência. Ela só informa quando a própria pessoa disse isso na conversa. Essa informação não fica no registro de auditoria.
+
 ## [2.14.0] — 2026-11-12
 
 ### Adicionado
@@ -9634,7 +9640,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.14.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.15.0...HEAD
+[2.15.0]: https://github.com/berseba/berseba-crm/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/berseba/berseba-crm/compare/v2.13.0...v2.14.0
 [2.13.0]: https://github.com/berseba/berseba-crm/compare/v2.12.0...v2.13.0
 [2.12.0]: https://github.com/berseba/berseba-crm/compare/v2.11.0...v2.12.0
