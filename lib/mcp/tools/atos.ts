@@ -276,6 +276,42 @@ const date = (what: string) =>
     .optional()
     .describe(what);
 
+const SLOT_TAKEN_TTL_MS = 30 * 60_000;
+
+const CONFIRM_FIRST =
+  'Antes de chamar, confirme com a aluna o dia e o horário ("Confirma sexta às 7h?") e só ' +
+  "chame depois do sim dela.";
+
+/**
+ * The `Idempotency-Key` of a write: stable per intended write, so a retry of the same turn
+ * replays the first answer instead of writing twice. The job id is the conversation's turn; the
+ * args hash is in the key because in one turn the agent may try a second slot after the first
+ * was taken, and one key with two bodies is a different write. The phone is not hashed: it
+ * comes from the turn's contact, the same for the whole job.
+ */
+export function atosIdempotencyKey(ctx: McpContext, tool: string, args: unknown): string | null {
+  const job = ctx.sourceJobId ?? ctx.idempotencyKey;
+  if (!job) return null;
+  const hash = createHash("sha256").update(JSON.stringify(args)).digest("hex").slice(0, 16);
+  return `atos:${job}:${tool}:${hash}`.slice(0, 128);
+}
+
+/** One `slot_unavailable` per contact is retried by the agent; the second one hands off. */
+const slotTaken = new Map<string, number>();
+
+function slotTakenBefore(ctx: McpContext): boolean {
+  const key = `${ctx.organizationId}:${ctx.contatoDoTurno}`;
+  const now = Date.now();
+  for (const [k, at] of slotTaken) if (now - at > SLOT_TAKEN_TTL_MS) slotTaken.delete(k);
+  const before = slotTaken.has(key);
+  slotTaken.set(key, now);
+  return before;
+}
+
+export function resetAtosSlotTakenForTests(): void {
+  slotTaken.clear();
+}
+
 // ---------------------------------------------------------------------------
 // atos_free_slots
 // ---------------------------------------------------------------------------
@@ -420,42 +456,6 @@ export const atosMyClasses: McpToolDefinition<typeof myClassesShape> = {
 // ---------------------------------------------------------------------------
 // writes
 // ---------------------------------------------------------------------------
-
-const SLOT_TAKEN_TTL_MS = 30 * 60_000;
-
-const CONFIRM_FIRST =
-  'Antes de chamar, confirme com a aluna o dia e o horário ("Confirma sexta às 7h?") e só ' +
-  "chame depois do sim dela.";
-
-/**
- * The `Idempotency-Key` of a write: stable per intended write, so a retry of the same turn
- * replays the first answer instead of writing twice. The job id is the conversation's turn; the
- * args hash is in the key because in one turn the agent may try a second slot after the first
- * was taken, and one key with two bodies is a different write. The phone is not hashed: it
- * comes from the turn's contact, the same for the whole job.
- */
-export function atosIdempotencyKey(ctx: McpContext, tool: string, args: unknown): string | null {
-  const job = ctx.sourceJobId ?? ctx.idempotencyKey;
-  if (!job) return null;
-  const hash = createHash("sha256").update(JSON.stringify(args)).digest("hex").slice(0, 16);
-  return `atos:${job}:${tool}:${hash}`.slice(0, 128);
-}
-
-/** One `slot_unavailable` per contact is retried by the agent; the second one hands off. */
-const slotTaken = new Map<string, number>();
-
-function slotTakenBefore(ctx: McpContext): boolean {
-  const key = `${ctx.organizationId}:${ctx.contatoDoTurno}`;
-  const now = Date.now();
-  for (const [k, at] of slotTaken) if (now - at > SLOT_TAKEN_TTL_MS) slotTaken.delete(k);
-  const before = slotTaken.has(key);
-  slotTaken.set(key, now);
-  return before;
-}
-
-export function resetAtosSlotTakenForTests(): void {
-  slotTaken.clear();
-}
 
 /** Gate, trusted phone and idempotency key: what every write needs before it calls the API. */
 async function prepareWrite(
