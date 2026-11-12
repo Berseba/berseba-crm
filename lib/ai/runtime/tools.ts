@@ -31,6 +31,7 @@ import { escolhasDoServidor, escolhasRemotas } from "@/lib/mcp/servidor-externo/
 import { catalogEntry, deCapacidadeDesligada, deModuloDesligado } from "@/lib/mcp/tools/catalog";
 import { isAvecToolHiddenFor } from "@/lib/integrations/avec/config"; // Berseba
 import { isMiraeToolHiddenFor } from "@/lib/integrations/mirae/config"; // Berseba
+import { isAtosToolHiddenFor } from "@/lib/integrations/atos/config"; // Berseba
 import type { CapacidadeDaOrganizacao } from "@/lib/organizacao/capacidades";
 import type { ModuloOpcional } from "@/lib/instalacao/modulos";
 import { higienizarUuidsDeAterro } from "@/lib/mcp/uuid-de-aterro";
@@ -647,6 +648,7 @@ export function pickToolsFromMcp(input: PickToolsInput): Record<string, Tool> {
     if (deCapacidadeDesligada(def.name, input.capacidadesLigadas ?? [])) continue;
     if (isAvecToolHiddenFor(def.name, input.ctx.organizationId)) continue; // Berseba
     if (isMiraeToolHiddenFor(def.name, input.ctx.organizationId)) continue; // Berseba
+    if (isAtosToolHiddenFor(def.name, input.ctx.organizationId)) continue; // Berseba
 
     // A chave da VERSÃO DO AGENTE manda nos dois sentidos: antes ela só
     // impedia o acréscimo automático, e a ferramenta vinda do pacote `vender`
