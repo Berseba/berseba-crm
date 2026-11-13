@@ -630,6 +630,10 @@ export interface Preferencia {
   dias_semana?: DiaSemana[];
   periodo?: "manha" | "tarde";
   horario?: string;
+  /** "Depois das 17h": only starts at or after this time (HH:MM). */
+  depois_de?: string;
+  /** "Até as 10h": only starts at or before this time (HH:MM). */
+  ate?: string;
 }
 
 export const MAX_OPCOES = 2; // Matheus, 2026-10-23: at most two, one if that is all there is
@@ -656,6 +660,8 @@ export function escolherOpcoes(opcoes: Opcao[], pref: Preferencia, hoje: string)
     const inicio = toMinutes(o.inicio);
     if (pref.periodo === "manha" && inicio >= 12 * 60) return false;
     if (pref.periodo === "tarde" && inicio < 12 * 60) return false;
+    if (pref.depois_de && inicio < toMinutes(pref.depois_de)) return false;
+    if (pref.ate && inicio > toMinutes(pref.ate)) return false;
     return pediuDia || o.agrupamento < 2;
   });
   const ordenadas = [...filtradas].sort((a, b) => {

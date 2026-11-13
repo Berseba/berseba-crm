@@ -245,3 +245,23 @@ describe("escolherOpcoes", () => {
     expect(r).toHaveLength(1);
   });
 });
+
+describe("depois_de and ate (Ruth's case: 'após as 17h' got 16h30)", () => {
+  const base = [
+    opcao("2026-11-13", "16:30", 0),
+    opcao("2026-11-13", "17:00", 0),
+    opcao("2026-11-13", "17:30", 1),
+  ];
+  it("depois_de keeps only starts at or after the time", () => {
+    const got = escolherOpcoes(
+      base,
+      { data: "2026-11-13", horario: "17:00", depois_de: "17:00" },
+      "2026-11-12",
+    );
+    expect(got.map((o) => o.inicio)).toEqual(["17:00", "17:30"]);
+  });
+  it("ate keeps only starts at or before the time", () => {
+    const got = escolherOpcoes(base, { data: "2026-11-13", ate: "17:00" }, "2026-11-12");
+    expect(got.map((o) => o.inicio).sort()).toEqual(["16:30", "17:00"]);
+  });
+});
