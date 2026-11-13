@@ -1,6 +1,5 @@
 "use client";
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 
 import { useT } from "@/hooks/i18n/useT";
@@ -14,6 +13,9 @@ import { Phone } from "@/lib/ui/icons";
  * component draws nothing, not even a disabled button. Two clicks: the first one asks, the second
  * one calls, because the phone rings in a real person's pocket. The refusals (opted out, already
  * calling, paused, daily limit) come back as the sentence the route wrote.
+ *
+ * A plain fetch on mount, not React Query: the dossier is mounted in places (and upstream tests)
+ * without a QueryClientProvider, and a missing provider must never take the whole card down.
  */
 interface Props {
   leadId: string;
@@ -24,16 +26,26 @@ interface Props {
 export function LigarComBia({ leadId, phone }: Props) {
   const t = useT();
   const [etapa, setEtapa] = useState<"pronto" | "confirmar" | "pedindo" | "pedida">("pronto");
-  const { data: ativo } = useQuery({
-    queryKey: ["voz-ativa"],
-    queryFn: async () => {
-      const res = await fetch("/api/v1/voz/calls");
-      if (!res.ok) return false;
-      const json = (await res.json()) as { data?: { ativo?: boolean } };
-      return json.data?.ativo === true;
-    },
-    staleTime: 5 * 60_000,
-  });
+  const [ativo, setAtivo] = useState(false);
+  useEffect(() => {
+    let vivo = true;
+    // After the card's own reads (the next task): the Bia's check is secondary and must not get
+    // ahead of what the dossier loads first.
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/v1/voz/calls");
+        if (!res.ok) return;
+        const json = (await res.json()) as { data?: { ativo?: boolean } };
+        if (vivo) setAtivo(json.data?.ativo === true);
+      } catch {
+        // No Voz, no button: a failed check never breaks the dossier.
+      }
+    }, 0);
+    return () => {
+      vivo = false;
+      clearTimeout(timer);
+    };
+  }, []);
 
   if (!ativo || !phone?.trim()) return null;
 

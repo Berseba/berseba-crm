@@ -1,6 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
@@ -20,13 +19,9 @@ function json(status: number, body: unknown) {
   return Promise.resolve(new Response(JSON.stringify(body), { status }));
 }
 
+// No QueryClientProvider on purpose: the dossier mounts the button without one.
 function montar(phone: string | null = "+5511987654321") {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={qc}>
-      <LigarComBia leadId={LEAD} phone={phone} />
-    </QueryClientProvider>,
-  );
+  return render(<LigarComBia leadId={LEAD} phone={phone} />);
 }
 
 beforeEach(() => {
@@ -46,6 +41,17 @@ describe("LigarComBia", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  it("draws nothing when the check fails", async () => {
+    fetchMock.mockImplementation(() => Promise.reject(new Error("offline")));
+    const { container } = montar();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    expect(container).toBeEmptyDOMElement();
+    fetchMock.mockImplementation(() => json(500, {}));
+    const second = montar();
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(second.container).toBeEmptyDOMElement();
+  });
+
   it("draws nothing without a phone", async () => {
     fetchMock.mockImplementation(() => json(200, { data: { ativo: true } }));
     const { container } = montar(" ");
@@ -55,7 +61,9 @@ describe("LigarComBia", () => {
 
   it("asks first, then calls with the lead's id", async () => {
     fetchMock.mockImplementation((_url: string, init?: RequestInit) =>
-      init?.method === "POST" ? json(200, { data: { call_id: "c1" } }) : json(200, { data: { ativo: true } }),
+      init?.method === "POST"
+        ? json(200, { data: { call_id: "c1" } })
+        : json(200, { data: { ativo: true } }),
     );
     montar();
     const botao = await screen.findByRole("button", { name: /Ligar com a Bia/ });
