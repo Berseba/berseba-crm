@@ -37,6 +37,7 @@ import {
 import { resolveActiveLeadForContact } from "@/lib/leads/active-lead";
 import { emitLeadActivity } from "@/lib/leads/activity-emitter";
 import { encerraDemanda } from "@/lib/leads/encerramento";
+import { moduloLigado } from "@/lib/instalacao/modulos";
 import { logger } from "@/lib/logger";
 
 export const VOZ_OUTCOMES = [
@@ -56,7 +57,10 @@ export const vozCallEndedSchema = z.object({
   event: z.literal("call.ended").optional(),
   call_id: z.string().uuid(),
   to: z.string().trim().min(8).max(40),
-  lead_ref: z.object({ id: z.string().trim().min(1).max(120) }).nullable().optional(),
+  lead_ref: z
+    .object({ id: z.string().trim().min(1).max(120) })
+    .nullable()
+    .optional(),
   status: z.string().max(40).optional(),
   outcome: z.enum(VOZ_OUTCOMES),
   summary: z.string().trim().min(1).max(4000),
@@ -167,7 +171,9 @@ async function findLead(
   admin: SupabaseClient,
   ctx: Ctx,
   input: VozCallEnded,
-): Promise<{ lead: LeadRow } | { outcome: "no_contact" | "no_lead" | "unavailable"; detail?: string }> {
+): Promise<
+  { lead: LeadRow } | { outcome: "no_contact" | "no_lead" | "unavailable"; detail?: string }
+> {
   // 1. The lead the call was asked from. An id that is not a lead of this organization (or not a
   // uuid: calls queued before the button kept a contact id) falls back to the phone.
   const ref = input.lead_ref?.id;
@@ -223,7 +229,11 @@ async function findLead(
  * Cold Call funnel created before the module listed them refuses every loss. Same fix as the Cold
  * Call result route, once.
  */
-async function ensureColdCallReasons(admin: SupabaseClient, ctx: Ctx, lead: LeadRow): Promise<void> {
+async function ensureColdCallReasons(
+  admin: SupabaseClient,
+  ctx: Ctx,
+  lead: LeadRow,
+): Promise<void> {
   const novos = comMotivosDoColdCall(lead.crm_pipelines?.settings);
   if (!novos) return;
   const { error } = await admin
@@ -235,23 +245,28 @@ async function ensureColdCallReasons(admin: SupabaseClient, ctx: Ctx, lead: Lead
 }
 
 async function apply(admin: SupabaseClient, ctx: Ctx, input: VozCallEnded): Promise<ReportResult> {
+  // One report, one line, across the whole organization: a retry must find the line wherever it was
+  // written, even when the card it went to has since been closed and a lookup by phone would now
+  // pick another card (review of #138).
+  const { data: seen, error: seenError } = await admin
+    .from("crm_lead_activities")
+    .select("id, lead_id")
+    .eq("organization_id", ctx.organizationId)
+    .eq("source_module", "voz")
+    .eq("source_id", input.call_id)
+    .limit(1);
+  if (seenError) return { outcome: "unavailable", detail: seenError.message };
+  const already = (seen ?? [])[0] as { lead_id?: string } | undefined;
+  if (already) return { outcome: "already_applied", leadId: already.lead_id };
+
   const found = await findLead(admin, ctx, input);
   if ("outcome" in found) return { outcome: found.outcome, detail: found.detail };
   const lead = found.lead;
 
-  // One report, one line.
-  const { data: seen, error: seenError } = await admin
-    .from("crm_lead_activities")
-    .select("id")
-    .eq("organization_id", ctx.organizationId)
-    .eq("lead_id", lead.id)
-    .eq("source_module", "voz")
-    .eq("source_id", input.call_id)
-    .limit(1);
-  if (seenError) return { outcome: "unavailable", leadId: lead.id, detail: seenError.message };
-  if ((seen ?? []).length > 0) return { outcome: "already_applied", leadId: lead.id };
-
-  const coldCall = configDoFunil(lead.crm_pipelines?.settings) !== null;
+  // The card moves only where the Cold Call module is on, by the Cold Call's own rule.
+  const coldCall =
+    configDoFunil(lead.crm_pipelines?.settings) !== null &&
+    (await moduloLigado(admin, "cold_call"));
   const resultado = coldCall ? RESULTADO_DA_BIA[input.outcome] : null;
   const hctx = {
     organization_id: ctx.organizationId,
@@ -259,42 +274,8 @@ async function apply(admin: SupabaseClient, ctx: Ctx, input: VozCallEnded): Prom
     requestId: ctx.requestId,
   };
 
-  // The move first: a retry after a failed line finds the card already there (no second move).
-  let refused: { code: string; detail: string } | null = null;
-  if (resultado && lead.status === "open") {
-    const regra = RESULTADOS[resultado];
-    try {
-      if ("etapa" in regra) {
-        const { data: etapa, error: etapaError } = await admin
-          .from("crm_stages")
-          .select("id")
-          .eq("organization_id", ctx.organizationId)
-          .eq("pipeline_id", lead.pipeline_id)
-          .eq("slug", regra.etapa)
-          .maybeSingle();
-        if (etapaError) return { outcome: "unavailable", leadId: lead.id, detail: etapaError.message };
-        if (!etapa) {
-          refused = { code: "stage_missing", detail: regra.etapa };
-        } else if (etapa.id !== lead.stage_id) {
-          await moveLeadHandler(admin, hctx, lead.id, {
-            to_stage_id: etapa.id,
-            reason: `Ligação da Bia: ${regra.rotulo}`,
-          });
-        }
-      } else {
-        await ensureColdCallReasons(admin, ctx, lead);
-        await encerraDemanda(admin, hctx, { leadId: lead.id, desfecho: "lost", motivo: regra.rotulo });
-      }
-    } catch (err) {
-      if (!(err instanceof ApiError)) throw err;
-      if (err.status >= 500) return { outcome: "unavailable", leadId: lead.id, code: err.code };
-      if (err.status === 409 && err.code === "lead_stage_changed_concurrent") {
-        return { outcome: "conflict", leadId: lead.id, code: err.code };
-      }
-      refused = { code: err.code, detail: err.message };
-    }
-  }
-
+  // The line first: it is what makes a retry idempotent. A card moved before a failed line would,
+  // on the retry, no longer be the contact's open lead (review of #138).
   const written = await emitLeadActivity(admin, {
     organizationId: ctx.organizationId,
     leadId: lead.id,
@@ -311,6 +292,56 @@ async function apply(admin: SupabaseClient, ctx: Ctx, input: VozCallEnded): Prom
     },
   });
   if (!written.ok) return { outcome: "unavailable", leadId: lead.id, detail: written.error };
-  if (refused) return { outcome: "refused", leadId: lead.id, resultado, ...refused };
+
+  // Then the move. The line is written, so a failure here is reported, never retried: a retry would
+  // find the line and stop.
+  if (resultado && lead.status === "open") {
+    const regra = RESULTADOS[resultado];
+    try {
+      if ("etapa" in regra) {
+        const { data: etapa, error: etapaError } = await admin
+          .from("crm_stages")
+          .select("id")
+          .eq("organization_id", ctx.organizationId)
+          .eq("pipeline_id", lead.pipeline_id)
+          .eq("slug", regra.etapa)
+          .maybeSingle();
+        if (etapaError) {
+          return {
+            outcome: "refused",
+            leadId: lead.id,
+            resultado,
+            code: "stage_read_failed",
+            detail: etapaError.message,
+          };
+        }
+        if (!etapa)
+          return {
+            outcome: "refused",
+            leadId: lead.id,
+            resultado,
+            code: "stage_missing",
+            detail: regra.etapa,
+          };
+        if (etapa.id !== lead.stage_id) {
+          await moveLeadHandler(admin, hctx, lead.id, {
+            to_stage_id: etapa.id,
+            reason: `Ligação da Bia: ${regra.rotulo}`,
+          });
+        }
+      } else {
+        await ensureColdCallReasons(admin, ctx, lead);
+        await encerraDemanda(admin, hctx, {
+          leadId: lead.id,
+          desfecho: "lost",
+          motivo: regra.rotulo,
+        });
+      }
+    } catch (err) {
+      const code = err instanceof ApiError ? err.code : "move_failed";
+      const detail = err instanceof Error ? err.message : String(err);
+      return { outcome: "refused", leadId: lead.id, resultado, code, detail };
+    }
+  }
   return { outcome: "applied", leadId: lead.id, resultado };
 }

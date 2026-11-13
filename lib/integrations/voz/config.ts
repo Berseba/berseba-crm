@@ -21,7 +21,11 @@ export interface VozConfig {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 /** Pure: the three raw values → the config, or `null` when the integration is off. */
-export function parseVozConfig(raw: { url?: string; key?: string; orgIds?: string }): VozConfig | null {
+export function parseVozConfig(raw: {
+  url?: string;
+  key?: string;
+  orgIds?: string;
+}): VozConfig | null {
   // A pasted `/v1` or `/v1/calls` tail is tolerated.
   const baseUrl = (raw.url ?? "")
     .trim()
@@ -36,12 +40,19 @@ export function parseVozConfig(raw: { url?: string; key?: string; orgIds?: strin
       .map((id) => id.trim().toLowerCase())
       .filter((id) => UUID.test(id)),
   );
-  if (orgIds.size === 0) return null;
+  // Exactly one organization: there is one Voz key and one webhook token, and that token belongs to
+  // one organization, so a second one would get the first one's reports on a matching phone
+  // (review of #138). A second organization needs its own Voz tenant.
+  if (orgIds.size !== 1) return null;
   return { baseUrl, apiKey, orgIds };
 }
 
 export function vozConfig(): VozConfig | null {
-  return parseVozConfig({ url: env.VOZ_API_URL, key: env.VOZ_API_KEY, orgIds: env.VOZ_API_ORG_IDS });
+  return parseVozConfig({
+    url: env.VOZ_API_URL,
+    key: env.VOZ_API_KEY,
+    orgIds: env.VOZ_API_ORG_IDS,
+  });
 }
 
 /** The config when this organization may ask the Bia for calls, else `null`. */

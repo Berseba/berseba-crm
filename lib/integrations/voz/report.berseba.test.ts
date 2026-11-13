@@ -6,11 +6,17 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api/types";
 
-const { move, close } = vi.hoisted(() => ({ move: vi.fn(), close: vi.fn() }));
+const { move, close, modulo } = vi.hoisted(() => ({
+  move: vi.fn(),
+  close: vi.fn(),
+  modulo: vi.fn(),
+}));
 vi.mock("@/app/api/v1/leads/_handler", () => ({ moveLeadHandler: move }));
 vi.mock("@/lib/leads/encerramento", () => ({ encerraDemanda: close }));
+vi.mock("@/lib/instalacao/modulos", () => ({ moduloLigado: modulo }));
 
-const { applyVozReport, textoDaLinha, vozCallEndedSchema, RESULTADO_DA_BIA } = await import("./report");
+const { applyVozReport, textoDaLinha, vozCallEndedSchema, RESULTADO_DA_BIA } =
+  await import("./report");
 
 const ORG = "0cc6e9e0-a9b0-42a4-951b-a0cb1e554a48";
 const COLD = "0a7bc40c-45a3-47ed-ac0c-684fd8111ed2";
@@ -130,6 +136,7 @@ const line = (writes: Array<{ table: string; row: Row }>) =>
 beforeEach(() => {
   move.mockReset().mockResolvedValue({});
   close.mockReset().mockResolvedValue({});
+  modulo.mockReset().mockResolvedValue(true);
 });
 
 describe("the mapping", () => {
@@ -204,7 +211,9 @@ describe("applyVozReport", () => {
       motivo: "Não tem interesse",
     });
     const reasons = db.writes.find((w) => w.table === "crm_pipelines");
-    expect(reasons?.row.settings).toMatchObject({ lost_reasons: expect.arrayContaining(["Não tem interesse"]) });
+    expect(reasons?.row.settings).toMatchObject({
+      lost_reasons: expect.arrayContaining(["Não tem interesse"]),
+    });
   });
 
   it("a funnel that already lists the reasons is not rewritten", async () => {
@@ -215,7 +224,11 @@ describe("applyVozReport", () => {
     const db = fakeDb(tables({ crm_leads: [lead({ crm_pipelines: { settings } })] }));
     await applyVozReport(db.supabase, CTX, report({ outcome: "wrong_number" }));
     expect(db.writes.some((w) => w.table === "crm_pipelines")).toBe(false);
-    expect(close).toHaveBeenCalledWith(db.supabase, expect.anything(), expect.objectContaining({ motivo: "Número errado" }));
+    expect(close).toHaveBeenCalledWith(
+      db.supabase,
+      expect.anything(),
+      expect.objectContaining({ motivo: "Número errado" }),
+    );
   });
 
   it("another funnel: no move, a voz_call_report line", async () => {
@@ -225,12 +238,19 @@ describe("applyVozReport", () => {
     const r = await applyVozReport(db.supabase, CTX, report());
     expect(r).toEqual({ outcome: "applied", leadId: LEAD, resultado: null });
     expect(move).not.toHaveBeenCalled();
-    expect(line(db.writes)).toMatchObject({ type: "voz_call_report", payload: { voz_outcome: "meeting_booked" } });
+    expect(line(db.writes)).toMatchObject({
+      type: "voz_call_report",
+      payload: { voz_outcome: "meeting_booked" },
+    });
   });
 
   it("'other' in a Cold Call funnel: only the line", async () => {
     const db = fakeDb(tables());
-    const r = await applyVozReport(db.supabase, CTX, report({ outcome: "other", duration_s: undefined }));
+    const r = await applyVozReport(
+      db.supabase,
+      CTX,
+      report({ outcome: "other", duration_s: undefined }),
+    );
     expect(r.resultado).toBeNull();
     expect(move).not.toHaveBeenCalled();
     expect(line(db.writes)?.payload).toEqual({ voz_outcome: "other" });
@@ -241,6 +261,49 @@ describe("applyVozReport", () => {
     expect((await applyVozReport(db.supabase, CTX, report())).outcome).toBe("applied");
     expect(move).not.toHaveBeenCalled();
     expect(close).not.toHaveBeenCalled();
+  });
+
+  it("the line is written before the card moves", async () => {
+    const order: string[] = [];
+    const db = fakeDb(tables());
+    const realFrom = (db.supabase as { from: (t: string) => unknown }).from;
+    (db.supabase as { from: unknown }).from = vi.fn((t: string) => {
+      const q = realFrom(t) as { insert?: (r: Row) => unknown };
+      if (t === "crm_lead_activities" && q.insert) {
+        const insert = q.insert;
+        q.insert = (r: Row) => (order.push("line"), insert(r));
+      }
+      return q;
+    });
+    move.mockImplementationOnce(async () => void order.push("move"));
+    await applyVozReport(db.supabase, CTX, report());
+    expect(order).toEqual(["line", "move"]);
+  });
+
+  it("the Cold Call module off: only the line, the card stays", async () => {
+    modulo.mockResolvedValue(false);
+    const db = fakeDb(tables());
+    const r = await applyVozReport(db.supabase, CTX, report());
+    expect(r).toEqual({ outcome: "applied", leadId: LEAD, resultado: null });
+    expect(move).not.toHaveBeenCalled();
+    expect(line(db.writes)).toMatchObject({ type: "voz_call_report" });
+  });
+
+  it("a retry finds the line on any card of the organization, and writes nothing", async () => {
+    const OTHER = "77777777-7777-4777-8777-777777777777";
+    const db = fakeDb(
+      tables({
+        crm_lead_activities: [
+          { id: "a1", organization_id: ORG, lead_id: OTHER, source_module: "voz", source_id: CALL },
+        ],
+      }),
+    );
+    expect(await applyVozReport(db.supabase, CTX, report({ lead_ref: null }))).toEqual({
+      outcome: "already_applied",
+      leadId: OTHER,
+    });
+    expect(db.writes).toEqual([]);
+    expect(move).not.toHaveBeenCalled();
   });
 
   it("a second delivery of the same call writes nothing", async () => {
@@ -260,9 +323,17 @@ describe("applyVozReport", () => {
   });
 
   it("without lead_ref (or with a stale id), the contact's open lead by phone", async () => {
-    for (const ref of [null, { id: "not-a-uuid" }, { id: "55555555-5555-4555-8555-555555555555" }]) {
+    for (const ref of [
+      null,
+      { id: "not-a-uuid" },
+      { id: "55555555-5555-4555-8555-555555555555" },
+    ]) {
       const db = fakeDb(tables());
-      const r = await applyVozReport(db.supabase, CTX, report({ lead_ref: ref, to: "(11) 98765-4321" }));
+      const r = await applyVozReport(
+        db.supabase,
+        CTX,
+        report({ lead_ref: ref, to: "(11) 98765-4321" }),
+      );
       expect(r.leadId).toBe(LEAD);
     }
   });
@@ -272,18 +343,23 @@ describe("applyVozReport", () => {
     const none = fakeDb(tables({ contacts: [] }));
     expect((await applyVozReport(none.supabase, CTX, report(noRef))).outcome).toBe("no_contact");
     const badPhone = fakeDb(tables());
-    expect((await applyVozReport(badPhone.supabase, CTX, report({ ...noRef, to: "12345678" }))).outcome).toBe(
-      "no_contact",
-    );
+    expect(
+      (await applyVozReport(badPhone.supabase, CTX, report({ ...noRef, to: "12345678" }))).outcome,
+    ).toBe("no_contact");
     const personal = fakeDb(
       tables({ contacts: [{ ...tables().contacts![0], is_personal: true }] }),
     );
-    expect((await applyVozReport(personal.supabase, CTX, report(noRef))).outcome).toBe("no_contact");
+    expect((await applyVozReport(personal.supabase, CTX, report(noRef))).outcome).toBe(
+      "no_contact",
+    );
     const noLead = fakeDb(tables({ crm_leads: [] }));
     expect((await applyVozReport(noLead.supabase, CTX, report(noRef))).outcome).toBe("no_lead");
     const tied = fakeDb(
       tables({
-        crm_leads: [lead(), lead({ id: "66666666-6666-4666-8666-666666666666", pipeline_id: SALES })],
+        crm_leads: [
+          lead(),
+          lead({ id: "66666666-6666-4666-8666-666666666666", pipeline_id: SALES }),
+        ],
       }),
     );
     expect((await applyVozReport(tied.supabase, CTX, report(noRef))).outcome).toBe("no_lead");
@@ -296,7 +372,9 @@ describe("applyVozReport", () => {
     expect(r).toMatchObject({ outcome: "refused", code: "stage_missing" });
     expect(line(noStage.writes)).toBeDefined();
 
-    move.mockRejectedValueOnce(new ApiError(422, "required_fields_missing", undefined, "req-1", "Falta campo"));
+    move.mockRejectedValueOnce(
+      new ApiError(422, "required_fields_missing", undefined, "req-1", "Falta campo"),
+    );
     const rule = fakeDb(tables());
     expect(await applyVozReport(rule.supabase, CTX, report())).toMatchObject({
       outcome: "refused",
@@ -305,29 +383,45 @@ describe("applyVozReport", () => {
     expect(line(rule.writes)).toBeDefined();
   });
 
-  it("a concurrent edit is a conflict, a 5xx or a dead database is unavailable: nothing written", async () => {
-    move.mockRejectedValueOnce(new ApiError(409, "lead_stage_changed_concurrent", undefined, "req-1", "x"));
-    const busy = fakeDb(tables());
-    expect((await applyVozReport(busy.supabase, CTX, report())).outcome).toBe("conflict");
-    expect(line(busy.writes)).toBeUndefined();
-
-    move.mockRejectedValueOnce(new ApiError(500, "internal_error", undefined, "req-1", "x"));
-    expect((await applyVozReport(fakeDb(tables()).supabase, CTX, report())).outcome).toBe("unavailable");
-
-    for (const table of ["crm_leads", "crm_lead_activities", "crm_stages"]) {
-      const db = fakeDb(tables(), table);
-      expect((await applyVozReport(db.supabase, CTX, report())).outcome).toBe("unavailable");
+  it("after the line, any move failure is reported as refused: the line stays, nothing is retried", async () => {
+    const cases: Array<[unknown, string]> = [
+      [
+        new ApiError(409, "lead_stage_changed_concurrent", undefined, "req-1", "x"),
+        "lead_stage_changed_concurrent",
+      ],
+      [new ApiError(500, "internal_error", undefined, "req-1", "x"), "internal_error"],
+      [new Error("boom"), "move_failed"],
+      ["weird", "move_failed"],
+    ];
+    for (const [err, code] of cases) {
+      move.mockRejectedValueOnce(err);
+      const db = fakeDb(tables());
+      expect(await applyVozReport(db.supabase, CTX, report())).toMatchObject({
+        outcome: "refused",
+        code,
+      });
+      expect(line(db.writes)).toBeDefined();
     }
-    const contactsDown = fakeDb(tables(), "contacts");
-    expect((await applyVozReport(contactsDown.supabase, CTX, report({ lead_ref: null }))).outcome).toBe(
-      "unavailable",
-    );
-    const lineDown = fakeDb(tables(), undefined, "insert failed");
-    expect((await applyVozReport(lineDown.supabase, CTX, report())).outcome).toBe("unavailable");
+    const stagesDown = fakeDb(tables(), "crm_stages");
+    expect(await applyVozReport(stagesDown.supabase, CTX, report())).toMatchObject({
+      outcome: "refused",
+      code: "stage_read_failed",
+    });
+    expect(line(stagesDown.writes)).toBeDefined();
   });
 
-  it("an unexpected error is not swallowed", async () => {
-    move.mockRejectedValueOnce(new Error("boom"));
-    await expect(applyVozReport(fakeDb(tables()).supabase, CTX, report())).rejects.toThrow("boom");
+  it("a dead database before the line is unavailable: nothing written, Voz retries", async () => {
+    for (const table of ["crm_leads", "crm_lead_activities"]) {
+      const db = fakeDb(tables(), table);
+      expect((await applyVozReport(db.supabase, CTX, report())).outcome).toBe("unavailable");
+      expect(db.writes).toEqual([]);
+    }
+    const contactsDown = fakeDb(tables(), "contacts");
+    expect(
+      (await applyVozReport(contactsDown.supabase, CTX, report({ lead_ref: null }))).outcome,
+    ).toBe("unavailable");
+    const lineDown = fakeDb(tables(), undefined, "insert failed");
+    expect((await applyVozReport(lineDown.supabase, CTX, report())).outcome).toBe("unavailable");
+    expect(move).not.toHaveBeenCalled();
   });
 });
