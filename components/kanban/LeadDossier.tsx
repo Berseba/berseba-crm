@@ -13,6 +13,7 @@ import type { Stage } from "@/lib/kanban/types";
 import { ContatoDoNegocio } from "./ContatoDoNegocio";
 import { AtalhosDoNegocio } from "./AtalhosDoCard";
 import { ConversaNoDossie } from "./ConversaNoDossie";
+import { LigarComBia } from "./LigarComBia";
 import { LeadFieldsForm, type ControleDosCamposDoNegocio } from "./LeadFieldsForm";
 import { RevisaoDoDocumento } from "./RevisaoDoDocumento";
 import { ScoreSlot } from "./ScoreSlot";
@@ -268,6 +269,9 @@ export function LeadDossier({
           contactId={lead.contact_id}
           phone={lead.contact_phone}
         />
+
+        {/* Berseba: the Bia (Voz) calls this lead over WhatsApp; nothing where Voz is off. */}
+        <LigarComBia leadId={lead.id} phone={lead.contact_phone} />
 
         {/* ① Contato — os dados do CLIENTE: telefone e e-mail numa aba, links
             (Instagram, site, Google Meu Negócio…) na outra. Vêm do contato, não

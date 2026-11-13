@@ -30,6 +30,9 @@
  */
 export const AUDIT_ACTIONS = [
   // ── Berseba ──────────────────────────────────────────────────────────────
+  // "Ligar com a Bia" on a lead card asked Voz for a call (`app/api/v1/voz/calls/route.ts`). The
+  // report that comes back moves the card through `moveLeadHandler` / `encerraDemanda`, audited there.
+  "voz.call_requested",
   // A Mirae milestone that found the card already in its stage but advanced the
   // agent's funnel (`lib/integrations/mirae/milestone.ts`). A milestone that moves
   // the card is audited as `lead.moved` by `moveLeadHandler`.

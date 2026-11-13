@@ -250,6 +250,17 @@ const schema = z.object({
   /** Comma-separated organization ids that get the `mirae_*` agent tools. */
   MIRAE_API_ORG_IDS: z.string().optional().default(""),
 
+  // ─── Berseba: Voz, the Bia's WhatsApp calls — OPTIONAL, OFF BY DEFAULT ───
+  //
+  // Install level, like the Mirae block above. Off unless all three are set; parsed (and refused
+  // when malformed) by `lib/integrations/voz/config.ts`, never here.
+  /** Voz's origin, e.g. `https://voz.grupoberseba.com.br`. */
+  VOZ_API_URL: z.string().optional().default(""),
+  /** The tenant's `voz_…` key, from Voz's console (Linha › Chaves da API). */
+  VOZ_API_KEY: z.string().optional().default(""),
+  /** Comma-separated organization ids that get the "Ligar com a Bia" button. */
+  VOZ_API_ORG_IDS: z.string().optional().default(""),
+
   // ─── Berseba: Atos agenda API (RBCOR) — OPTIONAL, OFF BY DEFAULT ───
   //
   // Install level, like the avec block above. Off unless all three are set; parsed (and refused
