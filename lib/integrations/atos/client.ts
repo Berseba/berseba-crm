@@ -249,6 +249,7 @@ export function bookClass(
     name?: string;
     birthDate?: string;
     plan?: AtosPlan;
+    pregnant?: boolean;
     idempotencyKey: string;
   },
 ): Promise<AtosWriteResult> {
@@ -261,6 +262,7 @@ export function bookClass(
       name: input.name,
       birth_date: input.birthDate,
       plan: input.plan,
+      pregnant: input.pregnant,
     }),
     input.idempotencyKey,
   );
@@ -276,6 +278,7 @@ export function createRecurringPlan(
     plan: AtosAppPlan;
     weekly: ReadonlyArray<{ weekday: AtosWeekday; start_time: string }>;
     months?: number;
+    pregnant?: boolean;
     idempotencyKey: string;
   },
 ): Promise<AtosWriteResult> {
@@ -289,6 +292,7 @@ export function createRecurringPlan(
       plan: input.plan,
       weekly: input.weekly.map((w) => ({ weekday: w.weekday, start_time: w.start_time })),
       months: input.months,
+      pregnant: input.pregnant,
     }),
     input.idempotencyKey,
   );

@@ -40,7 +40,7 @@ const BASE = "linha de base, medida quando a cerca nasceu (2026-10-31)";
 // Berseba: baseline of our agenda tools, measured in the v1.102.0 sync (2026-11-05).
 const BERSEBA = "linha de base Berseba, medida no sync da v1.102.0 (2026-11-05)";
 const BERSEBA_ATOS =
-  "linha de base Berseba das ferramentas do Atos, com a gravação na agenda (2026-11-12)";
+  "linha de base Berseba das ferramentas do Atos, com a gravação na agenda e o campo pregnant (2026-11-12)";
 
 const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   // ── Berseba ──────────────────────────────────────────────────────────────
@@ -65,9 +65,9 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   "atos_cancel_class": { tokens: 252, motivo: BERSEBA_ATOS },
   "atos_reschedule_class": { tokens: 199, motivo: BERSEBA_ATOS },
   "atos_book_makeup": { tokens: 225, motivo: BERSEBA_ATOS },
-  "atos_book_class": { tokens: 351, motivo: BERSEBA_ATOS },
-  "atos_book_trial": { tokens: 297, motivo: BERSEBA_ATOS },
-  "atos_create_recurring_plan": { tokens: 472, motivo: BERSEBA_ATOS },
+  "atos_book_class": { tokens: 375, motivo: BERSEBA_ATOS },
+  "atos_book_trial": { tokens: 302, motivo: BERSEBA_ATOS },
+  "atos_create_recurring_plan": { tokens: 496, motivo: BERSEBA_ATOS },
   // ── end of the Berseba block ─────────────────────────────────────────────
   "crm_list_event_types": { tokens: 204, motivo: BASE },
   "crm_find_free_slots": { tokens: 859, motivo: BASE },
@@ -163,9 +163,9 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   "schedule_followup (com negócio)": { tokens: 314, motivo: BASE },
 };
 
-// Berseba: upstream 29569 + 3055 of our avec/mirae tools + 2452 of the Atos tools (block at the
+// Berseba: upstream 29569 + 3055 of our avec/mirae tools + 2505 of the Atos tools (block at the
 // top of TETO).
-const TETO_TOTAL = 35076;
+const TETO_TOTAL = 35129;
 
 const VARIANTE = "schedule_followup (com negócio)";
 
