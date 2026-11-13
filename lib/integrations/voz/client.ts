@@ -56,22 +56,28 @@ export async function pedirLigacaoNaVoz(
   } catch {
     return { ok: false, codigo: "unavailable" };
   }
-  const body = (await res.json().catch(() => null)) as { call_id?: unknown; error?: unknown } | null;
-  if (res.status === 202 && typeof body?.call_id === "string") return { ok: true, callId: body.call_id };
+  const body = (await res.json().catch(() => null)) as {
+    call_id?: unknown;
+    error?: unknown;
+  } | null;
+  if (res.status === 202 && typeof body?.call_id === "string")
+    return { ok: true, callId: body.call_id };
   const codigo = typeof body?.error === "string" && CODIGOS.has(body.error) ? body.error : null;
-  if (codigo) return { ok: false, codigo: codigo as Exclude<PedidoDeLigacao, { ok: true }>["codigo"] };
+  if (codigo)
+    return { ok: false, codigo: codigo as Exclude<PedidoDeLigacao, { ok: true }>["codigo"] };
   if (res.status === 401) return { ok: false, codigo: "unauthorized" };
   return { ok: false, codigo: "unavailable" };
 }
 
 /** What the team reads under the button, in Portuguese (the dictionary translates). */
-export const MENSAGEM_DO_PEDIDO: Record<Exclude<PedidoDeLigacao, { ok: true }>["codigo"], string> = {
-  opted_out: "Este número pediu para não receber ligações.",
-  in_progress: "A Bia já está ligando para este número.",
-  suspended: "A Bia está pausada. Ative-a no console da Voz.",
-  daily_limit: "A linha da Bia chegou ao limite de ligações de hoje.",
-  unauthorized: "A chave da Voz não vale mais. Avise quem administra o CRM.",
-  no_line: "A Bia não tem uma linha de WhatsApp ativa.",
-  bad_phone: "O telefone do contato não parece um celular válido.",
-  unavailable: "A Voz não respondeu. Tente de novo em instantes.",
-};
+export const MENSAGEM_DO_PEDIDO: Record<Exclude<PedidoDeLigacao, { ok: true }>["codigo"], string> =
+  {
+    opted_out: "Este número pediu para não receber ligações.",
+    in_progress: "A Bia já está ligando para este número.",
+    suspended: "A Bia está pausada. Ative-a no console da Voz.",
+    daily_limit: "A linha da Bia chegou ao limite de ligações de hoje.",
+    unauthorized: "A chave da Voz não vale mais. Avise quem administra o CRM.",
+    no_line: "A Bia não tem uma linha de WhatsApp ativa.",
+    bad_phone: "O telefone do contato não parece um celular válido.",
+    unavailable: "A Voz não respondeu. Tente de novo em instantes.",
+  };

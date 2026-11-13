@@ -7,7 +7,10 @@
 import { authorizeServerBearer, type MiraeAuth } from "@/lib/integrations/mirae/read-auth";
 import { TETO_DE_ESCRITA } from "@/lib/mcp/rate-limit";
 
-export function authorizeVozWrite(authHeader: string | null, requestId: string): Promise<MiraeAuth> {
+export function authorizeVozWrite(
+  authHeader: string | null,
+  requestId: string,
+): Promise<MiraeAuth> {
   return authorizeServerBearer(authHeader, requestId, {
     scope: "mcp:write",
     role: "agent",

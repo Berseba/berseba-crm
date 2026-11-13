@@ -3,23 +3,33 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MENSAGEM_DO_PEDIDO, pedirLigacaoNaVoz } from "./client";
 
-const CONFIG = { baseUrl: "https://voz.example", apiKey: "voz_abc123_secret", orgIds: new Set<string>() };
+const CONFIG = {
+  baseUrl: "https://voz.example",
+  apiKey: "voz_abc123_secret",
+  orgIds: new Set<string>(),
+};
 const LEAD = "11111111-1111-4111-8111-111111111111";
 
 function answer(status: number, body: unknown) {
-  return vi.fn(async () => new Response(JSON.stringify(body), { status })) as unknown as typeof fetch;
+  return vi.fn(
+    async () => new Response(JSON.stringify(body), { status }),
+  ) as unknown as typeof fetch;
 }
 
 describe("pedirLigacaoNaVoz", () => {
   it("sends the number, the agent and the lead, with the key", async () => {
     const fetchImpl = answer(202, { call_id: "c1" });
-    expect(await pedirLigacaoNaVoz(CONFIG, { phone: "+5511987654321", leadId: LEAD }, fetchImpl)).toEqual({
+    expect(
+      await pedirLigacaoNaVoz(CONFIG, { phone: "+5511987654321", leadId: LEAD }, fetchImpl),
+    ).toEqual({
       ok: true,
       callId: "c1",
     });
     const [url, init] = (fetchImpl as unknown as ReturnType<typeof vi.fn>).mock.calls[0]!;
     expect(url).toBe("https://voz.example/v1/calls");
-    expect((init as RequestInit).headers).toMatchObject({ Authorization: "Bearer voz_abc123_secret" });
+    expect((init as RequestInit).headers).toMatchObject({
+      Authorization: "Bearer voz_abc123_secret",
+    });
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({
       to: "+5511987654321",
       agent: "bia",
@@ -40,7 +50,9 @@ describe("pedirLigacaoNaVoz", () => {
       [202, {}, "unavailable"],
     ];
     for (const [status, body, codigo] of cases) {
-      expect(await pedirLigacaoNaVoz(CONFIG, { phone: "1", leadId: LEAD }, answer(status, body))).toEqual({
+      expect(
+        await pedirLigacaoNaVoz(CONFIG, { phone: "1", leadId: LEAD }, answer(status, body)),
+      ).toEqual({
         ok: false,
         codigo,
       });
@@ -55,7 +67,9 @@ describe("pedirLigacaoNaVoz", () => {
       ok: false,
       codigo: "unavailable",
     });
-    const html = vi.fn(async () => new Response("<html>", { status: 502 })) as unknown as typeof fetch;
+    const html = vi.fn(
+      async () => new Response("<html>", { status: 502 }),
+    ) as unknown as typeof fetch;
     expect((await pedirLigacaoNaVoz(CONFIG, { phone: "1", leadId: LEAD }, html)).ok).toBe(false);
   });
 
