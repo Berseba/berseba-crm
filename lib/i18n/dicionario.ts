@@ -40,6 +40,16 @@ import { TEXTOS_AGENDA_SERVICOS } from "./agenda-servicos";
 type Traducoes = Record<string, Partial<Record<Exclude<Idioma, "pt-BR">, string>>>;
 
 export const DICIONARIO: Traducoes = {
+  // Berseba (9005): "Registrar toque" on the lead (components/kanban/RegisterTouch.tsx).
+  "Toque registrado": { es: "Contacto registrado" },
+  "Toque registrado.": { es: "Contacto registrado." },
+  "Registrar toque": { es: "Registrar contacto" },
+  "Canal do toque": { es: "Canal del contacto" },
+  "Anotação (opcional)": { es: "Nota (opcional)" },
+  "Salvar toque": { es: "Guardar contacto" },
+  "Não foi possível registrar o toque.": { es: "No se pudo registrar el contacto." },
+  "Escolha o canal do toque.": { es: "Elige el canal del contacto." },
+  Telefonema: { es: "Llamada" },
   // Berseba: phone reply counts as the team's answer (settings/atendimento).
   "Contar a resposta pelo celular como resposta da equipe": { es: "Contar la respuesta desde el celular como respuesta del equipo" },
   "Ligue se a equipe responde os clientes pelo celular. A conversa volta ao agente quando a última mensagem foi da equipe, pelo CRM ou pelo celular, e o prazo passou. Deixe desligado se o celular manda lembretes automáticos de outro sistema: eles contariam como resposta.": { es: "Actívalo si el equipo responde a los clientes desde el celular. La conversación vuelve al agente cuando el último mensaje fue del equipo, desde el CRM o desde el celular, y el plazo venció. Déjalo desactivado si el celular envía recordatorios automáticos de otro sistema: contarían como respuesta." },

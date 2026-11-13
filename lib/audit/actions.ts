@@ -30,6 +30,10 @@
  */
 export const AUDIT_ACTIONS = [
   // ── Berseba ──────────────────────────────────────────────────────────────
+  // "Registrar toque" on the lead (`app/api/v1/leads/[id]/touches/route.ts`,
+  // migration 9005). Metadata: the channel and whether a note was typed, never
+  // the note itself.
+  "lead.touch_recorded",
   // A Mirae milestone that found the card already in its stage but advanced the
   // agent's funnel (`lib/integrations/mirae/milestone.ts`). A milestone that moves
   // the card is audited as `lead.moved` by `moveLeadHandler`.

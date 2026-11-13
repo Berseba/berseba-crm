@@ -18,6 +18,7 @@ import { RevisaoDoDocumento } from "./RevisaoDoDocumento";
 import { ScoreSlot } from "./ScoreSlot";
 import { LeadTimeline } from "./LeadTimeline";
 import { PropostasDoNegocio } from "./PropostasDoNegocio";
+import { RegisterTouch } from "./RegisterTouch";
 import { TarefasDoNegocio } from "./TarefasDoNegocio";
 import { OwnerBadge } from "./OwnerBadge";
 import { EtapaNoDossie } from "./EtapaNoDossie";
@@ -319,6 +320,9 @@ export function LeadDossier({
           podeEditar={podeEditarTarefas}
           aberto={open}
         />
+
+        {/* Berseba (9005): "Registrar toque", right above the timeline it feeds. */}
+        <RegisterTouch leadId={lead.id} canRegister={podeEditarTarefas} />
 
         {/* ③ Linha do tempo — a CONSULTA, por último. Recolhida, mostra as três
             entradas mais recentes e o "ver tudo" (pedido do autor): a seção

@@ -18,6 +18,15 @@
  * aceita; quem escreve daqui é que fica preso ao vocabulário.
  */
 export type ActivityType =
+  /**
+   * Berseba (migration 9005): a person on the team reached the lead outside the
+   * CRM's own channels, or wants a WhatsApp touch on record. Written by
+   * `POST /api/v1/leads/[id]/touches` with `payload.channel` in
+   * `TOUCH_CHANNELS` (`lib/leads/touch.ts`); counted by
+   * `analytics.v1_contagem_dia`. OUR entry, at the TOP: upstream extends this
+   * union at the bottom.
+   */
+  | "touch"
   // Spec 17: o lead nasceu da primeira mensagem. Sem esta linha na timeline, o
   // card aparece no kanban sem que ninguém saiba de onde veio — e "apareceu
   // sozinho" é como se perde a confiança num automatismo.
@@ -234,6 +243,8 @@ export type ActivityType =
   | "cold_call_result";
 
 export const ACTIVITY_LABELS: Record<ActivityType, string> = {
+  // Berseba (9005). The channel and the note come in the `reason`.
+  touch: "Toque registrado",
   cold_call_result: "Ligação de cold call",
   lead_created: "Entrou no funil",
   stage_changed: "Mudou de estágio",
