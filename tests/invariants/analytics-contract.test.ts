@@ -80,8 +80,8 @@ async function message(lead: string, org: string, session: string, direction: st
   externalId += 1;
   await q(
     `insert into public.messages
-       (organization_id, contact_id, conversation_id, channel_session_id, external_id, type, direction, status, created_at)
-     values ($1, $2, $3, $4, $5, 'text', $6, $7, $8)`,
+       (organization_id, contact_id, conversation_id, channel_session_id, external_id, type, direction, status, created_at, sent_at)
+     values ($1, $2, $3, $4, $5, 'text', $6, $7, $8, $8)`,
     [org, CONTACT(lead), CONVERSATION(lead), session, `analytics-${externalId}`, direction, status, at],
   );
 }
@@ -95,7 +95,7 @@ beforeAll(async () => {
   ] as const) {
     await q(
       `insert into public.organizations (id, slug, legal_name, display_name)
-       values ($1, $2, $2, $2) on conflict do nothing`,
+       values ($1, $2::text, $2::text, $2::text) on conflict do nothing`,
       [org, slug],
     );
   }
@@ -248,8 +248,8 @@ describe("analytics_reader — reads the view and nothing else", () => {
 
   it("logs in with 2 connections and 15 s, and has no password in the schema", async () => {
     const { rows } = await q(
-      `select rolcanlogin, rolconnlimit, rolsuper, rolbypassrls, rolcreaterole, rolpassword, rolconfig
-         from pg_authid where rolname = 'analytics_reader'`,
+      `select r.rolcanlogin, r.rolconnlimit, r.rolsuper, r.rolbypassrls, r.rolcreaterole, a.rolpassword, r.rolconfig
+         from pg_roles r join pg_authid a on a.oid = r.oid where r.rolname = 'analytics_reader'`,
     );
     expect(rows[0]).toMatchObject({
       rolcanlogin: true,
