@@ -240,11 +240,17 @@ export type ActivityType =
    * própria fila é a memória dela, com trecho e decisão por proposta.
    */
   | "document_attached"
-  | "cold_call_result";
+  | "cold_call_result"
+  /**
+   * Berseba: the Bia's report of a WhatsApp call (Voz, `lib/integrations/voz/report.ts`), on a lead
+   * outside a Cold Call funnel. In a Cold Call funnel the same report is a `cold_call_result`.
+   */
+  | "voz_call_report";
 
 export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   // Berseba (9005). The channel and the note come in the `reason`.
   touch: "Toque registrado",
+  voz_call_report: "Ligação da Bia",
   cold_call_result: "Ligação de cold call",
   lead_created: "Entrou no funil",
   stage_changed: "Mudou de estágio",

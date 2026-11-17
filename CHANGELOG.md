@@ -8,6 +8,12 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.17.0] — 2026-11-13
+
+### Adicionado
+
+- **Ligar com a Bia, pelo card do lead** O card do lead ganha o botão "Ligar com a Bia". Com dois cliques, a Bia, a assistente de voz da Berseba, liga para o WhatsApp do contato. Quando a ligação termina, o resumo e o próximo passo aparecem na linha do tempo do lead. Se o lead está num funil de Cold Call, ele muda de etapa pelas mesmas regras do botão de resultado do Cold Call, e a ligação conta como uma tentativa na fila. O botão só aparece nas empresas em que a Voz está ligada. Para ligar, configure `VOZ_API_URL`, `VOZ_API_KEY` e `VOZ_API_ORG_IDS` (o id de uma organização) no `.env`. Sem essas variáveis, nada muda.
+
 ## [2.16.0] — 2026-11-12
 
 ### Adicionado
@@ -9646,7 +9652,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.16.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.17.0...HEAD
+[2.17.0]: https://github.com/berseba/berseba-crm/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/berseba/berseba-crm/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/berseba/berseba-crm/compare/v2.14.0...v2.15.0
 [2.14.0]: https://github.com/berseba/berseba-crm/compare/v2.13.0...v2.14.0

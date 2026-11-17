@@ -12,6 +12,10 @@ export const PUBLIC_PATHS: RegExp[] = [
   /^\/api\/v1\/mirae\/leads$/,
   /^\/api\/v1\/mirae\/pipelines$/,
   /^\/api\/v1\/mirae\/milestones$/,
+  // Berseba: Voz (the Bia's WhatsApp calls) sends each call's report SERVER-TO-SERVER, same rule:
+  // Bearer `dsk_…` with `mcp:write`, checked inside the route (`lib/integrations/voz/auth.ts`).
+  // "Ligar com a Bia" (`/api/v1/voz/calls`) is NOT here: it is the signed-in team's.
+  /^\/api\/v1\/voz\/call-ended$/,
   // Link público persistido: org e destino são resolvidos exclusivamente no servidor.
   /^\/api\/v1\/rastreio\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
   /^\/$/,
