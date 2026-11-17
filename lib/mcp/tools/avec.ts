@@ -22,6 +22,7 @@ import { z } from "zod";
 import {
   AvecApiError,
   cancelAppointment,
+  confirmAppointment,
   createAppointment,
   getAppointment,
   listAppointments,
@@ -803,6 +804,46 @@ export const avecCancel: McpToolDefinition<typeof cancelShape> = {
         idempotencyKey: key,
       });
       return { ok: true, appointment_id: result.id, status: result.status };
+    });
+  },
+};
+
+const confirmShape = {
+  appointment_id: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .describe("O appointment_id que veio de avec_my_appointments (qualquer um do dia)."),
+};
+
+export const avecConfirm: McpToolDefinition<typeof confirmShape> = {
+  name: "avec_confirm",
+  description:
+    "Confirma a presença da cliente DESTA conversa no avec, como o botão Confirmar do avec: " +
+    "todos os agendamentos dela naquele dia ficam Confirmado. Use quando ela confirmar que vem " +
+    "(ex.: respondeu 'confirmo' à mensagem da véspera), com o appointment_id de " +
+    "avec_my_appointments. Não muda dia, hora nem serviço.",
+  inputSchema: confirmShape,
+  category: "write",
+  requiresRole: "ai_operator",
+  requiresScope: "mcp:write",
+  handler: async (input, ctx) => {
+    const ready = await prepare(ctx);
+    if ("ok" in ready) return ready;
+    const key = avecIdempotencyKey(ctx, "avec_confirm", input);
+    if (!key) return NO_JOB;
+    return write(ctx, async () => {
+      const day = await confirmAppointment(ready.config, {
+        appointmentId: input.appointment_id,
+        phone: ready.phone,
+        idempotencyKey: key,
+      });
+      return {
+        ok: true,
+        agendamentos: day.map((a) => ({ ...appointmentView(a), data_br: dataBr(a.date) })),
+        total: day.length,
+      };
     });
   },
 };

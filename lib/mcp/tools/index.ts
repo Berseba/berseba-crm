@@ -14,6 +14,7 @@ import type { McpToolDefinition } from "../types";
 import {
   avecBook,
   avecCancel,
+  avecConfirm,
   avecFindServices,
   avecFreeSlots,
   avecMyAppointments,
@@ -137,6 +138,7 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   avecFreeSlots,
   avecBook,
   avecReschedule,
+  avecConfirm,
   avecCancel,
   // Berseba: Mirae agenda (read, then write)
   miraeMyAppointments,

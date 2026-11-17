@@ -19,12 +19,14 @@ import type { EvidenciaComercial } from "./evidencias-comerciais";
 export const FERRAMENTAS_DE_AGENDA_DO_AVEC: ReadonlySet<string> = new Set([
   "avec_book",
   "avec_reschedule",
+  "avec_confirm",
   "avec_my_appointments",
 ]);
 
 const TITULOS: Record<string, string> = {
   avec_book: "Agendamento gravado na agenda do salão neste atendimento",
   avec_reschedule: "Agendamento remarcado e gravado na agenda do salão neste atendimento",
+  avec_confirm: "Presença confirmada na agenda do salão neste atendimento",
   avec_my_appointments: "Agendamento da cliente consultado na agenda do salão neste atendimento",
 };
 
@@ -72,7 +74,11 @@ export function evidenciasDaAgenda(ferramenta: string, resultado: unknown): Evid
   if (!FERRAMENTAS_DE_AGENDA_DO_AVEC.has(ferramenta)) return [];
   const r = objeto(resultado);
   if (!r || r.ok !== true) return [];
-  const visitas = ferramenta === "avec_my_appointments" ? r.agendamentos : [r.agendamento];
+  // A confirmation answers the whole day, like the list does.
+  const visitas =
+    ferramenta === "avec_my_appointments" || ferramenta === "avec_confirm"
+      ? r.agendamentos
+      : [r.agendamento];
   if (!Array.isArray(visitas)) return [];
   return visitas
     .map((v) => evidenciaDaVisita(ferramenta, v))

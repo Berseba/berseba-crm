@@ -192,6 +192,25 @@ export async function cancelAppointment(
   );
 }
 
+/**
+ * `POST /v1/appointments/{id}/confirm` (Berseba/berseba-mayara-morales#39): what avec's own
+ * "Confirmar" does. Every Agendado booking of the client that day becomes Confirmado; the answer is
+ * her bookings of that day. Answers 501 until switched on.
+ */
+export async function confirmAppointment(
+  config: AvecConfig,
+  params: { appointmentId: string; phone: string; idempotencyKey: string },
+): Promise<AvecAppointment[]> {
+  const day = await request(
+    config,
+    "POST",
+    `/v1/appointments/${encodeURIComponent(params.appointmentId)}/confirm`,
+    list(appointmentSchema),
+    { body: { phone: params.phone }, idempotencyKey: params.idempotencyKey },
+  );
+  return day.data;
+}
+
 /** `POST /v1/appointments` (Berseba/berseba-mayara-morales#19); answers 501 until switched on. */
 export async function createAppointment(
   config: AvecConfig,
