@@ -8,6 +8,12 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.17.1] — 2026-11-17
+
+### Corrigido
+
+- **Agenda avec: a busca de horário respeita "depois das 17h" e "até as 10h"** Quando a cliente pedia um horário "depois das 17h", a assistente ordenava pelos horários mais próximos de 17h e podia oferecer 16h30. A busca de horários da agenda avec ganhou dois filtros opcionais, `depois_de` e `ate`, que deixam de fora o que começa antes ou depois do limite pedido. O texto da ferramenta também deixou de trazer um exemplo com o nome da profissional: a oferta é feita com dia, data e hora.
+
 ## [2.17.0] — 2026-11-13
 
 ### Adicionado
@@ -9652,7 +9658,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.17.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.17.1...HEAD
+[2.17.1]: https://github.com/berseba/berseba-crm/compare/v2.17.0...v2.17.1
 [2.17.0]: https://github.com/berseba/berseba-crm/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/berseba/berseba-crm/compare/v2.15.0...v2.16.0
 [2.15.0]: https://github.com/berseba/berseba-crm/compare/v2.14.0...v2.15.0
