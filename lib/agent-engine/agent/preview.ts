@@ -47,6 +47,11 @@ export interface TurnPreview {
   contactId: string | null;
   channelId: string | null;
   gateContext?: GateContext;
+  /**
+   * Berseba: a block appended to the opening of an assisted draft (a Mirae reminder briefing,
+   * `mirae-reminder-turn.berseba.ts`). Absent = the opening upstream builds, unchanged.
+   */
+  aberturaExtra?: string;
   result: PreviewResult;
 }
 export interface PreviewResult {
