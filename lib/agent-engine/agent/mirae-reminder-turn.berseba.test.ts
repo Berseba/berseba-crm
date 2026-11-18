@@ -130,7 +130,7 @@ describe("briefingDoLembrete", () => {
 describe("runMiraeReminderTurn", () => {
   it("draft: an agent draft with the briefing, never a turn that sends", async () => {
     const p = ports();
-    await runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => NOW, TARGET, { ...REMINDER, delivery: "draft" }, p);
+    await runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => NOW, TARGET, { ...REMINDER, delivery: "draft" }, p as never);
     expect(p.runAgentTurn).not.toHaveBeenCalled();
     expect(p.generateReplyDraft).toHaveBeenCalledTimes(1);
     const input = (p.generateReplyDraft.mock.calls[0] as unknown as [unknown, unknown, Record<string, unknown>])[2];
@@ -148,18 +148,18 @@ describe("runMiraeReminderTurn", () => {
     for (const reason of ["reply_no_agent", "reply_context_unavailable"]) {
       const p = ports({ generateReplyDraft: vi.fn(async () => { throw new Error(reason); }) });
       await expect(
-        runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => NOW, TARGET, { ...REMINDER, delivery: "draft" }, p),
+        runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => NOW, TARGET, { ...REMINDER, delivery: "draft" }, p as never),
       ).resolves.toBeUndefined();
     }
     const p = ports({ generateReplyDraft: vi.fn(async () => { throw new Error("db down"); }) });
     await expect(
-      runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => NOW, TARGET, { ...REMINDER, delivery: "draft" }, p),
+      runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => NOW, TARGET, { ...REMINDER, delivery: "draft" }, p as never),
     ).rejects.toThrow("db down");
   });
 
   it("auto: the agent's normal turn, with the briefing in the opening and for an assisted agent", async () => {
     const p = ports();
-    await runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => NOW, TARGET, REMINDER, p);
+    await runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => NOW, TARGET, REMINDER, p as never);
     expect(p.generateReplyDraft).not.toHaveBeenCalled();
     expect(p.runAgentTurn).toHaveBeenCalledTimes(1);
     const input = (p.runAgentTurn.mock.calls[0] as unknown as [unknown, unknown, unknown, unknown, Record<string, unknown>])[4];
@@ -180,7 +180,7 @@ describe("runMiraeReminderTurn", () => {
 
   it("too close to the appointment: nothing runs", async () => {
     const p = ports();
-    await runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => new Date("2026-11-18T11:30:00.000Z"), TARGET, REMINDER, p);
+    await runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => new Date("2026-11-18T11:30:00.000Z"), TARGET, REMINDER, p as never);
     expect(p.runAgentTurn).not.toHaveBeenCalled();
     expect(p.generateReplyDraft).not.toHaveBeenCalled();
   });
