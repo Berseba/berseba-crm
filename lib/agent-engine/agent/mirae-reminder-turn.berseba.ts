@@ -87,14 +87,28 @@ export function chegaTardeDemais(reminder: MiraeReminderPayload, now: Date): boo
   return at - now.getTime() < TOO_LATE_MS;
 }
 
-/** "terça-feira, 18/11 às 09:00", in the organization's time zone. */
+/** Weekday names for the agent's prompt (Portuguese: the agent speaks Portuguese). */
+const DIA_DA_SEMANA: Record<string, string> = {
+  Sun: 'domingo',
+  Mon: 'segunda-feira',
+  Tue: 'terça-feira',
+  Wed: 'quarta-feira',
+  Thu: 'quinta-feira',
+  Fri: 'sexta-feira',
+  Sat: 'sábado',
+};
+
+/**
+ * "terça-feira, 18/11 às 09:00", in the organization's time zone. Built from neutral parts, as
+ * `lib/mcp/tools/mirae.ts` does: this is prompt text for the agent, not interface.
+ */
 export function quandoLegivel(iso: string, fuso: string): string | null {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return null;
   const parts = Object.fromEntries(
-    new Intl.DateTimeFormat('pt-BR', {
+    new Intl.DateTimeFormat('en-GB', {
       timeZone: fuso,
-      weekday: 'long',
+      weekday: 'short',
       day: '2-digit',
       month: '2-digit',
       hour: '2-digit',
@@ -104,7 +118,8 @@ export function quandoLegivel(iso: string, fuso: string): string | null {
       .formatToParts(at)
       .map((p) => [p.type, p.value]),
   );
-  return `${parts.weekday}, ${parts.day}/${parts.month} às ${parts.hour}:${parts.minute}`;
+  const dia = DIA_DA_SEMANA[parts.weekday ?? ''] ?? parts.weekday;
+  return `${dia}, ${parts.day}/${parts.month} às ${parts.hour}:${parts.minute}`;
 }
 
 const O_QUE_E: Record<MiraeReminderKind, string> = {
