@@ -355,7 +355,14 @@ source "$KIT_DIR/_common.sh"
 source "$KIT_DIR/manutencao.sh"
 # Berseba (9005): the analytics contract views go down before the baseline and
 # come back after it. Sourced here, after the checkout, for the same reason.
-source "$KIT_DIR/_analytics.sh"
+# Soft on purpose: a kit without the file (an older checkout, the test fixtures
+# that copy a fixed list of kit files) skips both steps and updates as before.
+if [ -f "$KIT_DIR/_analytics.sh" ]; then
+  source "$KIT_DIR/_analytics.sh"
+else
+  analytics_views_drop() { :; }
+  analytics_views_recreate() { :; }
+fi
 
 # Single-server: o Supabase vai para a versão pinada no código novo ANTES do
 # banco (o passo 4 pausa peças dele, e um `up` depois as religaria).

@@ -61,9 +61,11 @@ U="$KIT/update.sh"
 line() { grep -nF -- "$1" "$U" | head -1 | cut -d: -f1; }
 checkout=$(line 'git checkout --quiet "$TARGET_TAG"')
 sourced=$(line 'source "$KIT_DIR/_analytics.sh"')
-drop=$(line 'analytics_views_drop')
+# The call sites carry this comment; the no-op fallbacks for a kit without
+# _analytics.sh (`analytics_views_drop() { :; }`) do not.
+drop=$(line 'analytics_views_drop  # Berseba (9005)')
 baseline=$(line 'if reaplicar_baseline "$PROJECT_DIR/supabase/baseline.sql"')
-recreate=$(line 'analytics_views_recreate')
+recreate=$(line 'analytics_views_recreate  # Berseba (9005)')
 policies=$(line 'E AS REGRAS DE ISOLAMENTO SÃO CONFERIDAS')
 check "every anchor was found" test -n "$checkout" -a -n "$sourced" -a -n "$drop" -a -n "$baseline" -a -n "$recreate" -a -n "$policies"
 check "_analytics.sh is sourced after the checkout" test "${sourced:-0}" -gt "${checkout:-0}"
@@ -71,7 +73,9 @@ check "the drop comes right before the baseline" test "$(( ${baseline:-0} - ${dr
 check "the recreate comes after the baseline and its error report" \
   test "${recreate:-0}" -gt "${baseline:-0}" -a "${recreate:-0}" -lt "${policies:-0}"
 check "update.sh calls each step once" \
-  test "$(grep -c '^ *analytics_views_drop' "$U")" = 1 -a "$(grep -c '^ *analytics_views_recreate' "$U")" = 1
+  test "$(grep -c '^ *analytics_views_drop  #' "$U")" = 1 -a "$(grep -c '^ *analytics_views_recreate  #' "$U")" = 1
+check "a kit without _analytics.sh still updates (no-op fallbacks)" \
+  grep -q 'analytics_views_drop() { :; }' "$U"
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "✓ analytics views around the baseline: all checks passed"; exit 0; fi
