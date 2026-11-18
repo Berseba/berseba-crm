@@ -8,6 +8,20 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.20.0] — 2026-11-18
+
+### Adicionado
+
+- **Lembretes do Mirae viram mensagem escrita pela assistente** O Mirae pode pedir ao CRM uma mensagem para a aluna a partir de um lembrete da agenda: a confirmação da avaliação inicial ou da primeira aula, um dia antes, ou um lembrete de "mensagem no WhatsApp" da equipe. A assistente escreve o texto com as próprias palavras, a partir do pedido da equipe e da conversa; nada sai de texto pronto.
+
+  Por padrão a mensagem vira um rascunho da assistente na conversa, que alguém da equipe aprova, edita ou descarta. A organização pode escolher que as confirmações saiam sozinhas: elas passam pelas mesmas regras de qualquer mensagem da assistente (horário de envio, ritmo, mensagens repetidas, opt-out, atendimento humano), e fora do horário esperam a próxima abertura. Logo antes de escrever, o CRM confere no Mirae se a avaliação ou a aula continua marcada naquele dia e hora; se foi cancelada ou mudou, nada sai. A assistente também não manda nada quando a conversa mostra que a pessoa já confirmou, pediu para não receber mensagens ou mudou o agendamento. Contato bloqueado nunca recebe; quem tem um retorno da assistente já marcado também não recebe a segunda mensagem.
+
+  Para ligar o envio automático numa organização, quem opera a instalação grava `organizations.settings.mirae_reminder_delivery = "auto"` (`"draft"` é o padrão; `"off"` desliga).
+
+### Corrigido
+
+- **Agenda Mirae: a confirmação de horário e os valores do estúdio deixam de ser barrados como promessa sem prova** O revisor de promessas da assistente só aceitava como prova o acervo, o catálogo e a agenda avec. Com a agenda Mirae (Fiore Pilates), a confirmação logo depois de marcar ("Prontinho, sua avaliação está marcada…"), os horários livres oferecidos e os valores dos planos podiam ser barrados como promessa inventada, e a mensagem não saía. Agora o que a agenda Mirae respondeu no próprio atendimento (marcação, remarcação, agendamentos da pessoa, horários livres, planos e regras) conta como prova. Só vale a resposta de sucesso do sistema; nada do que a assistente escreve vira prova.
+
 ## [2.19.0] — 2026-11-18
 
 ### Adicionado
@@ -9670,7 +9684,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.19.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.20.0...HEAD
+[2.20.0]: https://github.com/berseba/berseba-crm/compare/v2.19.0...v2.20.0
 [2.19.0]: https://github.com/berseba/berseba-crm/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/berseba/berseba-crm/compare/v2.17.1...v2.18.0
 [2.17.1]: https://github.com/berseba/berseba-crm/compare/v2.17.0...v2.17.1
