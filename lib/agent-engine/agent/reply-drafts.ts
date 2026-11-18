@@ -37,6 +37,8 @@ export async function generateReplyDraft(
     channelId: string;
     boundary?: ServiceBoundary;
     agent?: PublishedAgentConfig;
+    /** Berseba: appended to the draft's opening (a Mirae reminder briefing). */
+    aberturaExtra?: string;
   },
 ) {
   const agent =
@@ -108,6 +110,7 @@ export async function generateReplyDraft(
         feedback: JSON.stringify(feedback.map((r) => r.feedback)),
         contactId: input.contactId,
         channelId: input.channelId,
+        ...(input.aberturaExtra ? { aberturaExtra: input.aberturaExtra } : {}),
         result,
       });
       const body = result.candidates.map((c) => c.body).join("\n\n");

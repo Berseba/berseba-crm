@@ -85,6 +85,7 @@ import {
 } from './followup-flow-classify';
 import { consultarJevNoFollowup } from '@/lib/ai/decisao/followup';
 import { enviarComSaidaConfiguravel } from "@/lib/prospecting/saida-configuravel";
+import { lembreteDoMirae, runMiraeReminderTurn } from './mirae-reminder-turn.berseba';
 
 
 const DAY_MS = 86_400_000;
@@ -626,6 +627,13 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
         }
         throw err;
       }
+      return;
+    }
+
+    // Berseba: a Mirae reminder (draft or automatic send), `mirae-reminder-turn.berseba.ts`.
+    const lembrete = lembreteDoMirae(job.payload);
+    if (lembrete !== null) {
+      await runMiraeReminderTurn(deps, job, pool, ctx, clock, { ...target, boundary }, lembrete);
       return;
     }
 

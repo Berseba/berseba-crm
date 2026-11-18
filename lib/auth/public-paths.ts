@@ -5,13 +5,14 @@
 export const PUBLIC_PATHS: RegExp[] = [
   // Berseba: Mirae reads the studio's funnel and sends its milestones SERVER-TO-SERVER. Bearer
   // `dsk_…` only, checked INSIDE the routes (`lib/integrations/mirae/read-auth.ts`, scope
-  // `mcp:read` for the reads, `mcp:write` for the milestones), with the
+  // `mcp:read` for the reads, `mcp:write` for the milestones and reminder messages), with the
   // organization taken from the token row and never from the query — the same "the proxy does
   // not decide" as `/api/v1/contacts` below, not "no auth". Anchored with `$`: no sub-path under
   // `/api/v1/mirae/` becomes public by riding along.
   /^\/api\/v1\/mirae\/leads$/,
   /^\/api\/v1\/mirae\/pipelines$/,
   /^\/api\/v1\/mirae\/milestones$/,
+  /^\/api\/v1\/mirae\/reminder-messages$/,
   // Berseba: Voz (the Bia's WhatsApp calls) sends each call's report SERVER-TO-SERVER, same rule:
   // Bearer `dsk_…` with `mcp:write`, checked inside the route (`lib/integrations/voz/auth.ts`).
   // "Ligar com a Bia" (`/api/v1/voz/calls`) is NOT here: it is the signed-in team's.

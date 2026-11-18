@@ -269,7 +269,7 @@ import {
   POR_QUE_DO_TURNO_CALADO,
   turnoCaladoPorVetoPedePassagem,
 } from './turno-calado-por-veto.berseba';
-import { FERRAMENTAS_DE_AGENDA_DO_AVEC } from '../guardrails/promise/evidencia-de-agenda.berseba';
+import { FERRAMENTAS_QUE_VIRAM_EVIDENCIA } from '../guardrails/promise/evidencia-de-agenda.berseba';
 import { CORRECAO_DO_TURNO_MUDO, PASSOS_DA_CORRECAO, turnoMudoPedeCorrecao } from './turno-mudo';
 import {
   desfechoSemCandidato,
@@ -1799,6 +1799,11 @@ export function inboundsNaoRespondidos(messages: readonly LeadContextMessage[]):
  */
 export interface AgentTurnInput {
   resolvedAgent?: TurnAgentResolution;
+  /**
+   * Berseba: when this turn becomes an assisted draft, this block goes into the draft's opening
+   * (a Mirae reminder briefing, `mirae-reminder-turn.berseba.ts`). Absent = unchanged.
+   */
+  aberturaDoRascunho?: string;
   /** número (channel_sessions.id do CRM) — chave da serialização anti-ban do envio. */
   channelSessionId: string;
   /** conversa do CRM — destino do send_message. */
@@ -2801,6 +2806,8 @@ async function executarTurnoDoAgente(
       channelId: input.channelSessionId,
       boundary: currentExecutionBoundary() ?? undefined,
       agent: agentConfig,
+      // Berseba: a Mirae reminder that lands on an assisted agent keeps its briefing.
+      ...(input.aberturaDoRascunho ? { aberturaExtra: input.aberturaDoRascunho } : {}),
     });
     if (job.kind === 'followup_turn') {
       // #1648 (3): o follow-up do assistido caía no `return` genérico de baixo
@@ -5774,9 +5781,9 @@ async function executarTurnoDoAgente(
               };
               continue;
             }
-            // Berseba: what avec answered is proof for the promise reviewer
+            // Berseba: what avec and Mirae answered is proof for the promise reviewer
             // (evidencia-de-agenda.berseba.ts). The result comes from the server.
-            if (FERRAMENTAS_DE_AGENDA_DO_AVEC.has(name) && typeof mcpTool.execute === 'function') {
+            if (FERRAMENTAS_QUE_VIRAM_EVIDENCIA.has(name) && typeof mcpTool.execute === 'function') {
               const executeOriginal = mcpTool.execute.bind(mcpTool);
               rawTools[name] = {
                 ...mcpTool,
@@ -7231,19 +7238,23 @@ export async function runAgentPreview(
           compromissosBlock,
           formatoDoHistorico,
         }) =>
-          buildOpeningMessage(
-            previous,
-            leadState,
-            context,
-            notesIndexBlock,
-            projeta,
-            entregues,
-            compromissosBlock,
-            undefined,
-            undefined,
-            '',
-            formatoDoHistorico,
-          ),
+          [
+            buildOpeningMessage(
+              previous,
+              leadState,
+              context,
+              notesIndexBlock,
+              projeta,
+              entregues,
+              compromissosBlock,
+              undefined,
+              undefined,
+              '',
+              formatoDoHistorico,
+            ),
+            // Berseba: the briefing of a Mirae reminder draft (`preview.aberturaExtra`).
+            ...(preview.aberturaExtra ? [preview.aberturaExtra] : []),
+          ].join('\n\n'),
       },
       preview,
     );

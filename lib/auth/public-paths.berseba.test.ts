@@ -106,7 +106,12 @@ describe("through the proxy", () => {
 });
 
 describe("the Mirae routes get past the proxy, and nothing next to them does", () => {
-  it.each(["/api/v1/mirae/leads", "/api/v1/mirae/pipelines", "/api/v1/mirae/milestones"])(
+  it.each([
+    "/api/v1/mirae/leads",
+    "/api/v1/mirae/pipelines",
+    "/api/v1/mirae/milestones",
+    "/api/v1/mirae/reminder-messages",
+  ])(
     "%s is public (Bearer checked in the route)",
     (path) => {
       expect(isPublicPath(path)).toBe(true);
@@ -121,12 +126,14 @@ describe("the Mirae routes get past the proxy, and nothing next to them does", (
     "/api/v1/mirae/pipelines/x",
     "/api/v1/mirae/milestones/",
     "/api/v1/mirae/milestones/x",
+    "/api/v1/mirae/reminder-messages/",
+    "/api/v1/mirae/reminder-messages/x",
     "/api/v1/mirae/contacts",
   ])("%s stays private", (path) => {
     expect(isPublicPath(path)).toBe(false);
   });
 
-  it("every route file under app/api/v1/mirae/ is one of the three", () => {
+  it("every route file under app/api/v1/mirae/ is one of the four", () => {
     const paths = (readdirSync("app/api/v1/mirae", { recursive: true }) as string[])
       .filter((rel) => rel.endsWith("route.ts"))
       .map((rel) => routePath(`app/api/v1/mirae/${rel.split("\\").join("/")}`))
@@ -135,6 +142,7 @@ describe("the Mirae routes get past the proxy, and nothing next to them does", (
       "/api/v1/mirae/leads",
       "/api/v1/mirae/milestones",
       "/api/v1/mirae/pipelines",
+      "/api/v1/mirae/reminder-messages",
     ]);
   });
 });

@@ -4,7 +4,7 @@
  * Não recebe histórico, notas do contato, prompt do agente ou argumentos de tool.
  */
 export interface EvidenciaComercial {
-  // Berseba: "agenda" = what avec told the server this turn (evidencia-de-agenda.berseba.ts).
+  // Berseba: "agenda" = what avec or Mirae told the server this turn (evidencia-de-agenda.berseba.ts).
   origem: "catalogo" | "conhecimento" | "agenda";
   referencia: string;
   titulo: string;
@@ -149,7 +149,7 @@ export function criarEvidenciasComerciaisDoTurno(fontesHabilitadas: readonly str
     }
   }
 
-  /** Berseba: only a successful avec agenda result, as the server returned it. */
+  /** Berseba: only a successful avec or Mirae agenda result, as the server returned it. */
   function registrarAgendamento(ferramenta: string, resultado: unknown) {
     for (const evidencia of evidenciasDaAgenda(ferramenta, resultado)) guardar(evidencia);
   }
