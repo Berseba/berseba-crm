@@ -40,7 +40,10 @@ export function appointmentStillScheduled(
   startAtIso: string,
 ): boolean {
   const at = Date.parse(startAtIso);
-  return appointments.some((a) => a.status === "scheduled" && Date.parse(a.starts_at) === at);
+  // `starts_at` is Mirae's JSON string, never a `pg` column; `new Date` reads either offset.
+  return appointments.some(
+    (a) => a.status === "scheduled" && new Date(a.starts_at).getTime() === at,
+  );
 }
 
 export interface PrecheckPorts {
