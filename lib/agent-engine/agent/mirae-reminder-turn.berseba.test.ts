@@ -202,6 +202,11 @@ describe("runMiraeReminderTurn", () => {
       });
       expect(p.runAgentTurn).not.toHaveBeenCalled();
       expect(p.generateReplyDraft).not.toHaveBeenCalled();
+      // Mirae was told the reminder is on its way: the team hears it did not go out.
+      expect(p.avisar).toHaveBeenCalledTimes(1);
+      expect((p.avisar.mock.calls[0] as unknown as [unknown, { motivo: string }])[1].motivo).toContain(
+        "não estava mais marcado",
+      );
     });
 
     it("confirmed → the turn runs, and the agent still reads the appointment (proof for the promise reviewer)", async () => {

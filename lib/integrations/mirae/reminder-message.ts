@@ -116,10 +116,70 @@ export function reminderDeliveryOf(settings: unknown): MiraeReminderDelivery {
 }
 
 /** Pure: Mirae's kind, or `manual` for anything this CRM does not know. */
+/**
+ * Mirae's own spelling (`connector.ts`, ADR-084: `evaluation` | `first_class`) and the long one
+ * this CRM names its kinds by. Both are accepted.
+ */
+const KIND_ALIASES: Record<string, MiraeReminderKind> = {
+  evaluation: "evaluation_confirmation",
+  first_class: "first_class_confirmation",
+};
+
 export function reminderKindOf(raw: string | undefined): MiraeReminderKind {
+  if (raw && raw in KIND_ALIASES) return KIND_ALIASES[raw]!;
   return (MIRAE_REMINDER_KINDS as readonly string[]).includes(raw ?? "")
     ? (raw as MiraeReminderKind)
     : "manual";
+}
+
+/** A return due after this instant does not compete with the reminder. */
+export const LIVE_RETURN_HORIZON_MS = 24 * 60 * 60_000;
+
+/**
+ * Pure: until when another return counts as "the person already gets a message". Up to the
+ * appointment, when known (a return due next week must not swallow tomorrow's confirmation),
+ * else the next 24 hours.
+ */
+export function liveReturnHorizon(appointmentStartAt: string | null | undefined, now: Date): Date {
+  const at = appointmentStartAt ? Date.parse(appointmentStartAt) : Number.NaN;
+  return Number.isNaN(at) ? new Date(now.getTime() + LIVE_RETURN_HORIZON_MS) : new Date(at);
+}
+
+/** The contact lock every reminder writer takes (endpoint and requeue). */
+export async function lockReminderContact(
+  db: Pick<pg.PoolClient, "query">,
+  orgId: string,
+  contactId: string,
+): Promise<void> {
+  await db.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
+    `mirae_reminder_contact:${orgId}:${contactId}`,
+  ]);
+}
+
+/**
+ * Another return due before `before`: live in `cron_jobs`, or a return turn queued (`run_after`
+ * before it, e.g. deferred to the send window) or running in `job_queue`.
+ */
+export async function hasLiveReturnBefore(
+  db: Pick<pg.PoolClient, "query">,
+  orgId: string,
+  contactId: string,
+  before: Date,
+): Promise<boolean> {
+  const { rows } = await db.query<{ live: boolean }>(
+    `select (
+       exists (select 1 from cron_jobs
+                where organization_id = $1 and contact_id = $2
+                  and kind = 'at' and job_kind = 'followup_turn' and enabled = true
+                  and next_run_at < $3)
+       or exists (select 1 from job_queue
+                   where organization_id = $1 and contact_id = $2
+                     and kind = 'followup_turn'
+                     and (status = 'running' or (status = 'pending' and run_after < $3)))
+     ) as live`,
+    [orgId, contactId, before],
+  );
+  return rows[0]?.live === true;
 }
 
 /** Pure: draft or automatic send for this reminder. */
@@ -164,8 +224,8 @@ export interface ReminderDbTx {
   ): Promise<{ id: string; channelSessionId: string } | null>;
   /** Serializes every reminder of this contact until the transaction ends. */
   lockContact(orgId: string, contactId: string): Promise<void>;
-  /** A live return (`cron_jobs`) or a return turn queued or running (`job_queue`). */
-  hasLiveReturn(orgId: string, contactId: string): Promise<boolean>;
+  /** Another return due before `before` (`hasLiveReturnBefore`). */
+  hasLiveReturn(orgId: string, contactId: string, before: Date): Promise<boolean>;
   /** A person handles this contact: `force_human`, "always human", internal tag, silenced bot. */
   humanInCharge(orgId: string, contactId: string): Promise<boolean>;
   beginService(orgId: string, contactId: string, channelSessionId: string): Promise<ServiceBoundary>;
@@ -220,7 +280,8 @@ export async function queueMiraeReminderMessage(
     // 4. The agent already promised to come back, or another reminder is on its way: one
     // message, not two. The contact lock makes two reminders with different keys see each other.
     await tx.lockContact(ctx.organizationId, contact.id);
-    if (await tx.hasLiveReturn(ctx.organizationId, contact.id)) {
+    const horizon = liveReturnHorizon(input.appointment_start_at, ctx.now);
+    if (await tx.hasLiveReturn(ctx.organizationId, contact.id, horizon)) {
       return { outcome: "already_handled", conversationId: conversation.id };
     }
 
@@ -372,26 +433,9 @@ function txOver(
       return row ? { id: row.id, channelSessionId: row.channel_session_id } : null;
     },
 
-    async lockContact(orgId, contactId) {
-      await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
-        `mirae_reminder_contact:${orgId}:${contactId}`,
-      ]);
-    },
+    lockContact: (orgId, contactId) => lockReminderContact(client, orgId, contactId),
 
-    async hasLiveReturn(orgId, contactId) {
-      const { rows } = await client.query(
-        `select (
-           exists (select 1 from cron_jobs
-                    where organization_id = $1 and contact_id = $2
-                      and kind = 'at' and job_kind = 'followup_turn' and enabled = true)
-           or exists (select 1 from job_queue
-                       where organization_id = $1 and contact_id = $2
-                         and kind = 'followup_turn' and status in ('pending', 'running'))
-         ) as live`,
-        [orgId, contactId],
-      );
-      return (rows[0] as { live?: boolean } | undefined)?.live === true;
-    },
+    hasLiveReturn: (orgId, contactId, before) => hasLiveReturnBefore(client, orgId, contactId, before),
 
     humanInCharge,
 

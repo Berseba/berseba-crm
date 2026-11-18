@@ -43,16 +43,18 @@ const BOUNDARY = {
   status: "open",
 };
 
-function fakePool(over: { done?: boolean } = {}) {
+function fakePool(over: { done?: boolean; live?: boolean } = {}) {
   const calls: Array<{ sql: string; params: unknown[] }> = [];
   const query = vi.fn(async (sql: string, params: unknown[] = []) => {
     calls.push({ sql, params });
     if (sql.includes("requeued_from")) return { rows: over.done ? [{}] : [] };
+    if (sql.includes("as live")) return { rows: [{ live: over.live === true }] };
     if (sql.includes("from conversations")) return { rows: [{ channel_session_id: "channel" }] };
     if (sql.includes("fn_service_begin")) return { rows: [{ b: BOUNDARY }] };
     return { rows: [] };
   });
-  return { pool: { query } as never, calls };
+  const client = { query, release: vi.fn() };
+  return { pool: { connect: vi.fn(async () => client) } as never, calls, client };
 }
 
 describe("requeueStaleMiraeReminder", () => {
@@ -73,6 +75,31 @@ describe("requeueStaleMiraeReminder", () => {
     });
     expect(insert.params[2]).not.toHaveProperty("service_boundary.status");
     expect(avisar).not.toHaveBeenCalled();
+  });
+
+  it("takes the contact lock and checks for another return before queuing, in one transaction", async () => {
+    const { pool, calls, client } = fakePool();
+    await requeueStaleMiraeReminder(pool, JOB as never, NOW, vi.fn());
+    const sqls = calls.map((c) => c.sql);
+    expect(sqls[0]).toBe("begin");
+    expect(sqls.at(-1)).toBe("commit");
+    const iLock = calls.findIndex((c) => c.params[0] === "mirae_reminder_contact:org:contact");
+    const iLive = sqls.findIndex((q) => q.includes("as live"));
+    const iInsert = sqls.findIndex((q) => q.includes("insert into cron_jobs"));
+    expect(iLock).toBeGreaterThan(0);
+    expect(iLive).toBeGreaterThan(iLock);
+    expect(iInsert).toBeGreaterThan(iLive);
+    // The horizon is the appointment.
+    expect(calls[iLive]!.params).toEqual(["org", "contact", new Date("2026-11-18T12:00:00.000Z")]);
+    expect(client.release).toHaveBeenCalled();
+  });
+
+  it("another return due before the appointment: not queued again, the team is told", async () => {
+    const { pool, calls } = fakePool({ live: true });
+    const avisar = vi.fn();
+    expect(await requeueStaleMiraeReminder(pool, JOB as never, NOW, avisar)).toBe("already_handled");
+    expect(calls.some((c) => c.sql.includes("insert"))).toBe(false);
+    expect(avisar).toHaveBeenCalledTimes(1);
   });
 
   it("is idempotent per discarded job", async () => {

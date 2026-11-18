@@ -11,8 +11,10 @@
  * conversation's CURRENT boundary (`fn_service_begin`) and queues the same reminder again, due
  * now. The turn still checks the appointment in Mirae and the conversation before writing.
  *
- * Bounded: at most `MAX_REQUEUES` times per reminder, and never for one already less than an hour
- * from the appointment; both end in a notice to the team. Idempotent per discarded job.
+ * The same rules as the endpoint, in one transaction: the contact lock, and no requeue when
+ * another return is due before the appointment (the person gets that one). Bounded: at most
+ * `MAX_REQUEUES` times per reminder, and never for one already less than an hour from the
+ * appointment. Every give-up ends in a notice to the team. Idempotent per discarded job.
  */
 import type pg from "pg";
 
@@ -25,18 +27,47 @@ import {
 import type { JobRow } from "@/lib/agent-engine/queue/queue";
 import { parseServiceBoundary } from "@/lib/atendimento/fronteira";
 
+import { hasLiveReturnBefore, liveReturnHorizon, lockReminderContact } from "./reminder-message";
+
 export const MAX_REQUEUES = 3;
 
-export type RequeueResult = "not_mirae" | "requeued" | "already_requeued" | "too_late" | "exhausted";
+export type RequeueResult =
+  | "not_mirae"
+  | "requeued"
+  | "already_requeued"
+  | "already_handled"
+  | "too_late"
+  | "exhausted";
 
 export async function requeueStaleMiraeReminder(
-  pool: Pick<pg.Pool, "query">,
+  pool: Pick<pg.Pool, "connect">,
   job: Pick<JobRow, "id" | "organization_id" | "contact_id" | "payload">,
   now: Date,
   avisar: typeof avisarLembreteQueNaoSaiu = avisarLembreteQueNaoSaiu,
 ): Promise<RequeueResult> {
-  const reminder = lembreteDoMirae(job.payload);
-  if (!reminder || !job.contact_id) return "not_mirae";
+  if (!lembreteDoMirae(job.payload) || !job.contact_id) return "not_mirae";
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
+    const result = await requeueInTx(client, job, now, avisar);
+    await client.query("commit");
+    return result;
+  } catch (err) {
+    await client.query("rollback").catch(() => undefined);
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function requeueInTx(
+  pool: Pick<pg.PoolClient, "query">,
+  job: Pick<JobRow, "id" | "organization_id" | "contact_id" | "payload">,
+  now: Date,
+  avisar: typeof avisarLembreteQueNaoSaiu,
+): Promise<RequeueResult> {
+  const reminder = lembreteDoMirae(job.payload)!;
+  const contactId = job.contact_id!;
   const orgId = job.organization_id;
   const conversationId =
     typeof job.payload.conversation_id === "string" ? job.payload.conversation_id : null;
@@ -45,7 +76,7 @@ export async function requeueStaleMiraeReminder(
     `select 1 from cron_jobs
       where organization_id = $1 and contact_id = $2 and payload->>'requeued_from' = $3
       limit 1`,
-    [orgId, job.contact_id, job.id],
+    [orgId, contactId, job.id],
   );
   if (done.length > 0) return "already_requeued";
 
@@ -69,6 +100,20 @@ export async function requeueStaleMiraeReminder(
     return "exhausted";
   }
 
+  // Same rule as the endpoint: one message, not two.
+  await lockReminderContact(pool, orgId, contactId);
+  if (
+    await hasLiveReturnBefore(pool, orgId, contactId, liveReturnHorizon(reminder.appointment_start_at, now))
+  ) {
+    await avisar(pool, {
+      tenantId: orgId,
+      conversationId,
+      reminder,
+      motivo: "A conversa mudou antes do envio, e outro retorno da assistente já vai falar com a pessoa antes do horário.",
+    });
+    return "already_handled";
+  }
+
   // The current boundary, on the same channel when the conversation still exists.
   const { rows: channel } = await pool.query<{ channel_session_id: string }>(
     "select channel_session_id from conversations where organization_id = $1 and id = $2",
@@ -76,7 +121,7 @@ export async function requeueStaleMiraeReminder(
   );
   const { rows } = await pool.query<{ b: unknown }>(
     "select public.fn_service_begin($1, $2, $3) as b",
-    [orgId, job.contact_id, channel[0]?.channel_session_id ?? null],
+    [orgId, contactId, channel[0]?.channel_session_id ?? null],
   );
   const b = parseServiceBoundary(rows[0]?.b);
   if (!b) throw new Error("mirae_reminder_service_boundary_invalid");
@@ -93,7 +138,7 @@ export async function requeueStaleMiraeReminder(
      values ($1, $2, 'at', 'followup_turn', $3, $4)`,
     [
       orgId,
-      job.contact_id,
+      contactId,
       {
         source: MIRAE_REMINDER_SOURCE,
         reason: job.payload.reason,

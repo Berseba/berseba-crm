@@ -14,6 +14,7 @@ import {
   queueMiraeReminderMessage,
   reminderDbPg,
   reminderDeliveryOf,
+  liveReturnHorizon,
   reminderKindOf,
   type ReminderDb,
   type ReminderDbTx,
@@ -51,12 +52,13 @@ function fakeDb(seed: {
   jobs?: Job[];
   humans?: string[];
   /** `job_queue` followup turns pending or running (e.g. deferred to the send window). */
-  queued?: Array<{ org: string; contactId: string }>;
+  queued?: Array<{ org: string; contactId: string; runAt: Date }>;
 }) {
   const jobs: Job[] = [...(seed.jobs ?? [])];
   const humanChecks: string[] = [];
   const locks: string[] = [];
-  const queued: Array<{ org: string; contactId: string }> = [...(seed.queued ?? [])];
+  const queued: Array<{ org: string; contactId: string; runAt: Date }> = [...(seed.queued ?? [])];
+  const horizons: Date[] = [];
   let n = 0;
   const tx: ReminderDbTx = {
     readSettings: async (org) => seed.settings?.[org] ?? null,
@@ -86,9 +88,13 @@ function fakeDb(seed: {
     lockContact: async (org, contactId) => {
       locks.push(`${org}:${contactId}`);
     },
-    hasLiveReturn: async (org, contactId) =>
-      jobs.some((j) => j.org === org && j.contactId === contactId && j.enabled) ||
-      queued.some((q) => q.org === org && q.contactId === contactId),
+    hasLiveReturn: async (org, contactId, before) => {
+      horizons.push(before);
+      return (
+        jobs.some((j) => j.org === org && j.contactId === contactId && j.enabled && j.runAt < before) ||
+        queued.some((q) => q.org === org && q.contactId === contactId && q.runAt < before)
+      );
+    },
     humanInCharge: async (_org, contactId) => {
       humanChecks.push(contactId);
       return (seed.humans ?? []).includes(contactId);
@@ -111,7 +117,7 @@ function fakeDb(seed: {
     },
   };
   const db: ReminderDb = { withKeyLock: (_org, _key, fn) => fn(tx) };
-  return { db, jobs, humanChecks, locks };
+  return { db, jobs, humanChecks, locks, horizons };
 }
 
 const STUDENT: Contact = { org: ORG_A, id: "contact-a", phone_number: "+5514996598955" };
@@ -152,6 +158,15 @@ describe("pure pieces", () => {
     expect(reminderKindOf(undefined)).toBe("manual");
     expect(reminderKindOf("birthday")).toBe("manual");
     expect(reminderKindOf("first_class_confirmation")).toBe("first_class_confirmation");
+    // Mirae's own spelling (connector.ts, ADR-084).
+    expect(reminderKindOf("evaluation")).toBe("evaluation_confirmation");
+    expect(reminderKindOf("first_class")).toBe("first_class_confirmation");
+  });
+
+  it("the live-return horizon is the appointment, else the next 24 hours", () => {
+    expect(liveReturnHorizon("2026-11-18T12:00:00.000Z", NOW)).toEqual(new Date("2026-11-18T12:00:00.000Z"));
+    expect(liveReturnHorizon(null, NOW)).toEqual(new Date("2026-11-18T12:00:00.000Z"));
+    expect(liveReturnHorizon(undefined, NOW).getTime() - NOW.getTime()).toBe(24 * 60 * 60_000);
   });
 
   it("only a confirmation with a time, with the setting on auto and nobody handling the person, is automatic", () => {
@@ -180,6 +195,63 @@ describe("pure pieces", () => {
     expect(
       miraeReminderMessageSchema.safeParse({ ...today, appointment_start_at: "amanhã" }).success,
     ).toBe(false);
+  });
+});
+
+describe("Mirae's exact body (mirae-local crm-connector.test.ts, ADR-084)", () => {
+  // reminderMessageBody({ ...INPUT, confirmation: { kind: "first_class", ... } }) as Mirae sends it.
+  const MIRAE_BODY = {
+    reminder_id: "rem_1",
+    delivery_key: "rem_1:2026-11-11T13:00:00.000Z",
+    phone: "(14) 99999-0000",
+    studentName: "Maria",
+    title: "Perguntar como foi a aula",
+    note: "Ela voltou de viagem",
+    as_of: "2026-11-11T14:00:00.000Z",
+    kind: "first_class",
+    appointment_start_at: "2026-11-12T13:00:00.000Z",
+    professional_first_name: "Raquel",
+  };
+  const MARIA: Contact = { org: ORG_A, id: "maria", phone_number: "+5514999990000" };
+  const CONV_MARIA: Conversation = { org: ORG_A, id: "conv-m", contactId: "maria", channelSessionId: "ch" };
+
+  it.each([
+    ["first_class", "first_class_confirmation"],
+    ["evaluation", "evaluation_confirmation"],
+  ])("kind %s passes the schema and is sent automatically as %s", async (kind, mapped) => {
+    const parsed = miraeReminderMessageSchema.safeParse({ ...MIRAE_BODY, kind });
+    expect(parsed.success).toBe(true);
+    const { db, jobs } = fakeDb({
+      settings: { [ORG_A]: { mirae_reminder_delivery: "auto" } },
+      contacts: [MARIA],
+      conversations: [CONV_MARIA],
+    });
+    const result = await queueMiraeReminderMessage(
+      db,
+      { organizationId: ORG_A, now: new Date("2026-11-11T14:00:05.000Z") },
+      parsed.data!,
+    );
+    expect(result).toMatchObject({ outcome: "scheduled", delivery: "auto", conversationId: "conv-m" });
+    expect(lembreteDoMirae(jobs[0]!.payload)).toMatchObject({
+      kind: mapped,
+      delivery: "auto",
+      appointment_start_at: "2026-11-12T13:00:00.000Z",
+      professional_first_name: "Raquel",
+      student_name: "Maria",
+      mirae_phone: "14999990000",
+    });
+    expect(followupTurnPayloadSchema.safeParse(jobs[0]!.payload).success).toBe(true);
+  });
+
+  it("Mirae's plain reminder (no confirmation fields) is a draft even on auto", async () => {
+    const { kind: _k, appointment_start_at: _a, professional_first_name: _p, ...plain } = MIRAE_BODY;
+    const { db } = fakeDb({
+      settings: { [ORG_A]: { mirae_reminder_delivery: "auto" } },
+      contacts: [MARIA],
+      conversations: [CONV_MARIA],
+    });
+    const parsed = miraeReminderMessageSchema.parse(plain);
+    expect((await queueMiraeReminderMessage(db, { organizationId: ORG_A, now: NOW }, parsed)).outcome).toBe("drafted");
   });
 });
 
@@ -405,7 +477,7 @@ describe("queueMiraeReminderMessage", () => {
     const { db, jobs, locks } = fakeDb({
       contacts: [STUDENT],
       conversations: [CONVERSATION],
-      queued: [{ org: ORG_A, contactId: "contact-a" }],
+      queued: [{ org: ORG_A, contactId: "contact-a", runAt: NOW }],
     });
     expect(await run(db)).toEqual({ outcome: "already_handled", conversationId: "conv-a" });
     expect(jobs).toEqual([]);
@@ -421,6 +493,42 @@ describe("queueMiraeReminderMessage", () => {
     expect(jobs).toHaveLength(1);
     // Both took the contact lock before looking for a live return.
     expect(locks).toEqual([`${ORG_A}:contact-a`, `${ORG_A}:contact-a`]);
+  });
+
+  it("a return due after the appointment (next week) does not swallow tomorrow's confirmation", async () => {
+    const nextWeek: Job = {
+      org: ORG_A,
+      id: "agent-return",
+      contactId: "contact-a",
+      enabled: true,
+      runAt: new Date("2026-11-24T12:00:00.000Z"),
+      payload: { reason: "reconfirmar o plano" },
+    };
+    const { db, jobs, horizons } = fakeDb({
+      contacts: [STUDENT],
+      conversations: [CONVERSATION],
+      jobs: [nextWeek],
+      queued: [{ org: ORG_A, contactId: "contact-a", runAt: new Date("2026-11-19T12:00:00.000Z") }],
+    });
+    expect((await run(db)).outcome).toBe("drafted");
+    expect(jobs).toHaveLength(2);
+    expect(horizons).toEqual([new Date("2026-11-18T12:00:00.000Z")]);
+  });
+
+  it("without an appointment time, a return within 24 hours counts and a later one does not", async () => {
+    const at = (iso: string): Job => ({
+      org: ORG_A,
+      id: iso,
+      contactId: "contact-a",
+      enabled: true,
+      runAt: new Date(iso),
+      payload: {},
+    });
+    const body = { ...BODY, kind: "manual", appointment_start_at: undefined };
+    const soon = fakeDb({ contacts: [STUDENT], conversations: [CONVERSATION], jobs: [at("2026-11-18T08:00:00.000Z")] });
+    expect((await run(soon.db, body)).outcome).toBe("already_handled");
+    const later = fakeDb({ contacts: [STUDENT], conversations: [CONVERSATION], jobs: [at("2026-11-19T08:00:00.000Z")] });
+    expect((await run(later.db, body)).outcome).toBe("drafted");
   });
 
   it("a return that already fired does not count as live", async () => {
@@ -546,7 +654,9 @@ describe("reminderDbPg (the SQL)", () => {
     const iLive = calls.findIndex((c) => c.sql.includes("from job_queue"));
     expect(iLock).toBeGreaterThan(-1);
     expect(iLive).toBeGreaterThan(iLock);
-    expect(calls[iLive]!.sql).toContain("status in ('pending', 'running')");
+    expect(calls[iLive]!.sql).toContain("next_run_at < $3");
+    expect(calls[iLive]!.sql).toContain("status = 'running' or (status = 'pending' and run_after < $3)");
+    expect(calls[iLive]!.params[2]).toEqual(new Date("2026-11-18T12:00:00.000Z"));
     expect(insert.params[3]).toEqual(NOW);
     // The boundary is stored as its identity, without status/timestamps.
     expect((insert.params[2] as { service_boundary: unknown }).service_boundary).toEqual({

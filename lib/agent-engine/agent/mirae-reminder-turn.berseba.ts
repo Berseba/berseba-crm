@@ -278,12 +278,12 @@ export function decisaoDoLembrete(
  * a notice in the Central, linked to the conversation (Portuguese: the team reads it).
  */
 export async function avisarLembreteQueNaoSaiu(
-  pool: Pick<pg.Pool, 'query'>,
+  pool: Pick<pg.Pool, 'query'> | Pick<pg.PoolClient, 'query'>,
   input: { tenantId: string; conversationId: string | null; reminder: MiraeReminderPayload; motivo: string },
 ): Promise<void> {
   const oQue = O_QUE_E[input.reminder.kind];
   await insertInboxItem(
-    pool,
+    pool as Pick<pg.Pool, 'query'>,
     input.tenantId,
     {
       kind: 'followup_dead',
@@ -350,6 +350,12 @@ export async function runMiraeReminderTurn(
   });
   if (decisao.kind === 'drop') {
     log.info('mirae reminder dropped: the appointment is no longer scheduled at that time');
+    await avisar(pool, {
+      tenantId: target.tenantId,
+      conversationId: target.conversationId,
+      reminder,
+      motivo: 'Na hora de enviar, o agendamento não estava mais marcado neste dia e hora no Mirae (cancelado ou remarcado).',
+    });
     return;
   }
   if (decisao.kind === 'retry') {
