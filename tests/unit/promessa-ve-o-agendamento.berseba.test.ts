@@ -181,8 +181,8 @@ describe("turnoCaladoPorVetoPedePassagem", () => {
 describe("turn wiring (source contract)", () => {
   const turno = readFileSync(join(process.cwd(), "lib/agent-engine/agent/inbound-turn.ts"), "utf8");
 
-  it("avec agenda results are registered as evidence after the server answers", () => {
-    const i = turno.indexOf("FERRAMENTAS_DE_AGENDA_DO_AVEC.has(name)");
+  it("avec and Mirae agenda results are registered as evidence after the server answers", () => {
+    const i = turno.indexOf("FERRAMENTAS_QUE_VIRAM_EVIDENCIA.has(name)");
     expect(i).toBeGreaterThan(-1);
     const bloco = turno.slice(i, i + 700);
     expect(bloco).toContain("const resultado = await executeOriginal(...args);");
