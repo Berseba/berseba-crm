@@ -12,8 +12,8 @@
  * Inline and not a dialog: the dossier is already a sheet, and a dialog on top
  * of a sheet hides the timeline the person is about to update.
  */
-import { useQueryClient } from "@tanstack/react-query";
-import { useId, useState } from "react";
+import { QueryClientContext } from "@tanstack/react-query";
+import { useContext, useId, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,9 @@ interface Props {
 
 export function RegisterTouch({ leadId, canRegister }: Props) {
   const t = useT();
-  const queryClient = useQueryClient();
+  // Optional, like SeletorDeAtendente: a dossier rendered without the query provider
+  // (tests, isolated screens) still registers the touch; it only skips the refresh.
+  const queryClient = useContext(QueryClientContext);
   const noteId = useId();
   const [open, setOpen] = useState(false);
   const [channel, setChannel] = useState<TouchChannel | null>(null);
@@ -65,7 +67,7 @@ export function RegisterTouch({ leadId, canRegister }: Props) {
         return;
       }
       toast.success(t("Toque registrado."));
-      await queryClient.invalidateQueries({ queryKey: ["timeline", leadId] });
+      await queryClient?.invalidateQueries({ queryKey: ["timeline", leadId] });
       close();
     } catch {
       toast.error(t("Não foi possível registrar o toque."));

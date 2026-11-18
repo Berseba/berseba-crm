@@ -50,6 +50,7 @@ export const DICIONARIO: Traducoes = {
   "Não foi possível registrar o toque.": { es: "No se pudo registrar el contacto." },
   "Escolha o canal do toque.": { es: "Elige el canal del contacto." },
   Telefonema: { es: "Llamada" },
+  LinkedIn: { es: "LinkedIn" },
   // Berseba: "Ligar com a Bia" (Voz) on the lead card and its route.
   "Ligar com a Bia": { es: "Llamar con Bia" },
   "Confirmar: a Bia liga agora": { es: "Confirmar: Bia llama ahora" },
