@@ -54,6 +54,7 @@ function ports(over: Record<string, unknown> = {}) {
     runAgentTurn: vi.fn(async () => undefined),
     generateReplyDraft: vi.fn(async () => ({ id: "draft-1", status: "pending" })),
     fuso: vi.fn(async () => "America/Sao_Paulo"),
+    checkAppointment: vi.fn(async () => "unknown" as const),
     ...over,
   };
 }
@@ -176,6 +177,48 @@ describe("runMiraeReminderTurn", () => {
     expect(opening).toContain("## Lembrete do estúdio (agenda Mirae)");
     expect(opening).toContain("send_message");
     expect(opening).toContain("Checkpoint anterior");
+  });
+
+  describe("the appointment is checked in Mirae right before the turn", () => {
+    const run = (p: ReturnType<typeof ports>, r: MiraeReminderPayload = REMINDER) =>
+      runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => NOW, TARGET, r, p as never);
+
+    it.each(["auto", "draft"] as const)("%s: gone (cancelled or moved) → nothing is sent nor drafted", async (delivery) => {
+      const p = ports({ checkAppointment: vi.fn(async () => "gone" as const) });
+      await run(p, { ...REMINDER, delivery });
+      expect(p.checkAppointment).toHaveBeenCalledWith({}, {
+        organizationId: "org",
+        contactId: "contact",
+        appointmentStartAt: "2026-11-18T12:00:00.000Z",
+      });
+      expect(p.runAgentTurn).not.toHaveBeenCalled();
+      expect(p.generateReplyDraft).not.toHaveBeenCalled();
+    });
+
+    it("confirmed → the turn runs and the briefing says it was checked", async () => {
+      const p = ports({ checkAppointment: vi.fn(async () => "confirmed" as const) });
+      await run(p);
+      const input = (p.runAgentTurn.mock.calls[0] as unknown as [unknown, unknown, unknown, unknown, Record<string, unknown>])[4];
+      expect(input.aberturaDoRascunho).toContain("acabou de conferir na agenda do estúdio");
+      expect(input.aberturaDoRascunho).not.toContain("chame mirae_my_appointments");
+    });
+
+    it("unknown (Mirae did not answer) → the turn runs and the agent must check first", async () => {
+      const p = ports();
+      await run(p);
+      const input = (p.runAgentTurn.mock.calls[0] as unknown as [unknown, unknown, unknown, unknown, Record<string, unknown>])[4];
+      expect(input.aberturaDoRascunho).toContain("ANTES de escrever, chame mirae_my_appointments");
+      expect(input.aberturaDoRascunho).toContain("se a ferramenta falhar");
+      expect(input.aberturaDoRascunho).toContain("feriado");
+    });
+
+    it("a manual reminder, or one without a time, is not checked", async () => {
+      const p = ports();
+      await run(p, { ...REMINDER, kind: "manual" });
+      await run(p, { ...REMINDER, appointment_start_at: null });
+      expect(p.checkAppointment).not.toHaveBeenCalled();
+      expect(p.runAgentTurn).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("too close to the appointment: nothing runs", async () => {

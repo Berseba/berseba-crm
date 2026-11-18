@@ -18,12 +18,18 @@
  * The briefing is data from the studio's team (title, note), never the message: the agent writes
  * its own short text, and sends nothing when the conversation shows the person already confirmed,
  * asked not to be contacted, or the appointment was cancelled or moved. A reminder that would
- * arrive less than an hour before the appointment is dropped.
+ * arrive less than an hour before the appointment is dropped, and so is a confirmation whose
+ * appointment Mirae no longer has as scheduled at that time (`reminder-precheck.ts`): Mirae
+ * cannot recall a reminder once the CRM queued it.
  */
 import type pg from 'pg';
 import { z } from 'zod';
 
 import type { ServiceBoundary } from '@/lib/atendimento/fronteira';
+import {
+  checkMiraeAppointment,
+  type AppointmentCheck,
+} from '@/lib/integrations/mirae/reminder-precheck';
 
 import { withFields } from '../obs/logger';
 import type { JobRow } from '../queue/queue';
@@ -111,7 +117,12 @@ const O_QUE_E: Record<MiraeReminderKind, string> = {
  * The briefing block (Portuguese: the agent speaks Portuguese). Same text for the automatic turn
  * and for the draft, so the reviewer of a draft sees what the agent was asked.
  */
-export function briefingDoLembrete(reminder: MiraeReminderPayload, fuso: string): string {
+export function briefingDoLembrete(
+  reminder: MiraeReminderPayload,
+  fuso: string,
+  /** What the pre-check read in Mirae right before the turn (`reminder-precheck.ts`). */
+  conferido: AppointmentCheck = 'unknown',
+): string {
   const quando = reminder.appointment_start_at
     ? quandoLegivel(reminder.appointment_start_at, fuso)
     : null;
@@ -125,8 +136,21 @@ export function briefingDoLembrete(reminder: MiraeReminderPayload, fuso: string)
   ].filter((l): l is string => l !== null);
 
   const confirmacao = CONFIRMATION_KINDS.has(reminder.kind);
+  // Mirae cannot recall a reminder: the appointment is checked again right before writing.
+  const conferencia =
+    conferido === 'confirmed'
+      ? [
+          '0. O sistema acabou de conferir na agenda do estúdio: este agendamento continua marcado neste dia e hora.',
+          '   Se você souber que o dia é feriado com o estúdio fechado, NÃO envie nada.',
+        ]
+      : [
+          '0. ANTES de escrever, chame mirae_my_appointments e confira que este agendamento continua marcado',
+          '   (status scheduled) neste mesmo dia e hora. NÃO envie nada se ele não aparecer, se aparecer',
+          '   cancelado ou em outro horário, se a ferramenta falhar, ou se o dia for feriado com o estúdio fechado.',
+        ];
   const comoAgir = confirmacao
     ? [
+        ...(reminder.appointment_start_at ? conferencia : []),
         '1. Releia a conversa. NÃO envie nada (encerre o turno sem send_message) se ela mostrar que:',
         '   - a pessoa já confirmou ESTE mesmo agendamento;',
         '   - a pessoa pediu para não receber mensagens;',
@@ -196,6 +220,10 @@ export interface MiraeReminderTurnPorts {
   runAgentTurn: typeof runAgentTurn;
   generateReplyDraft: typeof generateReplyDraft;
   fuso: (pool: pg.Pool, tenantId: string) => Promise<string>;
+  checkAppointment: (
+    pool: pg.Pool,
+    input: { organizationId: string; contactId: string; appointmentStartAt: string },
+  ) => Promise<AppointmentCheck>;
 }
 
 /** The two errors `generateReplyDraft` throws on purpose: no agent, or nobody to write to. */
@@ -229,8 +257,23 @@ export async function runMiraeReminderTurn(
     return;
   }
 
+  // A confirmation is checked in Mirae right before the turn: an appointment cancelled or moved
+  // since Mirae asked gets nothing, neither a send nor a draft.
+  let conferido: AppointmentCheck = 'unknown';
+  if (CONFIRMATION_KINDS.has(reminder.kind) && reminder.appointment_start_at) {
+    conferido = await (ports?.checkAppointment ?? checkMiraeAppointment)(pool, {
+      organizationId: target.tenantId,
+      contactId: target.leadId,
+      appointmentStartAt: reminder.appointment_start_at,
+    });
+    if (conferido === 'gone') {
+      log.info('mirae reminder dropped: the appointment is no longer scheduled at that time');
+      return;
+    }
+  }
+
   const fuso = await (ports?.fuso ?? ((p, t) => fusoDaOrganizacao(p, t, deps.log)))(pool, target.tenantId);
-  const briefing = briefingDoLembrete(reminder, fuso);
+  const briefing = briefingDoLembrete(reminder, fuso, conferido);
 
   if (reminder.delivery === 'draft') {
     const generate = ports?.generateReplyDraft ?? (await import('./reply-drafts')).generateReplyDraft;
