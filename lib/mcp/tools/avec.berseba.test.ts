@@ -430,6 +430,33 @@ describe("request shape", () => {
     expect(r).toEqual({ ok: true, appointment_id: APPOINTMENT.id, status: "cancelled" });
   });
 
+  it("avec_confirm confirms her whole day and answers it", async () => {
+    const second = { ...APPOINTMENT, id: "88123-2129318-447142-2026-10-23", service_id: "2129318" };
+    answer(200, {
+      data: [
+        { ...APPOINTMENT, status: "1.5", status_name: "Confirmado" },
+        { ...second, status: "1.5", status_name: "Confirmado" },
+      ],
+    });
+    const r = await run(tools.avecConfirm, { appointment_id: APPOINTMENT.id });
+    const call = calls[0]!;
+    expect(call.method).toBe("POST");
+    expect(call.url.pathname).toBe(`/v1/appointments/${APPOINTMENT.id}/confirm`);
+    expect(call.body).toEqual({ phone: "+5514999990001" });
+    expect(call.headers["Idempotency-Key"]).toMatch(/^avec:job-1:avec_confirm:[0-9a-f]{16}$/);
+    expect(r).toMatchObject({ ok: true, total: 2 });
+    expect(r.agendamentos).toEqual([
+      expect.objectContaining({ appointment_id: APPOINTMENT.id, status: "Confirmado" }),
+      expect.objectContaining({ appointment_id: second.id, status: "Confirmado" }),
+    ]);
+  });
+
+  it("avec_confirm not switched on yet goes to the team", async () => {
+    problem(501, "not_implemented");
+    const r = await run(tools.avecConfirm, { appointment_id: APPOINTMENT.id });
+    expect(r).toMatchObject({ ok: false });
+  });
+
   it("avec_reschedule returns the new appointment id", async () => {
     sameDay();
     answer(200, { ...APPOINTMENT, id: "88123-2129417-447142-2026-10-24", date: "2026-10-24" });
@@ -708,6 +735,7 @@ describe("registration", () => {
     "avec_free_slots",
     "avec_book",
     "avec_reschedule",
+    "avec_confirm",
     "avec_cancel",
   ];
 
@@ -721,7 +749,7 @@ describe("registration", () => {
   });
 
   it("the writes are declared in both write-scope tables and never enter by bundle", () => {
-    for (const name of ["avec_book", "avec_reschedule", "avec_cancel"]) {
+    for (const name of ["avec_book", "avec_reschedule", "avec_confirm", "avec_cancel"]) {
       expect(ESCOPO_DAS_ESCRITAS[name], name).toBeDefined();
       expect(ALVO_DE_FUNIL[name], name).toBe("sem_funil");
       expect(TOOL_CATALOG.find((t) => t.name === name)?.risco, name).toBe("critico");

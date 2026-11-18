@@ -58,6 +58,7 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   avec_book: { tokens: 252, motivo: BERSEBA },
   avec_reschedule: { tokens: 170, motivo: BERSEBA },
   avec_cancel: { tokens: 175, motivo: BERSEBA },
+  avec_confirm: { tokens: 136, motivo: BERSEBA },
   mirae_my_appointments: { tokens: 320, motivo: BERSEBA },
   mirae_services: { tokens: 127, motivo: BERSEBA },
   mirae_free_slots: { tokens: 387, motivo: BERSEBA },
@@ -171,9 +172,9 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   "schedule_followup (com negócio)": { tokens: 314, motivo: BASE },
 };
 
-// Berseba: upstream 29569 + 3055 of our avec/mirae tools + 2505 of the Atos tools (block at the
+// Berseba: upstream 29569 + 3219 of our avec/mirae tools + 2505 of the Atos tools (block at the
 // top of TETO).
-const TETO_TOTAL = 35157;
+const TETO_TOTAL = 35293;
 
 const VARIANTE = "schedule_followup (com negócio)";
 

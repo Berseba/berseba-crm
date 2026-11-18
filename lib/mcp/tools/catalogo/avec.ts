@@ -60,6 +60,16 @@ export const TOOLS_AVEC = declararTools([
     pacotes: ["atender"],
   },
   {
+    name: "avec_confirm",
+    category: "write",
+    rotulo: "Confirmar presença no avec",
+    explicacao:
+      "Marca como Confirmado, na agenda do salão, os horários do dia da cliente desta conversa, quando ela confirma que vem (como o botão Confirmar do avec).",
+    oQueToca: "Agenda do salão (avec)",
+    risco: "critico",
+    pacotes: ["atender"],
+  },
+  {
     name: "avec_cancel",
     category: "write",
     rotulo: "Cancelar horário no avec",

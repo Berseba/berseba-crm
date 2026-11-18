@@ -120,6 +120,7 @@ describe("evidenciasDaAgenda", () => {
     expect(evidenciasDaAgenda("avec_cancel", RESULTADO_DO_BOOK)).toEqual([]);
     expect([...FERRAMENTAS_DE_AGENDA_DO_AVEC].sort()).toEqual([
       "avec_book",
+      "avec_confirm",
       "avec_my_appointments",
       "avec_reschedule",
     ]);
