@@ -8,6 +8,12 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.18.0] — 2026-11-18
+
+### Adicionado
+
+- **Agenda avec: a assistente confirma a presença da cliente** Nova ferramenta `avec_confirm` para o salão Mayara Morales: quando a cliente responde que vem ("confirmo") à mensagem da véspera, a assistente marca como Confirmado, no avec, todos os horários dela naquele dia, como o botão "Confirmar" do avec fazia. A confirmação conta como prova de agenda, então o "Confirmado!" da assistente não é barrado como horário inventado. Só aparece para a organização do salão.
+
 ## [2.17.1] — 2026-11-17
 
 ### Corrigido
@@ -9658,7 +9664,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.17.1...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.18.0...HEAD
+[2.18.0]: https://github.com/berseba/berseba-crm/compare/v2.17.1...v2.18.0
 [2.17.1]: https://github.com/berseba/berseba-crm/compare/v2.17.0...v2.17.1
 [2.17.0]: https://github.com/berseba/berseba-crm/compare/v2.16.0...v2.17.0
 [2.16.0]: https://github.com/berseba/berseba-crm/compare/v2.15.0...v2.16.0
