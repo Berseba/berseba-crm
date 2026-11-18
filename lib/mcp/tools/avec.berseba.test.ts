@@ -749,15 +749,11 @@ describe("registration", () => {
   });
 
   it("the writes are declared in both write-scope tables and never enter by bundle", () => {
-    for (const name of ["avec_book", "avec_reschedule", "avec_cancel"]) {
+    for (const name of ["avec_book", "avec_reschedule", "avec_confirm", "avec_cancel"]) {
       expect(ESCOPO_DAS_ESCRITAS[name], name).toBeDefined();
       expect(ALVO_DE_FUNIL[name], name).toBe("sem_funil");
       expect(TOOL_CATALOG.find((t) => t.name === name)?.risco, name).toBe("critico");
     }
-    // Confirming changes only the status the client herself asked for.
-    expect(ESCOPO_DAS_ESCRITAS.avec_confirm).toBeDefined();
-    expect(ALVO_DE_FUNIL.avec_confirm).toBe("sem_funil");
-    expect(TOOL_CATALOG.find((t) => t.name === "avec_confirm")?.risco).toBe("atencao");
   });
 
   it("the agent turn offers them only to the enabled organization", () => {

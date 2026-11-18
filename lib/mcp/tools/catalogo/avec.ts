@@ -66,7 +66,7 @@ export const TOOLS_AVEC = declararTools([
     explicacao:
       "Marca como Confirmado, na agenda do salão, os horários do dia da cliente desta conversa, quando ela confirma que vem (como o botão Confirmar do avec).",
     oQueToca: "Agenda do salão (avec)",
-    risco: "atencao",
+    risco: "critico",
     pacotes: ["atender"],
   },
   {
