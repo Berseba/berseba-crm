@@ -53,7 +53,7 @@ describe("checkMiraeAppointment", () => {
 
   it("still scheduled at that time → confirmed; reads the contact's phone of this organization, that day", async () => {
     const db = pool();
-    const list = vi.fn(async () => ({ person: null, data: [appt()] }));
+    const list = vi.fn(async () => ({ person: { first_name: "Ana", stage: "lead" }, data: [appt()] }));
     expect(await checkMiraeAppointment(db as never, input, { configFor: () => CONFIG, list })).toBe("confirmed");
     expect(db.query.mock.calls[0]).toEqual([
       "select phone_number from contacts where organization_id = $1 and id = $2",
@@ -67,11 +67,11 @@ describe("checkMiraeAppointment", () => {
     ["moved to another time", [appt({ starts_at: "2026-11-18T15:00:00-03:00" })]],
     ["gone", []],
   ])("%s → gone", async (_label, data) => {
-    const list = vi.fn(async () => ({ person: null, data }));
+    const list = vi.fn(async () => ({ person: { first_name: "Ana", stage: "lead" }, data }));
     expect(await checkMiraeAppointment(pool() as never, input, { configFor: () => CONFIG, list })).toBe("gone");
   });
 
-  it("no Mirae for this organization, no phone, a bad time or Mirae not answering → unknown", async () => {
+  it("no Mirae for this organization, no phone or a bad time → unknown, without calling Mirae", async () => {
     const list = vi.fn(async () => ({ person: null, data: [appt()] }));
     expect(await checkMiraeAppointment(pool() as never, input, { configFor: () => null, list })).toBe("unknown");
     expect(await checkMiraeAppointment(pool(null) as never, input, { configFor: () => CONFIG, list })).toBe("unknown");
@@ -79,9 +79,35 @@ describe("checkMiraeAppointment", () => {
       await checkMiraeAppointment(pool() as never, { ...input, appointmentStartAt: "x" }, { configFor: () => CONFIG, list }),
     ).toBe("unknown");
     expect(list).not.toHaveBeenCalled();
+  });
+
+  it("Mirae not answering → unavailable (the turn retries, then drafts)", async () => {
     const down = vi.fn(async () => {
       throw new Error("timeout");
     });
-    expect(await checkMiraeAppointment(pool() as never, input, { configFor: () => CONFIG, list: down })).toBe("unknown");
+    expect(await checkMiraeAppointment(pool() as never, input, { configFor: () => CONFIG, list: down })).toBe(
+      "unavailable",
+    );
+  });
+
+  it("Mirae does not know the person by the CRM phone: tries the phone Mirae sent", async () => {
+    const list = vi.fn(async (_c: unknown, q: { phone: string }) =>
+      q.phone === "14996598955" ? { person: { first_name: "Ana", stage: "lead" }, data: [appt()] } : { person: null, data: [] },
+    );
+    expect(
+      await checkMiraeAppointment(pool("+551496598955") as never, { ...input, miraePhone: "14996598955" }, {
+        configFor: () => CONFIG,
+        list: list as never,
+      }),
+    ).toBe("confirmed");
+    expect(list.mock.calls.map((c) => (c[1] as { phone: string }).phone)).toEqual(["551496598955", "14996598955"]);
+  });
+
+  it("a person Mirae does not know is unknown, never gone", async () => {
+    const list = vi.fn(async () => ({ person: null, data: [] }));
+    expect(
+      await checkMiraeAppointment(pool() as never, { ...input, miraePhone: "14996598955" }, { configFor: () => CONFIG, list }),
+    ).toBe("unknown");
+    expect(list).toHaveBeenCalledTimes(2);
   });
 });

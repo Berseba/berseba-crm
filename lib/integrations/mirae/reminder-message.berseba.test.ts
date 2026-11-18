@@ -5,6 +5,7 @@
  */
 import { describe, expect, it, vi } from "vitest";
 
+import { followupTurnPayloadSchema } from "@/lib/agent-engine/agent/followup-turn";
 import { lembreteDoMirae } from "@/lib/agent-engine/agent/mirae-reminder-turn.berseba";
 
 import {
@@ -49,9 +50,13 @@ function fakeDb(seed: {
   conversations?: Conversation[];
   jobs?: Job[];
   humans?: string[];
+  /** `job_queue` followup turns pending or running (e.g. deferred to the send window). */
+  queued?: Array<{ org: string; contactId: string }>;
 }) {
   const jobs: Job[] = [...(seed.jobs ?? [])];
   const humanChecks: string[] = [];
+  const locks: string[] = [];
+  const queued: Array<{ org: string; contactId: string }> = [...(seed.queued ?? [])];
   let n = 0;
   const tx: ReminderDbTx = {
     readSettings: async (org) => seed.settings?.[org] ?? null,
@@ -78,8 +83,12 @@ function fakeDb(seed: {
       const c = (seed.conversations ?? []).find((x) => x.org === org && x.contactId === contactId);
       return c ? { id: c.id, channelSessionId: c.channelSessionId } : null;
     },
+    lockContact: async (org, contactId) => {
+      locks.push(`${org}:${contactId}`);
+    },
     hasLiveReturn: async (org, contactId) =>
-      jobs.some((j) => j.org === org && j.contactId === contactId && j.enabled),
+      jobs.some((j) => j.org === org && j.contactId === contactId && j.enabled) ||
+      queued.some((q) => q.org === org && q.contactId === contactId),
     humanInCharge: async (_org, contactId) => {
       humanChecks.push(contactId);
       return (seed.humans ?? []).includes(contactId);
@@ -102,7 +111,7 @@ function fakeDb(seed: {
     },
   };
   const db: ReminderDb = { withKeyLock: (_org, _key, fn) => fn(tx) };
-  return { db, jobs, humanChecks };
+  return { db, jobs, humanChecks, locks };
 }
 
 const STUDENT: Contact = { org: ORG_A, id: "contact-a", phone_number: "+5514996598955" };
@@ -145,12 +154,13 @@ describe("pure pieces", () => {
     expect(reminderKindOf("first_class_confirmation")).toBe("first_class_confirmation");
   });
 
-  it("only a confirmation, with the setting on auto and nobody handling the person, is automatic", () => {
-    expect(deliveryFor("auto", "evaluation_confirmation", false)).toBe("auto");
-    expect(deliveryFor("auto", "first_class_confirmation", false)).toBe("auto");
-    expect(deliveryFor("auto", "manual", false)).toBe("draft");
-    expect(deliveryFor("auto", "evaluation_confirmation", true)).toBe("draft");
-    expect(deliveryFor("draft", "evaluation_confirmation", false)).toBe("draft");
+  it("only a confirmation with a time, with the setting on auto and nobody handling the person, is automatic", () => {
+    expect(deliveryFor("auto", "evaluation_confirmation", false, true)).toBe("auto");
+    expect(deliveryFor("auto", "first_class_confirmation", false, true)).toBe("auto");
+    expect(deliveryFor("auto", "manual", false, true)).toBe("draft");
+    expect(deliveryFor("auto", "evaluation_confirmation", true, true)).toBe("draft");
+    expect(deliveryFor("auto", "evaluation_confirmation", false, false)).toBe("draft");
+    expect(deliveryFor("draft", "evaluation_confirmation", false, true)).toBe("draft");
   });
 
   it("the body accepts what Mirae sends today, and extra fields", () => {
@@ -194,6 +204,9 @@ describe("queueMiraeReminderMessage", () => {
     });
     // No `purpose`: the turn path treats it as a return that talks to the person (send window).
     expect(job.payload).not.toHaveProperty("purpose");
+    // The worker's payload schema accepts it (a `promise: null` made every job die at parse).
+    expect(job.payload).not.toHaveProperty("promise");
+    expect(followupTurnPayloadSchema.safeParse(job.payload).success).toBe(true);
     expect(job.payload).not.toHaveProperty("followup_enrollment_id");
     // The worker reads back exactly what the endpoint wrote.
     expect(lembreteDoMirae(job.payload)).toEqual({
@@ -206,6 +219,7 @@ describe("queueMiraeReminderMessage", () => {
       student_name: "Ana",
       appointment_start_at: "2026-11-18T12:00:00.000Z",
       professional_first_name: "Raquel",
+      mirae_phone: "14996598955",
     });
   });
 
@@ -232,6 +246,16 @@ describe("queueMiraeReminderMessage", () => {
       conversations: [CONVERSATION],
     });
     expect((await run(db, { ...BODY, kind })).outcome).toBe(outcome);
+  });
+
+  it("auto: a confirmation without appointment_start_at is a draft (nothing to check in Mirae)", async () => {
+    const { db, humanChecks } = fakeDb({
+      settings: { [ORG_A]: { mirae_reminder_delivery: "auto" } },
+      contacts: [STUDENT],
+      conversations: [CONVERSATION],
+    });
+    expect((await run(db, { ...BODY, appointment_start_at: undefined })).outcome).toBe("drafted");
+    expect(humanChecks).toEqual([]);
   });
 
   it("auto: a person handling the contact (force_human, always human…) gets a draft instead", async () => {
@@ -377,6 +401,28 @@ describe("queueMiraeReminderMessage", () => {
     }
   });
 
+  it("a return turn already queued or running (deferred to the window): already_handled", async () => {
+    const { db, jobs, locks } = fakeDb({
+      contacts: [STUDENT],
+      conversations: [CONVERSATION],
+      queued: [{ org: ORG_A, contactId: "contact-a" }],
+    });
+    expect(await run(db)).toEqual({ outcome: "already_handled", conversationId: "conv-a" });
+    expect(jobs).toEqual([]);
+    expect(locks).toEqual([`${ORG_A}:contact-a`]);
+  });
+
+  it("two reminders with different keys for one person: the second is already_handled", async () => {
+    const { db, jobs, locks } = fakeDb({ contacts: [STUDENT], conversations: [CONVERSATION] });
+    expect((await run(db)).outcome).toBe("drafted");
+    expect((await run(db, { ...BODY, delivery_key: "rem-2:x", reminder_id: "rem-2" })).outcome).toBe(
+      "already_handled",
+    );
+    expect(jobs).toHaveLength(1);
+    // Both took the contact lock before looking for a live return.
+    expect(locks).toEqual([`${ORG_A}:contact-a`, `${ORG_A}:contact-a`]);
+  });
+
   it("a return that already fired does not count as live", async () => {
     const fired: Job = {
       org: ORG_A,
@@ -495,6 +541,12 @@ describe("reminderDbPg (the SQL)", () => {
     }
     const insert = calls.find((c) => c.sql.includes("insert into cron_jobs"))!;
     expect(insert.sql).toContain("'at', 'followup_turn'");
+    // The contact lock comes before the live-return check, which also reads the job queue.
+    const iLock = calls.findIndex((c) => c.params[0] === `mirae_reminder_contact:${ORG_A}:contact-a`);
+    const iLive = calls.findIndex((c) => c.sql.includes("from job_queue"));
+    expect(iLock).toBeGreaterThan(-1);
+    expect(iLive).toBeGreaterThan(iLock);
+    expect(calls[iLive]!.sql).toContain("status in ('pending', 'running')");
     expect(insert.params[3]).toEqual(NOW);
     // The boundary is stored as its identity, without status/timestamps.
     expect((insert.params[2] as { service_boundary: unknown }).service_boundary).toEqual({

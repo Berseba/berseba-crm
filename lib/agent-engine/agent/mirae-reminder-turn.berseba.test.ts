@@ -10,7 +10,10 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  avisarLembreteQueNaoSaiu,
   briefingDoLembrete,
+  decisaoDoLembrete,
+  MiraeUnavailableError,
   chegaTardeDemais,
   lembreteDoMirae,
   quandoLegivel,
@@ -47,14 +50,16 @@ const TARGET = {
 const NOW = new Date("2026-11-17T12:00:00.000Z");
 const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
 const deps = { log } as never;
-const job = { id: "job-1", organization_id: "org", contact_id: "contact", kind: "followup_turn", payload: {} } as never;
+const JOB = { id: "job-1", organization_id: "org", contact_id: "contact", kind: "followup_turn", payload: {}, attempts: 1, max_attempts: 5 };
+const job = JOB as never;
 
 function ports(over: Record<string, unknown> = {}) {
   return {
     runAgentTurn: vi.fn(async () => undefined),
     generateReplyDraft: vi.fn(async () => ({ id: "draft-1", status: "pending" })),
     fuso: vi.fn(async () => "America/Sao_Paulo"),
-    checkAppointment: vi.fn(async () => "unknown" as const),
+    checkAppointment: vi.fn(async (): Promise<"confirmed" | "gone" | "unknown" | "unavailable"> => "confirmed"),
+    avisar: vi.fn(async () => undefined),
     ...over,
   };
 }
@@ -151,6 +156,7 @@ describe("runMiraeReminderTurn", () => {
       await expect(
         runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => NOW, TARGET, { ...REMINDER, delivery: "draft" }, p as never),
       ).resolves.toBeUndefined();
+      expect(p.avisar).toHaveBeenCalledTimes(1);
     }
     const p = ports({ generateReplyDraft: vi.fn(async () => { throw new Error("db down"); }) });
     await expect(
@@ -180,36 +186,55 @@ describe("runMiraeReminderTurn", () => {
   });
 
   describe("the appointment is checked in Mirae right before the turn", () => {
-    const run = (p: ReturnType<typeof ports>, r: MiraeReminderPayload = REMINDER) =>
-      runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => NOW, TARGET, r, p as never);
+    const run = (p: ReturnType<typeof ports>, r: MiraeReminderPayload = REMINDER, j: unknown = job) =>
+      runMiraeReminderTurn(deps, j as never, {} as never, { workerId: "w" }, () => NOW, TARGET, r, p as never);
+    const turnInput = (p: ReturnType<typeof ports>) =>
+      (p.runAgentTurn.mock.calls[0] as unknown as [unknown, unknown, unknown, unknown, Record<string, unknown>])[4];
 
     it.each(["auto", "draft"] as const)("%s: gone (cancelled or moved) → nothing is sent nor drafted", async (delivery) => {
       const p = ports({ checkAppointment: vi.fn(async () => "gone" as const) });
-      await run(p, { ...REMINDER, delivery });
+      await run(p, { ...REMINDER, delivery, mirae_phone: "14996598955" });
       expect(p.checkAppointment).toHaveBeenCalledWith({}, {
         organizationId: "org",
         contactId: "contact",
         appointmentStartAt: "2026-11-18T12:00:00.000Z",
+        miraePhone: "14996598955",
       });
       expect(p.runAgentTurn).not.toHaveBeenCalled();
       expect(p.generateReplyDraft).not.toHaveBeenCalled();
     });
 
-    it("confirmed → the turn runs and the briefing says it was checked", async () => {
-      const p = ports({ checkAppointment: vi.fn(async () => "confirmed" as const) });
-      await run(p);
-      const input = (p.runAgentTurn.mock.calls[0] as unknown as [unknown, unknown, unknown, unknown, Record<string, unknown>])[4];
-      expect(input.aberturaDoRascunho).toContain("acabou de conferir na agenda do estúdio");
-      expect(input.aberturaDoRascunho).not.toContain("chame mirae_my_appointments");
-    });
-
-    it("unknown (Mirae did not answer) → the turn runs and the agent must check first", async () => {
+    it("confirmed → the turn runs, and the agent still reads the appointment (proof for the promise reviewer)", async () => {
       const p = ports();
       await run(p);
-      const input = (p.runAgentTurn.mock.calls[0] as unknown as [unknown, unknown, unknown, unknown, Record<string, unknown>])[4];
+      const input = turnInput(p);
+      expect(input.aberturaDoRascunho).toContain("acabou de conferir na agenda do estúdio");
       expect(input.aberturaDoRascunho).toContain("ANTES de escrever, chame mirae_my_appointments");
-      expect(input.aberturaDoRascunho).toContain("se a ferramenta falhar");
+      expect(input.aberturaDoRascunho).toContain("se a ferramenta");
       expect(input.aberturaDoRascunho).toContain("feriado");
+    });
+
+    it("auto, Mirae unavailable: retried while tries are left, then a draft", async () => {
+      const p = ports({ checkAppointment: vi.fn(async () => "unavailable" as const) });
+      await expect(run(p, REMINDER, { ...JOB, attempts: 1 })).rejects.toBeInstanceOf(MiraeUnavailableError);
+      await expect(run(p, REMINDER, { ...JOB, attempts: 2 })).rejects.toBeInstanceOf(MiraeUnavailableError);
+      expect(p.runAgentTurn).not.toHaveBeenCalled();
+      await run(p, REMINDER, { ...JOB, attempts: 3 });
+      expect(p.runAgentTurn).not.toHaveBeenCalled();
+      expect(p.generateReplyDraft).toHaveBeenCalledTimes(1);
+    });
+
+    it("auto, Mirae does not know the person (unknown): a draft right away", async () => {
+      const p = ports({ checkAppointment: vi.fn(async () => "unknown" as const) });
+      await run(p);
+      expect(p.runAgentTurn).not.toHaveBeenCalled();
+      expect(p.generateReplyDraft).toHaveBeenCalledTimes(1);
+    });
+
+    it("draft, Mirae unavailable: drafted anyway (a person reviews it)", async () => {
+      const p = ports({ checkAppointment: vi.fn(async () => "unavailable" as const) });
+      await run(p, { ...REMINDER, delivery: "draft" });
+      expect(p.generateReplyDraft).toHaveBeenCalledTimes(1);
     });
 
     it("a manual reminder, or one without a time, is not checked", async () => {
@@ -217,15 +242,47 @@ describe("runMiraeReminderTurn", () => {
       await run(p, { ...REMINDER, kind: "manual" });
       await run(p, { ...REMINDER, appointment_start_at: null });
       expect(p.checkAppointment).not.toHaveBeenCalled();
-      expect(p.runAgentTurn).toHaveBeenCalledTimes(2);
     });
   });
 
-  it("too close to the appointment: nothing runs", async () => {
+  describe("decisaoDoLembrete", () => {
+    const t = (attempts: number, maxAttempts = 5) => ({ attempts, maxAttempts });
+    it("covers every answer", () => {
+      expect(decisaoDoLembrete({ delivery: "auto" }, "gone", t(1))).toEqual({ kind: "drop" });
+      expect(decisaoDoLembrete({ delivery: "draft" }, "gone", t(1))).toEqual({ kind: "drop" });
+      expect(decisaoDoLembrete({ delivery: "auto" }, "confirmed", t(1))).toEqual({ kind: "run", delivery: "auto" });
+      expect(decisaoDoLembrete({ delivery: "auto" }, "unknown", t(1))).toEqual({ kind: "run", delivery: "draft" });
+      expect(decisaoDoLembrete({ delivery: "auto" }, "unavailable", t(2))).toEqual({ kind: "retry" });
+      expect(decisaoDoLembrete({ delivery: "auto" }, "unavailable", t(3))).toEqual({ kind: "run", delivery: "draft" });
+      // A queue with fewer tries than ours never lets the job die waiting for Mirae.
+      expect(decisaoDoLembrete({ delivery: "auto" }, "unavailable", t(2, 2))).toEqual({ kind: "run", delivery: "draft" });
+      expect(decisaoDoLembrete({ delivery: "draft" }, "unavailable", t(1))).toEqual({ kind: "run", delivery: "draft" });
+    });
+  });
+
+  it("too close to the appointment: nothing runs, and the team is told", async () => {
     const p = ports();
     await runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => new Date("2026-11-18T11:30:00.000Z"), TARGET, REMINDER, p as never);
     expect(p.runAgentTurn).not.toHaveBeenCalled();
     expect(p.generateReplyDraft).not.toHaveBeenCalled();
+    expect(p.avisar).toHaveBeenCalledTimes(1);
+    expect((p.avisar.mock.calls[0] as unknown as [unknown, Record<string, unknown>])[1]).toMatchObject({
+      tenantId: "org",
+      conversationId: "conv",
+    });
+  });
+
+  it("the notice goes to the Central, linked to the conversation", async () => {
+    const query = vi.fn(async () => ({ rows: [{ id: "item" }] }));
+    await avisarLembreteQueNaoSaiu({ query } as never, {
+      tenantId: "org",
+      conversationId: "conv",
+      reminder: REMINDER,
+      motivo: "Motivo.",
+    });
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toContain("agent_inbox_items");
+    expect(params).toEqual(expect.arrayContaining(["org", "followup_dead", "conversation", "conv"]));
   });
 });
 

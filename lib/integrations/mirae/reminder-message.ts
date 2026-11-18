@@ -4,14 +4,15 @@
  * In Mirae every manual follow-up is a reminder on the agenda. A "WhatsApp message" reminder, and
  * the confirmations Mirae sends about a day before an initial evaluation or a first class, call
  * `POST /api/v1/mirae/reminder-messages` from a queue with retries. The CRM never writes a fixed
- * text: the studio runs WhatsApp by QR (WAHA), with no template, and the same text to many people
+ * text: the studio's WhatsApp number is connected by QR, with no template, and the same text to many people
  * trips the spinning guard. The text is written by the published agent from the briefing.
  *
  * How it is delivered is the organization's choice, in the CRM (`organizations.settings
  * .mirae_reminder_delivery`), never Mirae's:
  *
  *  - `draft` (default): an agent draft in the conversation, approved by a person in the inbox;
- *  - `auto`: the confirmations (`evaluation_confirmation`, `first_class_confirmation`) are sent
+ *  - `auto`: the confirmations (`evaluation_confirmation`, `first_class_confirmation`) with a valid
+ *    `appointment_start_at` are sent
  *    by the agent's normal turn, through the whole send gate (window, pacing, spinning, opt-out,
  *    handoff). A `manual` reminder, or a contact a person is handling (`force_human`, "always
  *    human", internal contact, silenced conversation), still becomes a draft;
@@ -28,8 +29,9 @@
  *  2. contact by phone (both spellings of the 9th digit); none, anonymized or merged, or no 1:1
  *     conversation → `contact_not_found`;
  *  3. `contacts.is_blocked` → `contact_blocked`;
- *  4. a live scheduled return of the agent for this contact → `already_handled`, so the person
- *     never gets two messages;
+ *  4. under a second lock on (organization, contact), a live scheduled return for this contact
+ *     (`cron_jobs`) or a return turn already queued or running (`job_queue`, e.g. one deferred to
+ *     the next send window) → `already_handled`, so the person never gets two messages;
  *  5. queue the turn → `drafted` or `scheduled`.
  *
  * Logs carry ids and outcomes only, never the phone or the briefing.
@@ -125,8 +127,12 @@ export function deliveryFor(
   setting: Exclude<MiraeReminderDelivery, "off">,
   kind: MiraeReminderKind,
   humanInCharge: boolean,
+  /** The appointment time is known: without it nothing can be checked in Mirae before sending. */
+  hasAppointmentTime: boolean,
 ): "draft" | "auto" {
-  return setting === "auto" && CONFIRMATION_KINDS.has(kind) && !humanInCharge ? "auto" : "draft";
+  return setting === "auto" && CONFIRMATION_KINDS.has(kind) && hasAppointmentTime && !humanInCharge
+    ? "auto"
+    : "draft";
 }
 
 export function deliveryKeyOf(input: Pick<MiraeReminderMessageInput, "delivery_key" | "reminder_id">): string {
@@ -156,6 +162,9 @@ export interface ReminderDbTx {
     orgId: string,
     contactId: string,
   ): Promise<{ id: string; channelSessionId: string } | null>;
+  /** Serializes every reminder of this contact until the transaction ends. */
+  lockContact(orgId: string, contactId: string): Promise<void>;
+  /** A live return (`cron_jobs`) or a return turn queued or running (`job_queue`). */
   hasLiveReturn(orgId: string, contactId: string): Promise<boolean>;
   /** A person handles this contact: `force_human`, "always human", internal tag, silenced bot. */
   humanInCharge(orgId: string, contactId: string): Promise<boolean>;
@@ -208,19 +217,23 @@ export async function queueMiraeReminderMessage(
     // 3. Opt-out wins over everything that follows.
     if (contact.is_blocked) return { outcome: "contact_blocked", conversationId: conversation.id };
 
-    // 4. The agent already promised to come back: one message, not two.
+    // 4. The agent already promised to come back, or another reminder is on its way: one
+    // message, not two. The contact lock makes two reminders with different keys see each other.
+    await tx.lockContact(ctx.organizationId, contact.id);
     if (await tx.hasLiveReturn(ctx.organizationId, contact.id)) {
       return { outcome: "already_handled", conversationId: conversation.id };
     }
 
     // 5. Queue the turn.
     const kind = reminderKindOf(input.kind);
+    const hasTime = Boolean(input.appointment_start_at);
     const delivery = deliveryFor(
       setting,
       kind,
-      setting === "auto" && CONFIRMATION_KINDS.has(kind)
+      setting === "auto" && CONFIRMATION_KINDS.has(kind) && hasTime
         ? await tx.humanInCharge(ctx.organizationId, contact.id)
         : false,
+      hasTime,
     );
     const boundary = await tx.beginService(ctx.organizationId, contact.id, conversation.channelSessionId);
     const reminder: MiraeReminderPayload = {
@@ -231,6 +244,9 @@ export async function queueMiraeReminderMessage(
       title: input.title,
       note: input.note ?? null,
       student_name: input.studentName || null,
+      // The phone as Mirae has it: the pre-check retries with it when the CRM's spelling finds
+      // nobody in Mirae (9th digit).
+      mirae_phone: input.phone.replace(/\D/g, "") || null,
       appointment_start_at: input.appointment_start_at ?? null,
       professional_first_name: input.professional_first_name ?? null,
     };
@@ -241,7 +257,7 @@ export async function queueMiraeReminderMessage(
         source: MIRAE_REMINDER_SOURCE,
         // `reason` is what the follow-up queue and the timeline show for a return.
         reason: `Lembrete do Mirae: ${input.title}`.slice(0, 500),
-        promise: null,
+        // No `promise` key: the turn's payload schema reads it as an optional string, never null.
         promised_at: ctx.now.toISOString(),
         mirae_reminder: reminder,
         conversation_id: boundary.conversation_id,
@@ -356,15 +372,25 @@ function txOver(
       return row ? { id: row.id, channelSessionId: row.channel_session_id } : null;
     },
 
+    async lockContact(orgId, contactId) {
+      await client.query("select pg_advisory_xact_lock(hashtextextended($1, 0))", [
+        `mirae_reminder_contact:${orgId}:${contactId}`,
+      ]);
+    },
+
     async hasLiveReturn(orgId, contactId) {
       const { rows } = await client.query(
-        `select 1 from cron_jobs
-          where organization_id = $1 and contact_id = $2
-            and kind = 'at' and job_kind = 'followup_turn' and enabled = true
-          limit 1`,
+        `select (
+           exists (select 1 from cron_jobs
+                    where organization_id = $1 and contact_id = $2
+                      and kind = 'at' and job_kind = 'followup_turn' and enabled = true)
+           or exists (select 1 from job_queue
+                       where organization_id = $1 and contact_id = $2
+                         and kind = 'followup_turn' and status in ('pending', 'running'))
+         ) as live`,
         [orgId, contactId],
       );
-      return rows.length > 0;
+      return (rows[0] as { live?: boolean } | undefined)?.live === true;
     },
 
     humanInCharge,

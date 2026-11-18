@@ -3,7 +3,7 @@
  *
  * Mirae calls `POST /api/v1/mirae/reminder-messages` (`lib/integrations/mirae/reminder-message.ts`)
  * about a day before a lead's initial evaluation or a new student's first class. The CRM never
- * writes a fixed text: a number connected by QR (WAHA) has no template, and the same text to
+ * writes a fixed text: a number connected by QR has no template, and the same text to
  * many people trips the spinning guard. The endpoint queues a one-shot `followup_turn` (the
  * agent's scheduled-return machinery, `cron_jobs` kind `at`) whose payload carries the briefing
  * under `mirae_reminder`. When it fires, this file runs the turn:
@@ -31,6 +31,7 @@ import {
   type AppointmentCheck,
 } from '@/lib/integrations/mirae/reminder-precheck';
 
+import { insertInboxItem } from '../db/repository';
 import { withFields } from '../obs/logger';
 import type { JobRow } from '../queue/queue';
 import type { LeadContext } from '../edge/crm/get-lead-context';
@@ -69,6 +70,8 @@ export const miraeReminderPayloadSchema = z.object({
   student_name: z.string().nullable(),
   appointment_start_at: z.string().nullable(),
   professional_first_name: z.string().nullable(),
+  /** Digits of the phone as Mirae sent it (absent in reminders queued before this field). */
+  mirae_phone: z.string().nullable().optional(),
 });
 export type MiraeReminderPayload = z.infer<typeof miraeReminderPayloadSchema>;
 
@@ -151,18 +154,18 @@ export function briefingDoLembrete(
   ].filter((l): l is string => l !== null);
 
   const confirmacao = CONFIRMATION_KINDS.has(reminder.kind);
-  // Mirae cannot recall a reminder: the appointment is checked again right before writing.
-  const conferencia =
-    conferido === 'confirmed'
-      ? [
-          '0. O sistema acabou de conferir na agenda do estúdio: este agendamento continua marcado neste dia e hora.',
-          '   Se você souber que o dia é feriado com o estúdio fechado, NÃO envie nada.',
-        ]
-      : [
-          '0. ANTES de escrever, chame mirae_my_appointments e confira que este agendamento continua marcado',
-          '   (status scheduled) neste mesmo dia e hora. NÃO envie nada se ele não aparecer, se aparecer',
-          '   cancelado ou em outro horário, se a ferramenta falhar, ou se o dia for feriado com o estúdio fechado.',
-        ];
+  // Mirae cannot recall a reminder: the agent reads the appointment again before writing. The
+  // read is also what the promise reviewer accepts as proof of the day and time it repeats
+  // (`evidencia-de-agenda.berseba.ts`), so it is asked for even when the pre-check found it.
+  const conferencia = [
+    '0. ANTES de escrever, chame mirae_my_appointments e confira que este agendamento continua marcado',
+    '   (status scheduled) neste mesmo dia e hora. Use o dia, a hora e o nome que vierem de lá.',
+    ...(conferido === 'confirmed'
+      ? ['   (O sistema acabou de conferir na agenda do estúdio e o agendamento estava marcado.)']
+      : []),
+    '   NÃO envie nada se ele não aparecer, se aparecer cancelado ou em outro horário, se a ferramenta',
+    '   falhar, ou se o dia for feriado com o estúdio fechado.',
+  ];
   const comoAgir = confirmacao
     ? [
         ...(reminder.appointment_start_at ? conferencia : []),
@@ -235,14 +238,65 @@ export interface MiraeReminderTurnPorts {
   runAgentTurn: typeof runAgentTurn;
   generateReplyDraft: typeof generateReplyDraft;
   fuso: (pool: pg.Pool, tenantId: string) => Promise<string>;
-  checkAppointment: (
-    pool: pg.Pool,
-    input: { organizationId: string; contactId: string; appointmentStartAt: string },
-  ) => Promise<AppointmentCheck>;
+  checkAppointment: typeof checkMiraeAppointment;
+  avisar: typeof avisarLembreteQueNaoSaiu;
 }
 
 /** The two errors `generateReplyDraft` throws on purpose: no agent, or nobody to write to. */
 const DRAFT_NOT_POSSIBLE = new Set(['reply_no_agent', 'reply_context_unavailable']);
+
+/** How many runs an automatic reminder waits for Mirae before it falls back to a draft. */
+export const MIRAE_UNAVAILABLE_TRIES = 3;
+
+/** Thrown to retry the job while Mirae does not answer (the queue backs off). */
+export class MiraeUnavailableError extends Error {
+  constructor() {
+    super('mirae_reminder_precheck_unavailable');
+    this.name = 'MiraeUnavailableError';
+  }
+}
+
+/** Pure: what to do with the pre-check's answer. */
+export function decisaoDoLembrete(
+  reminder: Pick<MiraeReminderPayload, 'delivery'>,
+  conferido: AppointmentCheck,
+  tentativa: { attempts: number; maxAttempts: number },
+): { kind: 'drop' } | { kind: 'retry' } | { kind: 'run'; delivery: 'draft' | 'auto' } {
+  if (conferido === 'gone') return { kind: 'drop' };
+  if (reminder.delivery === 'draft' || conferido === 'confirmed') {
+    return { kind: 'run', delivery: reminder.delivery };
+  }
+  // Automatic, and Mirae did not confirm it: wait for Mirae a few runs, then a person decides.
+  if (conferido === 'unavailable' && tentativa.attempts < Math.min(MIRAE_UNAVAILABLE_TRIES, tentativa.maxAttempts)) {
+    return { kind: 'retry' };
+  }
+  return { kind: 'run', delivery: 'draft' };
+}
+
+/**
+ * A reminder Mirae was told is on its way and that will not go out is never silent: the team gets
+ * a notice in the Central, linked to the conversation (Portuguese: the team reads it).
+ */
+export async function avisarLembreteQueNaoSaiu(
+  pool: Pick<pg.Pool, 'query'>,
+  input: { tenantId: string; conversationId: string | null; reminder: MiraeReminderPayload; motivo: string },
+): Promise<void> {
+  const oQue = O_QUE_E[input.reminder.kind];
+  await insertInboxItem(
+    pool,
+    input.tenantId,
+    {
+      kind: 'followup_dead',
+      severity: 'warn',
+      title: `Lembrete do Mirae não saiu (${oQue})`,
+      body:
+        `${input.motivo} Pedido da equipe: "${input.reminder.title}". ` +
+        'Confira a conversa e, se ainda fizer sentido, mande a mensagem por aqui.',
+      ...(input.conversationId ? { refKind: 'conversation', refId: input.conversationId } : {}),
+    },
+    'kind_ref_e_titulo',
+  );
+}
 
 /**
  * Runs the reminder this `followup_turn` carries. Called by `createFollowupTurnHandler` after the
@@ -266,9 +320,16 @@ export async function runMiraeReminderTurn(
     delivery: reminder.delivery,
     kind: reminder.kind,
   });
+  const avisar = ports?.avisar ?? avisarLembreteQueNaoSaiu;
 
   if (chegaTardeDemais(reminder, clock())) {
     log.info('mirae reminder dropped: the appointment is less than an hour away');
+    await avisar(pool, {
+      tenantId: target.tenantId,
+      conversationId: target.conversationId,
+      reminder,
+      motivo: 'O lembrete ficou para menos de uma hora antes do horário (fora da janela de envio).',
+    });
     return;
   }
 
@@ -280,17 +341,29 @@ export async function runMiraeReminderTurn(
       organizationId: target.tenantId,
       contactId: target.leadId,
       appointmentStartAt: reminder.appointment_start_at,
+      miraePhone: reminder.mirae_phone ?? null,
     });
-    if (conferido === 'gone') {
-      log.info('mirae reminder dropped: the appointment is no longer scheduled at that time');
-      return;
-    }
+  }
+  const decisao = decisaoDoLembrete(reminder, conferido, {
+    attempts: job.attempts ?? 1,
+    maxAttempts: job.max_attempts ?? MIRAE_UNAVAILABLE_TRIES,
+  });
+  if (decisao.kind === 'drop') {
+    log.info('mirae reminder dropped: the appointment is no longer scheduled at that time');
+    return;
+  }
+  if (decisao.kind === 'retry') {
+    log.warn('mirae reminder waits for Mirae', { attempts: job.attempts });
+    throw new MiraeUnavailableError();
+  }
+  if (decisao.delivery !== reminder.delivery) {
+    log.info('automatic mirae reminder falls back to a draft', { conferido });
   }
 
   const fuso = await (ports?.fuso ?? ((p, t) => fusoDaOrganizacao(p, t, deps.log)))(pool, target.tenantId);
   const briefing = briefingDoLembrete(reminder, fuso, conferido);
 
-  if (reminder.delivery === 'draft') {
+  if (decisao.delivery === 'draft') {
     const generate = ports?.generateReplyDraft ?? (await import('./reply-drafts')).generateReplyDraft;
     try {
       const draft = await generate(pool, deps, {
@@ -306,6 +379,12 @@ export async function runMiraeReminderTurn(
       const message = err instanceof Error ? err.message : String(err);
       if (!DRAFT_NOT_POSSIBLE.has(message)) throw err;
       log.warn('mirae reminder draft not possible', { reason: message });
+      await avisar(pool, {
+        tenantId: target.tenantId,
+        conversationId: target.conversationId,
+        reminder,
+        motivo: 'A assistente não conseguiu escrever o rascunho (sem agente publicado ou contato indisponível).',
+      });
     }
     return;
   }

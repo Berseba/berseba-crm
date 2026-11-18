@@ -8,11 +8,15 @@
  * looks for a `scheduled` one starting at `appointment_start_at`:
  *
  *  - found → `confirmed`, the turn runs;
- *  - the list came back and it is not there (cancelled, moved, no-show, gone) → `gone`, nothing
- *    is sent nor drafted;
- *  - no Mirae for this organization, no phone, or the API did not answer → `unknown`, the turn
- *    runs and the briefing tells the agent to check with `mirae_my_appointments` first and send
- *    nothing when it cannot confirm the appointment.
+ *  - Mirae knows the person, the list came back and it is not there (cancelled, moved, no-show)
+ *    → `gone`, nothing is sent nor drafted;
+ *  - Mirae did not answer → `unavailable`: the automatic turn retries a few times, then falls back
+ *    to a draft;
+ *  - no Mirae for this organization, no phone, or Mirae does not know the person by either
+ *    spelling of the phone (`person: null`) → `unknown`: the automatic reminder becomes a draft.
+ *
+ * The phone is the CRM contact's; when Mirae finds nobody by it, the phone Mirae itself sent is
+ * tried (the two may differ by the Brazilian 9th digit). A `person: null` is never `gone`.
  *
  * Mirae's public API has no holiday read; a holiday is left to Mirae (it does not remind about
  * appointments it closed) and to the briefing.
@@ -22,7 +26,7 @@ import type pg from "pg";
 import { listAppointments, type MiraeAppointment } from "./client";
 import { miraeConfigFor, type MiraeConfig } from "./config";
 
-export type AppointmentCheck = "confirmed" | "gone" | "unknown";
+export type AppointmentCheck = "confirmed" | "gone" | "unknown" | "unavailable";
 
 /** `YYYY-MM-DD` of an instant in Brasília (Mirae's agenda day). */
 export function dayInBrasilia(at: Date): string {
@@ -55,7 +59,13 @@ const DEFAULT_PORTS: PrecheckPorts = { configFor: miraeConfigFor, list: listAppo
 
 export async function checkMiraeAppointment(
   pool: Pick<pg.Pool, "query">,
-  input: { organizationId: string; contactId: string; appointmentStartAt: string },
+  input: {
+    organizationId: string;
+    contactId: string;
+    appointmentStartAt: string;
+    /** Digits of the phone Mirae sent with the reminder. */
+    miraePhone?: string | null;
+  },
   ports: PrecheckPorts = DEFAULT_PORTS,
 ): Promise<AppointmentCheck> {
   const startAt = new Date(input.appointmentStartAt);
@@ -67,14 +77,25 @@ export async function checkMiraeAppointment(
     [input.organizationId, input.contactId],
   );
   // Same rule as the Mirae tools: digits only, never anything the model wrote.
-  const phone = rows[0]?.phone_number?.replace(/\D/g, "") ?? "";
-  if (phone.length < 10) return "unknown";
+  const phones = [
+    ...new Set(
+      [rows[0]?.phone_number?.replace(/\D/g, ""), input.miraePhone?.replace(/\D/g, "")].filter(
+        (p): p is string => typeof p === "string" && p.length >= 10,
+      ),
+    ),
+  ];
+  if (phones.length === 0) return "unknown";
   const day = dayInBrasilia(startAt);
-  try {
-    const { data } = await ports.list(config, { phone, from: day, to: day });
-    return appointmentStillScheduled(data, input.appointmentStartAt) ? "confirmed" : "gone";
-  } catch {
-    // Two registrations on the phone, Mirae down, timeout: the agent checks it in the turn.
-    return "unknown";
+  for (const phone of phones) {
+    let answer;
+    try {
+      answer = await ports.list(config, { phone, from: day, to: day });
+    } catch {
+      // Mirae down, timeout, two registrations on the phone: the caller decides (retry, draft).
+      return "unavailable";
+    }
+    if (answer.person === null) continue;
+    return appointmentStillScheduled(answer.data, input.appointmentStartAt) ? "confirmed" : "gone";
   }
+  return "unknown";
 }
