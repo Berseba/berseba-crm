@@ -8,6 +8,12 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.19.0] — 2026-11-18
+
+### Adicionado
+
+- **Registrar toque no negócio e contagem diária para as metas da Berseba** O card do negócio ganha o botão "Registrar toque", logo acima da linha do tempo: quem atende escolhe o canal (e-mail, LinkedIn, WhatsApp ou telefonema), escreve uma anotação se quiser, e o toque entra na linha do tempo como "Toque registrado". O botão aparece para atendentes, gestores e administradores. O banco passa a ter uma área de leitura própria para o painel de metas da Berseba, com as contas novas, os toques e as reuniões do dia dos negócios marcados com a etiqueta `plano-enterprise` da organização da Berseba, só em números, e um usuário de banco que só lê essa área. Esse usuário nasce sem senha: até alguém definir uma, ninguém entra com ele. A atualização refaz essa área depois de atualizar o banco; se não conseguir, avisa e segue.
+
 ## [2.18.0] — 2026-11-18
 
 ### Adicionado
@@ -9664,7 +9670,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.18.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.19.0...HEAD
+[2.19.0]: https://github.com/berseba/berseba-crm/compare/v2.18.0...v2.19.0
 [2.18.0]: https://github.com/berseba/berseba-crm/compare/v2.17.1...v2.18.0
 [2.17.1]: https://github.com/berseba/berseba-crm/compare/v2.17.0...v2.17.1
 [2.17.0]: https://github.com/berseba/berseba-crm/compare/v2.16.0...v2.17.0
