@@ -497,6 +497,16 @@ const freeSlotsShape = {
     .regex(/^\d{2}:\d{2}$/, "use HH:MM")
     .optional()
     .describe("Horário que a cliente pediu (HH:MM): os mais próximos vêm primeiro."),
+  depois_de: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/, "use HH:MM")
+    .optional()
+    .describe('"depois das 17h" = "17:00"'),
+  ate: z
+    .string()
+    .regex(/^\d{2}:\d{2}$/, "use HH:MM")
+    .optional()
+    .describe('"até as 10h" = "10:00"'),
   remarcar_appointment_id: z
     .string()
     .trim()
@@ -552,10 +562,8 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
     `Busca até ${MAX_OPCOES} opções de horário na agenda do salão (avec), já escolhidas pela ` +
     "regra do salão: primeiro o que a cliente pediu, depois horários colados em clientes que a " +
     "profissional já tem no dia. Cada opção traz dia da semana, data, hora, profissional, as " +
-    "etapas com outra pessoa (tambem, tambem_com: lavagem e secagem) e um opcao_id. Pergunte a " +
-    "preferência de profissional ANTES de buscar. Ofereça com dia, data, hora e profissional " +
-    '(ex.: "sexta, 30/10, às 15h com a Giovanna, e a secagem às 16h30 com a Júlia"). Se a ' +
-    "cliente recusar a pessoa da secagem, busque de novo com auxiliar. Use só opcao_id que " +
+    "etapas com outra pessoa (tambem, tambem_com: lavagem e secagem) e um opcao_id. " +
+    'Ofereça com dia, data e hora (ex.: "sexta, 30/10, às 15h"). Use só opcao_id que ' +
     "veio daqui. Para marcar: servico (+ comprimento " +
     "quando precisa). Para remarcar: remarcar_appointment_id. Sem preferência de dia, olha as " +
     "próximas 2 semanas.",
@@ -579,6 +587,8 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
       dias_semana: input.dias_semana,
       periodo: input.periodo,
       horario: input.horario,
+      depois_de: input.depois_de,
+      ate: input.ate,
     };
     try {
       let opcoes: Opcao[];
@@ -709,6 +719,8 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
           input.dias_semana?.join(", "),
           input.periodo === "manha" ? "manhã" : input.periodo,
           input.horario,
+          input.depois_de ? `depois das ${input.depois_de}` : null,
+          input.ate ? `até ${input.ate}` : null,
         ]
           .filter(Boolean)
           .join(", ");
