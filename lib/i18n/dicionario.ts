@@ -40,6 +40,17 @@ import { TEXTOS_AGENDA_SERVICOS } from "./agenda-servicos";
 type Traducoes = Record<string, Partial<Record<Exclude<Idioma, "pt-BR">, string>>>;
 
 export const DICIONARIO: Traducoes = {
+  // Berseba (9005): "Registrar toque" on the lead (components/kanban/RegisterTouch.tsx).
+  "Toque registrado": { es: "Contacto registrado" },
+  "Toque registrado.": { es: "Contacto registrado." },
+  "Registrar toque": { es: "Registrar contacto" },
+  "Canal do toque": { es: "Canal del contacto" },
+  "Anotação (opcional)": { es: "Nota (opcional)" },
+  "Salvar toque": { es: "Guardar contacto" },
+  "Não foi possível registrar o toque.": { es: "No se pudo registrar el contacto." },
+  "Escolha o canal do toque.": { es: "Elige el canal del contacto." },
+  Telefonema: { es: "Llamada" },
+  LinkedIn: { es: "LinkedIn" },
   // Berseba: "Ligar com a Bia" (Voz) on the lead card and its route.
   "Ligar com a Bia": { es: "Llamar con Bia" },
   "Confirmar: a Bia liga agora": { es: "Confirmar: Bia llama ahora" },

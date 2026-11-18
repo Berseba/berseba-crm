@@ -30,6 +30,10 @@
  */
 export const AUDIT_ACTIONS = [
   // ── Berseba ──────────────────────────────────────────────────────────────
+  // "Registrar toque" on the lead (`app/api/v1/leads/[id]/touches/route.ts`,
+  // migration 9005). Metadata: the channel and whether a note was typed, never
+  // the note itself.
+  "lead.touch_recorded",
   // "Ligar com a Bia" on a lead card asked Voz for a call (`app/api/v1/voz/calls/route.ts`). The
   // report that comes back moves the card through `moveLeadHandler` / `encerraDemanda`, audited there.
   "voz.call_requested",

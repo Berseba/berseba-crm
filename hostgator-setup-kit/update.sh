@@ -353,6 +353,16 @@ source "$KIT_DIR/_common.sh"
 # manutenção chegaria uma atualização atrasada, que é exatamente o defeito que a
 # releitura existe para fechar.
 source "$KIT_DIR/manutencao.sh"
+# Berseba (9005): the analytics contract views go down before the baseline and
+# come back after it. Sourced here, after the checkout, for the same reason.
+# Soft on purpose: a kit without the file (an older checkout, the test fixtures
+# that copy a fixed list of kit files) skips both steps and updates as before.
+if [ -f "$KIT_DIR/_analytics.sh" ]; then
+  source "$KIT_DIR/_analytics.sh"
+else
+  analytics_views_drop() { :; }
+  analytics_views_recreate() { :; }
+fi
 
 # Single-server: o Supabase vai para a versão pinada no código novo ANTES do
 # banco (o passo 4 pausa peças dele, e um `up` depois as religaria).
@@ -452,6 +462,7 @@ if [ -f supabase/baseline.sql ]; then
   #
   # O segundo argumento de `reaplicar_baseline` já existe para isto e recebe
   # TODAS as passadas, cada uma com cabeçalho — melhor que a saída da última.
+  analytics_views_drop  # Berseba (9005), see _analytics.sh
   if reaplicar_baseline "$PROJECT_DIR/supabase/baseline.sql" "$PROJECT_DIR/.deskcomm-banco.log"; then
     if [ "$BASELINE_PASSADAS" -gt 1 ]; then
       c_grn "✓ banco atualizado na passada $BASELINE_PASSADAS — as anteriores não aplicaram tudo (banco ocupado ou conexão instável; o que faltou está listado acima)."
@@ -469,6 +480,7 @@ if [ -f supabase/baseline.sql ]; then
     c_ylw "  O app pode ainda funcionar."
     orientar_banco_incompleto
   fi
+  analytics_views_recreate  # Berseba (9005), see _analytics.sh
   # ── E AS REGRAS DE ISOLAMENTO SÃO CONFERIDAS ──────────────────────────────
   #
   # ## Por que isto existe
