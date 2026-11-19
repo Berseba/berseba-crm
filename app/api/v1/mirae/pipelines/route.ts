@@ -8,7 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { type NextRequest, NextResponse } from "next/server";
 
-import { fail } from "@/lib/api/wrappers";
+import { comIdDaRequisicao, fail } from "@/lib/api/wrappers";
 import { listMiraePipelines } from "@/lib/integrations/mirae/funnel-read";
 import { authorizeMiraeRead } from "@/lib/integrations/mirae/read-auth";
 import { logger } from "@/lib/logger";
@@ -22,9 +22,7 @@ export async function GET(req: NextRequest): Promise<Response> {
 
   try {
     const data = await listMiraePipelines(auth.supabase, auth.organizationId);
-    const res = NextResponse.json({ data });
-    res.headers.set("X-Request-Id", requestId);
-    return res;
+    return comIdDaRequisicao(NextResponse.json({ data }), requestId);
   } catch (err) {
     logger.error("mirae.pipelines_read_failed", {
       requestId,

@@ -346,10 +346,10 @@ describe("message.sent: anti-loop and missing messages", () => {
     expect(stageOf(tables, "lead-1")).toBe(BOOKED.id);
   });
 
-  it("message.received keeps its context: no lead hydrated (existing rules unchanged)", async () => {
+  it("message.received keeps upstream's context: the contact and its open lead (#3974)", async () => {
     const { admin } = world();
     const ctx = await buildContext(admin, { ...phoneEvent(), event_type: "message.received" });
-    expect(ctx.lead).toBeUndefined();
+    expect((ctx.lead as Row).id).toBe("lead-1");
     expect((ctx.contact as Row).id).toBe(CONTACT);
   });
 });

@@ -644,10 +644,10 @@ describe("ehPedidoDeOptOut — pedido INEQUÍVOCO, o que autoriza bloquear", () 
     expect(ehPedidoDeOptOut("Cancelar 👍")).toBe(false);
   });
 
-  it("cancelling the messages blocks (Berseba); one's own subscription escalates (upstream #4579)", () => {
+  it("cancelling the messages blocks (Berseba); one's own subscription does not (upstream #4579)", () => {
     expect(ehPedidoDeOptOut("quero cancelar as mensagens")).toBe(true);
+    // Upstream #4579: no longer blocks (upstream's ambiguous pattern takes only "a inscrição").
     expect(ehPedidoDeOptOut("cancelar minha inscrição")).toBe(false);
-    expect(ehOptOutProvavel("cancelar minha inscrição")).toBe(true);
     // "cancelar mi suscripción" alone escalates without blocking since upstream #2886 (it may be the plan).
     // one message, not the channel
     expect(ehPedidoDeOptOut("pode cancelar a mensagem que mandei?")).toBe(false);

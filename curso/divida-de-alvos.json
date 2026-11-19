@@ -1297,22 +1297,6 @@
    "tipo": "role-nome"
   },
   {
-   "modulo": "contatos",
-   "licao": "varios-de-uma-vez",
-   "passo": "p4",
-   "campo": "destaque",
-   "indice": 0,
-   "tipo": "texto"
-  },
-  {
-   "modulo": "contatos",
-   "licao": "varios-de-uma-vez",
-   "passo": "p4",
-   "campo": "destaque",
-   "indice": 1,
-   "tipo": "texto"
-  },
-  {
    "modulo": "conversoes",
    "licao": "o-que-a-meta-recebe",
    "passo": "p1",

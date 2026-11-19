@@ -3,7 +3,7 @@
  *
  * They exist only for the organizations in `ATOS_API_ORG_IDS` (`lib/integrations/atos/config.ts`):
  * for every other one the served catalog, the agent turn and the external MCP drop them.
- * Bundle `atender` only, like avec and Mirae. The writes are `critico`, so turning a bundle on
+ * Bundle `reter`, like avec and Mirae. The writes are `critico`, so turning a bundle on
  * never adds them: someone has to tick each one.
  */
 import { declararTools } from "./tipos";
@@ -19,7 +19,7 @@ export const TOOLS_ATOS = declararTools([
       "Mostra até 12 horários de aula com vaga na agenda do estúdio, já com as regras do estúdio e do plano da aluna.",
     oQueToca: AGENDA,
     risco: "seguro",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "atos_my_classes",
@@ -29,7 +29,7 @@ export const TOOLS_ATOS = declararTools([
       "Mostra as próximas aulas que a aluna desta conversa tem marcadas na agenda do estúdio, pelo telefone dela.",
     oQueToca: AGENDA,
     risco: "seguro",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "atos_cancel_class",
@@ -39,7 +39,7 @@ export const TOOLS_ATOS = declararTools([
       "Desmarca uma aula da aluna desta conversa (também para falta avisada), depois de ela confirmar dia e horário, e diz se ela tem direito a reposição.",
     oQueToca: AGENDA,
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "atos_reschedule_class",
@@ -49,7 +49,7 @@ export const TOOLS_ATOS = declararTools([
       "Troca o horário de uma aula da aluna desta conversa por outro com vaga, depois de ela confirmar o novo dia e horário.",
     oQueToca: AGENDA,
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "atos_book_makeup",
@@ -59,7 +59,7 @@ export const TOOLS_ATOS = declararTools([
       "Marca a reposição de uma aula desmarcada da aluna desta conversa, dentro das regras de reposição do estúdio.",
     oQueToca: AGENDA,
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "atos_book_class",
@@ -69,7 +69,7 @@ export const TOOLS_ATOS = declararTools([
       "Marca uma aula pontual (avulsa), inclusive para quem vem pelo TotalPass ou Wellhub; pessoa nova leva nome e data de nascimento. Antes, confirma dia e horário.",
     oQueToca: AGENDA,
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "atos_book_trial",
@@ -79,7 +79,7 @@ export const TOOLS_ATOS = declararTools([
       "Para quem vai entrar num plano da RBCOR: cadastra a pessoa no Atos com nome e data de nascimento e marca a primeira aula.",
     oQueToca: AGENDA,
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "atos_create_recurring_plan",
@@ -89,6 +89,6 @@ export const TOOLS_ATOS = declararTools([
       "Cria os horários fixos semanais de quem vem pelo TotalPass ou Wellhub (12 meses por padrão, até 2 ou 3 dias por semana conforme o plano), depois de a pessoa confirmar dias e horário.",
     oQueToca: AGENDA,
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
 ]);

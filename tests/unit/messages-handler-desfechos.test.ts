@@ -626,8 +626,11 @@ describe('sendMessageHandler — o material da empresa pelo mesmo caminho de mí
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);
     const duble = criarDubleDoHandler({ conversation: conversationRow({ isBlocked: true }) });
+    // Berseba: a person in the CRM may still answer an opted-out contact (BERSEBA.md,
+    // "Opt-out never locks a person out"); the material comes from the agent's turn.
+    const doAgente: HandlerCtx = { ...ctx, actor: { type: 'ai_agent', id: USER, role: 'agent' } };
 
-    await expect(sendMessageHandler(duble.supabase, ctx, corpoDoMaterial())).rejects.toMatchObject({
+    await expect(sendMessageHandler(duble.supabase, doAgente, corpoDoMaterial())).rejects.toMatchObject({
       status: 403,
     });
     expect(duble.capturas.inserts.messages).toEqual([]);
