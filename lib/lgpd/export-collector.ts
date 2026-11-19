@@ -312,6 +312,30 @@ export interface WaitlistRow {
 }
 
 /**
+ * Berseba (migration 9007): the client's entry on the avec salon's waitlist — what she asked
+ * for, when she could come, the slot she was offered and what was booked. `created_by_user_id`
+ * stays out: it is the team, not her.
+ */
+export interface AvecWaitlistRow {
+  pedido: Json;
+  data_de: string;
+  data_ate: string;
+  depois_de: string | null;
+  ate: string | null;
+  substitui_data: string | null;
+  status: string;
+  oferta: Json | null;
+  oferta_expira_em: string | null;
+  ofertada_em: string | null;
+  resultado: Json | null;
+  observacoes: string | null;
+  created_by_kind: string;
+  created_at: string;
+  updated_at: string;
+  encerrada_em: string | null;
+}
+
+/**
  * A comanda do titular (migrations 0350-0359).
  *
  * Entra porque a anonimização APAGA: a 0359 pôs `sales` na cascata de redação
@@ -818,6 +842,8 @@ export interface ExportPayload {
    * cujo `observacoes` a anonimização apaga.
    */
   calendar_waitlist?: WaitlistRow[];
+  /** Berseba (migration 9007): present only when there is a row, like `calendar_waitlist`. */
+  avec_waitlist?: AvecWaitlistRow[];
   sales: SaleRow[];
   proposals: ProposalRow[];
   tasks: TaskRow[];
@@ -1884,6 +1910,31 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     }
   }
 
+  // Berseba (migration 9007): the avec salon's waitlist. Anonymization deletes
+  // these rows (`trg_avec_waitlist_anonimizado`), so access delivers them. The
+  // table exists on every Berseba install; an install without it (42P01 /
+  // PGRST205) yields an empty block, like `calendar_waitlist`.
+  let avec_waitlist: AvecWaitlistRow[] = [];
+  if (contactId) {
+    const { data, error } = await admin
+      .from("avec_waitlist")
+      .select(
+        "pedido, data_de, data_ate, depois_de, ate, substitui_data, status, oferta, oferta_expira_em, ofertada_em, resultado, observacoes, created_by_kind, created_at, updated_at, encerrada_em",
+      )
+      .eq("organization_id", organizationId)
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) {
+      if (error.code !== "42P01" && error.code !== "PGRST205") {
+        throw new Error(`avec_waitlist_load_failed: ${error.message}`);
+      }
+    } else if (data) {
+      conferirTeto("avec_waitlist", data, 500);
+      avec_waitlist = data as AvecWaitlistRow[];
+    }
+  }
+
   // Comandas — contact_id direto em sales (migrations 0350-0359).
   //
   // A 0359 acrescentou esta tabela à cascata de redação; este bloco é a outra
@@ -2739,6 +2790,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     mcp_acessos: mcpAcessos,
     appointments,
     ...(calendar_waitlist.length > 0 ? { calendar_waitlist } : {}),
+    ...(avec_waitlist.length > 0 ? { avec_waitlist } : {}),
     sales,
     proposals,
     tasks,

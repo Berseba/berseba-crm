@@ -29,6 +29,12 @@ vi.mock("@/lib/integrations/avec/ofertas", async (importOriginal) => {
   return { ...actual, salaoDa: (org: string) => (org === ORG ? mayara : null) };
 });
 vi.mock("@/lib/mcp/audit", () => ({ auditMcpToolCall: vi.fn().mockResolvedValue(undefined) }));
+// The waitlist reads Supabase through `fetch`, which this file counts as avec calls.
+vi.mock("@/lib/integrations/avec/lista-de-espera-supabase", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  ocupacoesSeguradasPorOutras: vi.fn().mockResolvedValue([]),
+  dispararBuscaDaEspera: vi.fn(),
+}));
 
 const tools = await import("./avec");
 const { allTools } = await import("./index");

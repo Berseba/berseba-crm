@@ -67,6 +67,9 @@ export const SECOES_DA_EQUIPE = {
  * `CAMPOS_DA_EQUIPE` vai sem eles.
  */
 export const O_QUE_FICA = {
+  // Berseba (migration 9007).
+  avec_waitlist:
+    "a inscrição dela na lista de espera do salão: o serviço e os dias que pediu, a vaga que recebeu, o que foi marcado e a observação da recepção que a anonimização apaga",
   request_id: "o protocolo do pedido dele (o e-mail cita o começo)",
   organization_id: "o \"ID interno\" que o PDF já imprime para o suporte",
   organization_legal_name: "o controlador: quem responde pelos dados",
