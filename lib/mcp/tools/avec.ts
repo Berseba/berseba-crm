@@ -36,11 +36,13 @@ import { avecConfigFor, type AvecConfig } from "@/lib/integrations/avec/config";
 import {
   MAX_DIAS_A_FRENTE,
   chaveDaVaga,
+  hojeNoSalao,
   horaSchema,
   janelaDeBusca,
   motivoParaNaoServir,
   ocupacaoDa,
   sobrepoe,
+  somarDias,
   type InscricaoAvec,
 } from "@/lib/integrations/avec/lista-de-espera";
 import type { OfertaGuardada } from "@/lib/integrations/avec/lista-de-espera-motor";
@@ -382,14 +384,10 @@ const SEM_OFERTAS = refusal(
 
 /** Today in Brasília, `YYYY-MM-DD`. */
 export function hojeEmBrasilia(now = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);
+  return hojeNoSalao(now);
 }
 
-function addDays(date: string, days: number): string {
-  const d = new Date(`${date}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+const addDays = somarDias;
 
 /** `27/10`: the agent repeats this, never computes it. */
 const dataBr = (date: string) => `${date.slice(8, 10)}/${date.slice(5, 7)}`;
@@ -1046,7 +1044,7 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
     });
     if (!marcada.ok) return marcada.falha;
     // She booked the service she was waiting for: her entry leaves the waitlist.
-    void encerrarAoMarcar(ctx.organizationId, ctx.contatoDoTurno!, opcao.oferta.id, new Date());
+    void encerrarAoMarcar(ctx.organizationId, ctx.contatoDoTurno!, opcao.oferta.id, opcao.slots[0]!.data, new Date());
     return visitaMarcadaView(salao, opcao, marcada.feitos);
   },
 };
@@ -1382,19 +1380,21 @@ async function entrarNaLista(
     ate: input.ate ?? null,
     substitui_data: input.substitui_data ?? null,
     observacoes: input.observacao ?? null,
-    ...(recusadasAoEntrar.length ? { recusadas: recusadasAoEntrar.slice(0, 50) } : {}),
     updated_at: agora.toISOString(),
   };
   const { data: existente, error: erroLeitura } = await admin
     .from("avec_waitlist")
-    .select("id")
+    .select("id, recusadas")
     .eq("organization_id", ctx.organizationId)
     .eq("contact_id", ctx.contatoDoTurno!)
     .eq("pedido->>servico", pedido.servico)
     .in("status", ["waiting", "offered"])
     .limit(1);
   if (erroLeitura) throw new Error(erroLeitura.message);
-  const jaEstava = (existente ?? [])[0] as { id: string } | undefined;
+  const jaEstava = (existente ?? [])[0] as { id: string; recusadas: string[] | null } | undefined;
+  // The slots she turned down now join the ones she refused before.
+  const recusadas = [...new Set([...(jaEstava?.recusadas ?? []), ...recusadasAoEntrar])].slice(-50);
+  if (recusadas.length) Object.assign(linha, { recusadas });
   const { error } = jaEstava
     ? await admin
         .from("avec_waitlist")
@@ -1456,7 +1456,12 @@ async function aceitarVaga(
   // Claim it: the cron cannot expire it while avec books, and a second accept finds it claimed.
   const { data: reivindicada, error: erroClaim } = await admin
     .from("avec_waitlist")
-    .update({ oferta_expira_em: new Date(agora.getTime() + PRAZO_DA_MARCACAO_MS).toISOString() })
+    // Never shortens the hold: at least 5 more minutes, or the deadline she was given.
+    .update({
+      oferta_expira_em: new Date(
+        Math.max(aberta.expira.getTime(), agora.getTime() + PRAZO_DA_MARCACAO_MS),
+      ).toISOString(),
+    })
     .eq("organization_id", org)
     .eq("id", aberta.id)
     .eq("status", "offered")

@@ -284,10 +284,18 @@ export function dispararBuscaDaEspera(org: string): void {
 }
 
 /**
- * The client booked this service herself (`avec_book`): her live entries for it leave the list,
- * and a slot held for her is free again. Never throws: the entry would only cost a later offer.
+ * The client booked this service herself (`avec_book`) on a day she was waiting for: those
+ * entries leave the list, and a slot held for her is free again. A booking outside her days (the
+ * fallback visit she keeps while waiting for an earlier one) leaves the entry alone. Never
+ * throws: a missed close only costs a later offer.
  */
-export async function encerrarAoMarcar(org: string, contactId: string, servico: string, agora: Date): Promise<void> {
+export async function encerrarAoMarcar(
+  org: string,
+  contactId: string,
+  servico: string,
+  dia: string,
+  agora: Date,
+): Promise<void> {
   try {
     const { data, error } = await createAdminClient()
       .from("avec_waitlist")
@@ -300,6 +308,8 @@ export async function encerrarAoMarcar(org: string, contactId: string, servico: 
       .eq("organization_id", org)
       .eq("contact_id", contactId)
       .eq("pedido->>servico", servico)
+      .lte("data_de", dia)
+      .gte("data_ate", dia)
       .in("status", [...VIVAS])
       .select("id, status");
     if (error) throw new Error(error.message);

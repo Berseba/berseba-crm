@@ -125,9 +125,18 @@ describe("procurarVagas", () => {
     const r = await procurarVagas(portas, ORG, config, agora);
     expect(r.ofertadas).toBe(1);
     expect(enviados.map((e) => e.contato)).toEqual(["c-a"]);
-    expect(enviados[0]!.texto).toContain("quarta, 16/12, às 15h, Escova com Mayara");
+    // "Any professional": the salon never names who attends.
+    expect(enviados[0]!.texto).toContain("quarta, 16/12, às 15h, Escova.");
+    expect(enviados[0]!.texto).not.toContain("Mayara");
     expect(linhas.find((l) => l.id === "a")!.status).toBe("offered");
     expect(linhas.find((l) => l.id === "b")!.status).toBe("waiting");
+  });
+
+  it("names the professional only when she asked for one", async () => {
+    const linhas = [entrada("a", 1, { pedido: { servico: "escova", comprimento: "medio", profissional: "mayara" } })];
+    const { portas, enviados } = montar(linhas, [opcao("2026-12-16", "15:00", "16:00")]);
+    await procurarVagas(portas, ORG, config, agora);
+    expect(enviados[0]!.texto).toContain("Escova com Mayara.");
   });
 
   it("gives two different slots to two people in the same round", async () => {

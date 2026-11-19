@@ -115,7 +115,8 @@ export async function procurarVagas(
 
   let avaliadas = 0;
   let ofertadas = 0;
-  for (const inscricao of fila.slice(0, TETO_DA_RODADA)) {
+  for (const inscricao of fila) {
+    if (avaliadas >= TETO_DA_RODADA) break;
     if (comOferta.has(inscricao.contactId)) continue;
     const janela = janelaDeBusca(inscricao, hoje);
     if (!janela) continue;
@@ -151,7 +152,8 @@ export async function procurarVagas(
     const texto = textoDaOfertaAvec({
       nome: await repo.nomeDoContato(org, inscricao.contactId),
       servico: oferta.servico_rotulo,
-      profissional: oferta.profissional_nome,
+      // The salon never names who attends unless the client asked for that professional.
+      profissional: inscricao.pedido.profissional ? oferta.profissional_nome : null,
       opcao: vaga,
       expiraEm,
       substituiData: inscricao.substituiData,
