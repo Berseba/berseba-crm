@@ -30,6 +30,7 @@ import {
   rescheduleAppointment,
   type AvecAppointment,
 } from "@/lib/integrations/avec/client";
+import { fold, principaisPara } from "@/lib/integrations/avec/busca";
 import { avecConfigFor, type AvecConfig } from "@/lib/integrations/avec/config";
 import {
   COMPRIMENTOS,
@@ -351,14 +352,6 @@ export const avecMyAppointments: McpToolDefinition<typeof myAppointmentsShape> =
   },
 };
 
-const fold = (s: string) =>
-  s
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-
 const SEM_OFERTAS = refusal(
   "sem_ofertas",
   true,
@@ -422,22 +415,6 @@ export const avecFindServices: McpToolDefinition<typeof findServicesShape> = {
     };
   },
 };
-
-/** The professionals of an oferta the client accepts: all, or the one she named. */
-function principaisPara(
-  salao: Salao,
-  oferta: NonNullable<ReturnType<typeof ofertaPorId>>,
-  profissional: string | undefined,
-): string[] | null {
-  const todas = oferta.porProfissional.map((p) => p.profissional);
-  if (!profissional) return todas;
-  const alvo = fold(profissional);
-  const achadas = todas.filter((id) => {
-    const nome = fold(salao.profissionais[id]?.nome ?? "");
-    return id === profissional.trim() || nome === alvo || nome.split(" ")[0] === alvo;
-  });
-  return achadas.length ? achadas : null;
-}
 
 function opcaoView(salao: Salao, o: Opcao) {
   return {
