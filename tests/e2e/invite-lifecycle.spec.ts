@@ -22,7 +22,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { test, expect, type Page } from "./helpers/test";
+import { esperarARevelacaoNasCargas, test, expect, type Page } from "./helpers/test";
 import { createClient } from "@supabase/supabase-js";
 
 import { uniqueEmail } from "./helpers/auth";
@@ -148,6 +148,7 @@ test.describe("ciclo de vida do convite (ponta a ponta + adversarial)", () => {
 
     // (a) telas autenticadas de /app + endpoints — como agent (membro, sem MFA)
     const ctx = await browser.newContext();
+    ctx.on("page", esperarARevelacaoNasCargas);
     const page = await ctx.newPage();
     await page.goto("/login");
     await page.locator("#email").fill(base.users.agent!.email);
@@ -167,6 +168,7 @@ test.describe("ciclo de vida do convite (ponta a ponta + adversarial)", () => {
 
     // (b) /login/mfa — login de senha do admin, sem completar o TOTP
     const mctx = await browser.newContext();
+    mctx.on("page", esperarARevelacaoNasCargas);
     const mp = await mctx.newPage();
     await mp.goto("/login");
     await mp.locator("#email").fill(base.users.admin!.email);
@@ -179,6 +181,7 @@ test.describe("ciclo de vida do convite (ponta a ponta + adversarial)", () => {
   test("1. ciclo feliz: convidar → aceitar → vira agent → cai no inbox", async ({ browser }) => {
     // admin convida
     const adminCtx = await browser.newContext();
+    adminCtx.on("page", esperarARevelacaoNasCargas);
     const adminPage = await adminCtx.newPage();
     await loginAdminTotp(adminPage);
     const { acceptUrl, failed } = await issueInvite(adminPage, inv.invitee_email, "agent");
@@ -191,6 +194,7 @@ test.describe("ciclo de vida do convite (ponta a ponta + adversarial)", () => {
 
     // convidado loga e aceita
     const inviteeCtx = await browser.newContext();
+    inviteeCtx.on("page", esperarARevelacaoNasCargas);
     const page = await inviteeCtx.newPage();
     await page.goto("/login");
     await page.locator("#email").fill(inv.invitee_email);
@@ -252,6 +256,7 @@ test.describe("ciclo de vida do convite (ponta a ponta + adversarial)", () => {
       exp: Math.floor(Date.now() / 1000) + 3600,
     });
     const ctx = await browser.newContext();
+    ctx.on("page", esperarARevelacaoNasCargas);
     const page = await ctx.newPage();
     await login(page, inv.invitee_email); // já é membro → cai no /app
     // 1º aceite (reaplica)
@@ -269,6 +274,7 @@ test.describe("ciclo de vida do convite (ponta a ponta + adversarial)", () => {
 
   test("5. already_member: reconvidar quem já é membro → failed already_member", async ({ browser }) => {
     const ctx = await browser.newContext();
+    ctx.on("page", esperarARevelacaoNasCargas);
     const page = await ctx.newPage();
     await loginAdminTotp(page);
     const { failed } = await issueInvite(page, inv.invitee_email, "agent");
@@ -520,6 +526,7 @@ test.describe("ciclo de vida do convite (ponta a ponta + adversarial)", () => {
     browser,
   }) => {
     const ctx = await browser.newContext();
+    ctx.on("page", esperarARevelacaoNasCargas);
     const page = await ctx.newPage();
     await loginAdminTotp(page);
     const { acceptUrl } = await issueInvite(page, FRESH_EMAIL, "agent");
@@ -543,6 +550,7 @@ test.describe("ciclo de vida do convite (ponta a ponta + adversarial)", () => {
 
   test("14. admin reenvia pelo menu da linha", async ({ browser }) => {
     const ctx = await browser.newContext();
+    ctx.on("page", esperarARevelacaoNasCargas);
     const page = await ctx.newPage();
     await loginAdminTotp(page);
     await page.goto("/app/team");
@@ -563,6 +571,7 @@ test.describe("ciclo de vida do convite (ponta a ponta + adversarial)", () => {
 
   test("15. admin revoga; o token deixa de valer mesmo dentro do prazo", async ({ browser }) => {
     const adminCtx = await browser.newContext();
+    adminCtx.on("page", esperarARevelacaoNasCargas);
     const adminPage = await adminCtx.newPage();
     await loginAdminTotp(adminPage);
 
@@ -592,6 +601,7 @@ test.describe("ciclo de vida do convite (ponta a ponta + adversarial)", () => {
 
     // o convidado tenta aceitar o link antigo → recusado, apesar de assinado e no prazo
     const inviteeCtx = await browser.newContext();
+    inviteeCtx.on("page", esperarARevelacaoNasCargas);
     const ip = await inviteeCtx.newPage();
     await ip.goto("/login");
     await ip.locator("#email").fill(FRESH_EMAIL);
@@ -665,8 +675,10 @@ test("convite novo: alternar cadastro/login e entrar só na equipe convidada, se
   expect(antes.error).toBeNull();
   expect(antes.data.users.some((u) => u.email === email)).toBe(false);
   const adminCtx = await browser.newContext();
+  adminCtx.on("page", esperarARevelacaoNasCargas);
   const adminPage = await adminCtx.newPage();
   const ctx = await browser.newContext();
+  ctx.on("page", esperarARevelacaoNasCargas);
   const page = await ctx.newPage();
   let usuarioId: string | undefined;
   try {

@@ -2,7 +2,7 @@ name: sync-upstream
 
 # Weekly sync with the upstream product (melgarafael/DeskcommCRM) — Berseba.
 #
-# Every Monday morning (or on "Run workflow"):
+# On "Run workflow" (manual fallback of the Sunday routine, see BERSEBA.md):
 #   1. finds the LATEST upstream release and which release is already in our main;
 #   2. merges it into a `sync/upstream-vX.Y.Z` branch;
 #   3. writes the `.changes/` fragment our own release will consume
@@ -26,9 +26,9 @@ name: sync-upstream
 # block zeroes `pull-requests`, so `gh pr list` with GITHUB_TOKEN answers 403
 # (release.yml declares `pull-requests: read` for the same reason).
 
+# Manual fallback only: the weekly sync is the Sunday 13:00 routine described in
+# BERSEBA.md ("Upstream sync"), which also resolves conflicts and updates the VPS.
 on:
-  schedule:
-    - cron: "0 12 * * 1" # Monday, 09:00 America/Sao_Paulo
   workflow_dispatch: {}
 
 permissions:

@@ -11,23 +11,21 @@
  *     função pura do conteúdo);
  *   - is_blocked lido DIRETO da fonte (contacts) — não existe mais cache.
  */
-import type { Queryable } from "../../queue/queue";
-import type { CrmEdgeConfig } from "./mcp-client";
-import { deriveLgpdFromContact, type LgpdInput } from "../../guardrails/lgpd/legal-basis";
-import { isoLocalComOffset } from "@/lib/tempo/agora";
-import { logger } from "@/lib/logger";
-import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
-import { lerRemetenteDeGrupo } from "@/lib/messaging/remetente-de-grupo";
-import { outboundAuthor, type OutboundAuthor } from "./outbound-author.berseba";
-import {
-  frameMediaBody,
-  INICIO_DA_MOLDURA_DE_MIDIA,
-  MARCADOR_IMAGEM_NAO_VISTA,
-} from "./moldura-de-midia";
+import type { Queryable } from '../../queue/queue';
+import type { CrmEdgeConfig } from './mcp-client';
+import { deriveLgpdFromContact, type LgpdInput } from '../../guardrails/lgpd/legal-basis';
+import { isoLocalComOffset } from '@/lib/tempo/agora';
+import { logger } from '@/lib/logger';
+import { nomeDoContato } from '@/lib/contacts/rotulo-do-contato';
+import { lerRemetenteDeGrupo } from '@/lib/messaging/remetente-de-grupo';
+// A mesma régua de "primeiro nome" do balão (#4031): o rótulo do prompt e o da
+// tela saem iguais para a mesma pessoa.
+import { primeiroNomeDeQuemEnviou } from '@/lib/inbox/nome-no-balao';
+import { frameMediaBody, INICIO_DA_MOLDURA_DE_MIDIA, MARCADOR_IMAGEM_NAO_VISTA } from './moldura-de-midia';
 
 // A régua mora num módulo folha para a tela usar a mesma conta (ver o cabeçalho de lá).
-import { countPayloadTokens } from "@/lib/ai/estimativa-de-tokens";
-export { CHARS_PER_TOKEN, countPayloadTokens } from "@/lib/ai/estimativa-de-tokens";
+import { countPayloadTokens } from '@/lib/ai/estimativa-de-tokens';
+export { CHARS_PER_TOKEN, countPayloadTokens } from '@/lib/ai/estimativa-de-tokens';
 
 /** Knobs do payload (env LEAD_CONTEXT_*; defaults documentados no .env.example). */
 export interface LeadContextKnobs {
@@ -46,27 +44,28 @@ export interface LeadContextKnobs {
 
 /** Uma mensagem do histórico, já curada. */
 export interface LeadContextMessage {
-  direction: "inbound" | "outbound";
-  /**
-   * Berseba: who wrote an OUTBOUND message (from `messages.sent_via`), so the
-   * model tells its own speech from the team's. Absent on inbound. Optional in
-   * the type for the same reason as `contact_id`: fixtures in
-   * `tests/invariants/**` build messages without it.
-   */
-  author?: OutboundAuthor;
+  direction: 'inbound' | 'outbound';
   /** Corpo textual; mídia usa o derivado (transcrição/visão/pdf) ou marcador [tipo]. */
   body: string;
   /**
-   * Quem escreveu esta mensagem quando ela veio de um GRUPO (#2729).
+   * Quem escreveu esta mensagem (#2729 nos grupos, #4580 nas enviadas).
    *
-   * Numa conversa 1:1 o autor é óbvio: é o contato da ficha. Num grupo há três
-   * pessoas na mesma conversa — a empresa, o cliente e a dona — e sem este campo
-   * o modelo lê todas elas como a MESMA voz, ou como "o cliente". O dado já
-   * existe gravado (`messages.metadata.group_sender`, do ingest de grupo); ele
-   * só não chegava aqui.
+   * Numa conversa 1:1 RECEBIDA o autor é óbvio: é o contato da ficha, e o campo
+   * fica ausente. Num grupo há três pessoas na mesma conversa — a empresa, o
+   * cliente e a dona — e sem este campo o modelo lê todas elas como a MESMA voz,
+   * ou como "o cliente". O dado já existe gravado (`messages.metadata.group_sender`,
+   * do ingest de grupo); ele só não chegava aqui.
    *
-   * AUSENTE (não `null`) nas conversas 1:1 e nas mensagens enviadas por nós: o
-   * participante é do grupo, e só o grupo tem participante. `lid` fica de fora
+   * Nas mensagens ENVIADAS o autor também vinha ausente, e o efeito medido é o
+   * da #4580: a resposta do agente de vendas, a do agente de suporte e a de uma
+   * pessoa da equipe chegavam ao modelo do mesmo jeito ("nós"), e o agente lia o
+   * que outro escreveu como se fosse dele. Aqui o rótulo segue o vocabulário da
+   * tela (`MessageBubble.senderLabel`, a mesma régua para o operador): `IA · {nome}`
+   * do agente que enviou, `Atendente · {primeiro nome}` de quem escreveu pela
+   * Caixa de entrada, e os emissores que não são nem gente nem agente com o
+   * rótulo que a coluna `messages.sent_via` garante (`Automação`, `Sistema`,
+   * `Celular`). O `phone` fica nulo nas enviadas: quem mandou não é participante
+   * de grupo, e telefone de atendente não é dado do prompt. `lid` fica de fora
    * de propósito — é identificador interno do WhatsApp, o modelo não decide nada
    * com ele, e o `phone` já é o que a tela mostra.
    */
@@ -100,7 +99,7 @@ export interface LeadContextMessage {
  */
 export interface UltimaDecisaoHumana {
   action: string;
-  decision: "approved" | "dismissed";
+  decision: 'approved' | 'dismissed';
   at: string;
 }
 
@@ -176,7 +175,7 @@ export interface LeadContext {
   messages: LeadContextMessage[];
 }
 
-export type LeadContextErrorCode = "lead_not_found" | "crm_error" | "crm_unavailable";
+export type LeadContextErrorCode = 'lead_not_found' | 'crm_error' | 'crm_unavailable';
 
 /**
  * Resultado da tool. `ok:false` é a mensagem de ensino pro modelo — pt-br,
@@ -221,18 +220,19 @@ interface DecisionRow {
  * estruturado ao lado.
  */
 function paraDecisao(row: DecisionRow): UltimaDecisaoHumana | null {
-  const acao = typeof row.payload?.next_action === "string" ? row.payload.next_action.trim() : "";
-  if (acao === "") return null; // sem O QUÊ, dizer "aprovado" não ajuda ninguém.
+  const acao =
+    typeof row.payload?.next_action === 'string' ? row.payload.next_action.trim() : '';
+  if (acao === '') return null; // sem O QUÊ, dizer "aprovado" não ajuda ninguém.
   return {
     action: acao,
-    decision: row.type === "next_action_approved" ? "approved" : "dismissed",
+    decision: row.type === 'next_action_approved' ? 'approved' : 'dismissed',
     at: row.performed_at,
   };
 }
 
 interface HistoryRow {
   id?: string;
-  direction: "inbound" | "outbound";
+  direction: 'inbound' | 'outbound';
   type: string;
   body: string | null;
   media_url: string | null;
@@ -240,13 +240,23 @@ interface HistoryRow {
   media_mime: string | null;
   media_derived_text: string | null;
   sent_at: Date;
-  /** #2729: `group_sender` do ingest de grupo — a única fonte de quem falou. */
-  metadata: Record<string, unknown> | null;
   /**
-   * Berseba: who sent an outbound (`ai`, `user`, `external_device`…). Always
-   * selected; optional so upstream tests that build rows by hand still compile.
+   * #4580 — quem enviou, tão certo quanto a coluna garante: `ai` (fala da IA),
+   * `user`/`crm` (uma pessoa pelo CRM, o default da coluna), `automation`,
+   * `system` ou `external_device`. Sem esta coluna não há como dizer de quem é
+   * a fala enviada.
    */
   sent_via?: string | null;
+  /** #4580 — a PESSOA que enviou pelo CRM; nulo em IA, automação, sistema e celular. */
+  sent_by_user_id?: string | null;
+  /**
+   * #1613 — a pessoa "em nome de" quem um token enviou. É a coluna que o servidor
+   * grava; `metadata.sent_on_behalf` só vale quando ela está preenchida (a mesma
+   * guarda do balão e do PDF).
+   */
+  sent_on_behalf_of_user_id?: string | null;
+  /** #2729: `group_sender` do ingest de grupo — a única fonte de quem falou. */
+  metadata: Record<string, unknown> | null;
   /** O último modelo aprovado da conversa, trazido de FORA da janela — ver `MODELO_FIXADO_DIAS`. */
   fixado?: boolean;
 }
@@ -302,6 +312,113 @@ export function historicoComOModeloFixado(linhasDaMaisNova: HistoryRow[]): Histo
   return linhasDaMaisNova.filter((l) => !(l.fixado && l.id && naJanela.has(l.id))).reverse();
 }
 
+/** Os `sent_via` que a tela rotula como uma PESSOA da equipe (`MessageBubble.senderLabel`). */
+const SENT_VIA_DE_PESSOA: ReadonlySet<string> = new Set(['user', 'crm']);
+
+/** Texto útil ou `null` — `metadata` é JSONB e já veio número onde se espera nome. */
+function textoUtil(valor: unknown): string | null {
+  if (typeof valor !== 'string') return null;
+  const limpo = valor.trim();
+  return limpo.length > 0 ? limpo : null;
+}
+
+/**
+ * O RÓTULO DE QUEM ENVIOU (#4580) — o autor que faltava nas mensagens de saída.
+ *
+ * O histórico só dizia o sentido ("nós"), então a resposta do agente de vendas, a
+ * do agente de suporte e a de uma pessoa da equipe chegavam ao modelo como uma
+ * voz só: ele lia o que outro escreveu como se fosse dele, repetia, contradizia
+ * ou assumia compromisso alheio. O campo é o MESMO `sender` do grupo (#2729) e o
+ * vocabulário é o da tela — `MessageBubble.senderLabel` é a régua do operador, e
+ * duas réguas para o mesmo dado divergem com o tempo.
+ *
+ * A ordem dos ramos é a de quem tem dado mais forte: a pessoa "em nome de" que um
+ * token enviou (#1613), depois a IA (com o nome que o envio gravou, #3649),
+ * depois quem apertou o botão no CRM, e por fim as máquinas, que a coluna
+ * `sent_via` nomeia sem ambiguidade. `null` só quando a própria coluna do autor
+ * não veio — aí não há o que afirmar, e inventar autor é pior que calar.
+ *
+ * `nomesDaEquipe` vem de fora (uma consulta por contexto) e é opcional: sem ele
+ * o rótulo cai em "Atendente", que é exatamente o que a tela faz quando o nome
+ * do atendente não resolve.
+ */
+export function remetenteDaSaida(
+  m: Pick<HistoryRow, 'sent_via' | 'sent_by_user_id' | 'sent_on_behalf_of_user_id' | 'metadata'>,
+  nomesDaEquipe: ReadonlyMap<string, string | null> = new Map(),
+): { name: string; phone: null } | null {
+  const sentVia = m.sent_via ?? null;
+  if (sentVia === null) return null;
+
+  // O nome gravado em `metadata.sent_on_behalf` só vale com a coluna preenchida:
+  // é a guarda do balão (`MessageBubble`) e do PDF (`exporta-pdf`).
+  const emNomeDe = m.sent_on_behalf_of_user_id ? m.metadata?.sent_on_behalf : undefined;
+  if (emNomeDe !== null && typeof emNomeDe === 'object') {
+    const nome = primeiroNomeDeQuemEnviou((emNomeDe as Record<string, unknown>).user_name);
+    return { name: nome !== null ? `Atendente · ${nome}` : 'Atendente', phone: null };
+  }
+
+  if (sentVia === 'ai') {
+    const nome = textoUtil(m.metadata?.ai_actor_name);
+    return { name: nome !== null ? `IA · ${nome}` : 'IA', phone: null };
+  }
+
+  if (SENT_VIA_DE_PESSOA.has(sentVia)) {
+    const nome = m.sent_by_user_id
+      ? primeiroNomeDeQuemEnviou(nomesDaEquipe.get(m.sent_by_user_id) ?? null)
+      : null;
+    return { name: nome !== null ? `Atendente · ${nome}` : 'Atendente', phone: null };
+  }
+
+  // O que não é gente nem agente: o rótulo é o da tela, e a coluna o garante.
+  if (sentVia === 'automation') return { name: 'Automação', phone: null };
+  if (sentVia === 'system') return { name: 'Sistema', phone: null };
+  if (sentVia === 'external_device') return { name: 'Celular', phone: null };
+  return null;
+}
+
+/**
+ * O NOME de cada pessoa da equipe que enviou pelo CRM neste histórico — UMA
+ * consulta por contexto, nunca por mensagem (#4580).
+ *
+ * O nome não está em `messages`: o envio grava o ID (`sent_by_user_id`) e o nome
+ * mora em `auth.users.raw_user_meta_data`, que o pool do motor só alcança pela
+ * função `fn_nomes_dos_membros` (migration 9314, `security definer`, `service_role`).
+ * É a mesma leitura que a tela faz pelo admin client desde o #4031 — aqui sem RTT
+ * ao GoTrue, porque do lado do motor já existe Postgres direto. Nome de pessoa
+ * NUNCA é lido de `metadata`: ali é entrada do cliente (#3649).
+ *
+ * Nunca lança: sem `service_role`, com a função ausente numa instalação antiga ou
+ * com a leitura falhando, o mapa volta vazio e o rótulo cai em "Atendente" —
+ * autoria perdida é melhor que turno derrubado.
+ */
+async function nomesDaEquipeNoHistorico(
+  db: Queryable,
+  tenantId: string,
+  history: HistoryRow[],
+): Promise<Map<string, string | null>> {
+  const ids = new Set<string>();
+  for (const m of history) {
+    if (m.direction !== 'outbound' || !m.sent_by_user_id) continue;
+    if (!SENT_VIA_DE_PESSOA.has(m.sent_via ?? '')) continue;
+    ids.add(m.sent_by_user_id);
+  }
+  if (ids.size === 0) return new Map();
+  try {
+    const { rows } = await db.query<{ user_id: string; full_name: string | null }>(
+      `select n.user_id::text as user_id, n.full_name
+         from fn_nomes_dos_membros($1, $2::uuid[]) n`,
+      [tenantId, [...ids]],
+    );
+    return new Map(rows.map((r) => [r.user_id, r.full_name]));
+  } catch (err) {
+    logger.warn('lead-context: nome de quem enviou não lido — a fala sai sem nome', {
+      organizationId: tenantId,
+      erro: err instanceof Error ? err.message : String(err),
+    });
+    return new Map();
+  }
+}
+
 export async function getLeadContext(
   db: Queryable,
   _cfg: CrmEdgeConfig,
@@ -316,8 +433,8 @@ export async function getLeadContext(
   const contact = contactRows[0];
   if (!contact) {
     return teach(
-      "lead_not_found",
-      "não encontrei esse lead nesta organização — confira o lead antes de continuar; se o problema persistir, peça handoff humano.",
+      'lead_not_found',
+      'não encontrei esse lead nesta organização — confira o lead antes de continuar; se o problema persistir, peça handoff humano.',
     );
   }
 
@@ -353,7 +470,7 @@ export async function getLeadContext(
             .query<HistoryRow>(
               `select * from (
                 (select id, direction, type, body, media_url, media_storage_path, media_mime,
-                        media_derived_text, sent_at, metadata, sent_via, false as fixado
+                        media_derived_text, sent_at, metadata, sent_via, sent_by_user_id, sent_on_behalf_of_user_id, false as fixado
                  from messages
                  where organization_id = $1 and conversation_id = $2
                    and direction in ('inbound', 'outbound')
@@ -361,12 +478,12 @@ export async function getLeadContext(
                      and ((messages.direction='inbound' and messages.service_revision=c.service_revision
                        and messages.demanda_id is not distinct from c.current_demanda_id)
                        or (messages.direction='outbound' and messages.sent_at >= c.service_started_at)))
-                   and ${HISTORY_MAX_AGE_SQL}
+                 and ${HISTORY_MAX_AGE_SQL}
                  order by sent_at desc, id desc
                  limit $3)
                 union all
                 (select id, direction, type, body, media_url, media_storage_path, media_mime,
-                        media_derived_text, sent_at, metadata, sent_via, true as fixado
+                        media_derived_text, sent_at, metadata, sent_via, sent_by_user_id, sent_on_behalf_of_user_id, true as fixado
                  from messages
                  where organization_id = $1 and conversation_id = $2
                    and direction = 'outbound' and type = 'template'
@@ -382,8 +499,7 @@ export async function getLeadContext(
       db.query<{ desfecho: string }>(
         `select distinct d.desfecho from demandas d join demanda_conversas dc on dc.demanda_id=d.id and dc.organization_id=d.organization_id
          where d.organization_id=$1 and dc.conversation_id=$2 and d.fechada_em is not null limit 5`,
-        [input.tenantId, conversationId],
-      ),
+        [input.tenantId, conversationId]),
     ]);
     return { conversationId, history, previousOutcomes };
   };
@@ -428,7 +544,7 @@ export async function getLeadContext(
       );
       return propostaRows[0] ?? null;
     } catch (err) {
-      logger.warn("lead-context: consulta de proposta falhou — contexto segue sem ela", {
+      logger.warn('lead-context: consulta de proposta falhou — contexto segue sem ela', {
         organizationId: input.tenantId,
         erro: err instanceof Error ? err.message : String(err),
       });
@@ -438,6 +554,11 @@ export async function getLeadContext(
 
   const [{ conversationId, history, previousOutcomes }, lastHumanDecision, last_proposal] =
     await Promise.all([conversaHistoricoEDesfechos(), ultimaDecisao(), ultimaProposta()]);
+
+  // #4580 — o nome de quem da EQUIPE enviou sai em UMA consulta por contexto, e
+  // só quando há enviada de pessoa no histórico: conversa só de IA e de cliente
+  // não paga este RTT (a função devolve mapa vazio sem ir ao banco).
+  const nomesDaEquipe = await nomesDaEquipeNoHistorico(db, input.tenantId, history);
 
   // LGPD: base legal derivada DIRETO do contato (fonte da verdade, mesmo banco).
   // isProspecting=false: o MVP é inbound + follow-up — ambos respondem a lead que
@@ -453,11 +574,7 @@ export async function getLeadContext(
 
   const context = fitToBudget(
     {
-      previous_service: {
-        label:
-          "Histórico encerrado. Desfechos anteriores não são tarefas ou compromissos pendentes.",
-        outcomes: previousOutcomes.map((d) => d.desfecho),
-      },
+      previous_service: { label: 'Histórico encerrado. Desfechos anteriores não são tarefas ou compromissos pendentes.', outcomes: previousOutcomes.map((d) => d.desfecho) },
       // ⚠️ `lead_id` aqui é, e sempre foi, o id do CONTATO (ver o comentário da
       // consulta acima e `inbound-turn.ts:1121`). O nome mente, e o modelo
       // acreditava: passava este valor ao parâmetro `lead_id` das ferramentas
@@ -485,6 +602,7 @@ export async function getLeadContext(
     knobs.maxTokens,
     input.fuso,
     knobs.verImagens ?? true,
+    nomesDaEquipe,
   );
   return { ok: true, context, tokenCount: countPayloadTokens(JSON.stringify(context)), lgpd };
 }
@@ -525,11 +643,9 @@ export function corpoDaMensagem(m: CorpoDaMensagemRow, verImagens = true): strin
   // leu (17/09, ver `MARCADOR_NAO_LIDA`); o aviso diz que chegou e que ele não viu.
   // Só na foto que o CLIENTE mandou: na que nós mandamos, a legenda é nossa, e
   // rotulá-la "do cliente" atribuiria a ele o que dissemos.
-  if (!verImagens && m.type === "image" && m.direction !== "outbound") {
-    const legenda = (m.body ?? "").trim();
-    return legenda === ""
-      ? MARCADOR_IMAGEM_NAO_VISTA
-      : `${MARCADOR_IMAGEM_NAO_VISTA}\nLegenda do cliente: ${legenda}`;
+  if (!verImagens && m.type === 'image' && m.direction !== 'outbound') {
+    const legenda = (m.body ?? '').trim();
+    return legenda === '' ? MARCADOR_IMAGEM_NAO_VISTA : `${MARCADOR_IMAGEM_NAO_VISTA}\nLegenda do cliente: ${legenda}`;
   }
   const hasMedia = Boolean(m.media_storage_path || m.media_url);
   const derived = m.media_derived_text;
@@ -538,7 +654,7 @@ export function corpoDaMensagem(m: CorpoDaMensagemRow, verImagens = true): strin
   // "não consigo ver mídia" mesmo tendo o conteúdo. Sem derivado, marcador [tipo].
   return derived
     ? frameMediaBody(m.type, m.body, derived)
-    : (m.body ?? (hasMedia ? `[${m.type}]` : ""));
+    : (m.body ?? (hasMedia ? `[${m.type}]` : ''));
 }
 
 /**
@@ -549,11 +665,12 @@ export function corpoDaMensagem(m: CorpoDaMensagemRow, verImagens = true): strin
  *      repetidamente até caber. Nunca erro fatal.
  */
 function fitToBudget(
-  base: Omit<LeadContext, "messages">,
+  base: Omit<LeadContext, 'messages'>,
   history: HistoryRow[],
   maxTokens: number,
   fuso: string,
   verImagens = true,
+  nomesDaEquipe: ReadonlyMap<string, string | null> = new Map(),
 ): LeadContext {
   let messages: LeadContextMessage[] = history.map((m) => {
     const hasMedia = Boolean(m.media_storage_path || m.media_url);
@@ -561,23 +678,24 @@ function fitToBudget(
     // job passa pela mesma função. Duas receitas para a mesma linha foi o defeito
     // da #617 — o histórico mostrava o texto do áudio e a abertura dizia vazio.
     const body = corpoDaMensagem(m, verImagens);
-    // #2729 — quem falou, quando há mais de uma pessoa na conversa. Só o
-    // recebido de grupo traz `group_sender` (o ingest grava só nesse sentido);
-    // nas demais linhas o campo fica AUSENTE, e o prompt não ganha ruído.
-    const remetente = m.direction === "inbound" ? lerRemetenteDeGrupo(m.metadata) : null;
+    // #2729/#4580 — quem falou. Recebida de grupo traz `group_sender` (o ingest
+    // grava só nesse sentido) e as demais recebidas ficam sem autor, porque numa
+    // 1:1 o autor é o contato da ficha. ENVIADA traz o autor que a linha garante
+    // (IA, pessoa da equipe, automação...) — sem isso o agente lia o que outro
+    // escreveu como se fosse dele.
+    const remetente =
+      m.direction === 'inbound' ? lerRemetenteDeGrupo(m.metadata) : remetenteDaSaida(m, nomesDaEquipe);
     return {
       direction: m.direction,
-      ...(m.direction === "outbound" ? { author: outboundAuthor(m.sent_via) } : {}),
       body,
       // Hora de PAREDE do tenant, não UTC cru — ver o comentário de `sent_at` na
       // interface acima e o cabeçalho de `isoLocalComOffset`.
       sent_at: isoLocalComOffset(m.sent_at, fuso),
-      ...(remetente !== null && (remetente.name !== null || remetente.phone !== null)
+      ...(remetente !== null &&
+      (remetente.name !== null || remetente.phone !== null)
         ? { sender: { name: remetente.name, phone: remetente.phone } }
         : {}),
-      ...(hasMedia
-        ? { type: m.type, media_storage_path: m.media_storage_path, media_mime: m.media_mime }
-        : {}),
+      ...(hasMedia ? { type: m.type, media_storage_path: m.media_storage_path, media_mime: m.media_mime } : {}),
     };
   });
   const build = (msgs: LeadContextMessage[]): LeadContext => ({ ...base, messages: msgs });
@@ -592,15 +710,11 @@ function fitToBudget(
   }
   if (fixado && messages.length === 2 && over(messages)) messages = messages.slice(1);
   while (messages.length === 1 && messages[0]!.body.length > 0 && over(messages)) {
-    messages = [
-      {
-        ...messages[0]!,
-        body: messages[0]!.body.slice(0, Math.floor(messages[0]!.body.length / 2)),
-      },
-    ];
+    messages = [{ ...messages[0]!, body: messages[0]!.body.slice(0, Math.floor(messages[0]!.body.length / 2)) }];
   }
   return build(messages);
 }
+
 
 // A moldura e o seu desembrulho moram juntos em `moldura-de-midia.ts` (o cartão
 // da passagem precisa ler a mesma moldura de volta). Reexportado aqui porque é
@@ -623,9 +737,8 @@ export { frameMediaBody, MARCADOR_IMAGEM_NAO_VISTA };
  * composto, então comparar os dois ali não seria a mesma pergunta.
  */
 export function textoDoClienteNaUltimaMensagem(messages: readonly LeadContextMessage[]): string {
-  const ultima = messages.findLast((m) => m.direction === "inbound");
-  if (!ultima || ultima.type !== undefined || ultima.body.startsWith(INICIO_DA_MOLDURA_DE_MIDIA))
-    return "";
+  const ultima = messages.findLast((m) => m.direction === 'inbound');
+  if (!ultima || ultima.type !== undefined || ultima.body.startsWith(INICIO_DA_MOLDURA_DE_MIDIA)) return '';
   return ultima.body;
 }
 
