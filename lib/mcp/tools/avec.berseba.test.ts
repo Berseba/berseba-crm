@@ -33,6 +33,7 @@ vi.mock("@/lib/mcp/audit", () => ({ auditMcpToolCall: vi.fn().mockResolvedValue(
 vi.mock("@/lib/integrations/avec/lista-de-espera-supabase", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   ocupacoesSeguradasPorOutras: vi.fn().mockResolvedValue([]),
+  configDaEsperaAvec: vi.fn().mockResolvedValue(null),
   dispararBuscaDaEspera: vi.fn(),
 }));
 
@@ -380,6 +381,29 @@ describe("request shape", () => {
     expect(r).toMatchObject({ ok: false, handoff: true, motivo: "sem_horario" });
     expect(String(r.mensagem)).toMatch(/Não diga que não há horário/);
     expect(String(r.todo)).toMatch(/Design de sobrancelha .*\(sexta, tarde\)/);
+  });
+
+  it("with the waitlist on, no slot offers the list before calling the team", async () => {
+    const espera = await import("@/lib/integrations/avec/lista-de-espera-supabase");
+    vi.mocked(espera.configDaEsperaAvec).mockResolvedValueOnce({
+      ativa: true,
+      prazo_maximo_minutos: 120,
+      margem_antes_minutos: 180,
+      prazo_minimo_minutos: 30,
+    });
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-23T15:00:00Z"));
+    answer(200, { data: [] });
+    const r = await run(tools.avecFreeSlots, { servico: "sobrancelha_design", dias_semana: ["sexta"] });
+    expect(r).toMatchObject({ ok: false, handoff: false, motivo: "sem_horario", lista_de_espera: true });
+    expect(String(r.mensagem)).toMatch(/avec_waitlist/);
+    expect(String(r.todo)).toMatch(/Design de sobrancelha/);
+  });
+
+  it("the waitlist tool answers 'off' when the organization did not turn it on", async () => {
+    const r = await run(tools.avecWaitlist, { acao: "entrar", servico: "escova", data_de: "2026-12-15" });
+    expect(r).toMatchObject({ ok: false, handoff: false, motivo: "lista_desligada" });
+    expect(calls).toHaveLength(0);
   });
 
   it("avec_free_slots asks for the hair length, and refuses an unknown service", async () => {

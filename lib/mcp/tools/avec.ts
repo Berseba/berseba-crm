@@ -553,6 +553,15 @@ async function visitaAvulsa(
   };
 }
 
+/** The waitlist is on for this organization. A failure reads as off: the old rule applies. */
+async function listaLigada(ctx: McpContext): Promise<boolean> {
+  try {
+    return (await configDaEsperaAvec(createAdminClient(), ctx.organizationId)) !== null;
+  } catch {
+    return false;
+  }
+}
+
 /** The waitlist's holds for other clients. A failure never blocks the search: it shows all. */
 async function seguradasPorOutras(ctx: McpContext) {
   try {
@@ -739,6 +748,23 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
         ]
           .filter(Boolean)
           .join(", ");
+        const todo = `Sem horário na agenda pelo sistema para ${pedido}${quando ? ` (${quando})` : ""}: ver um encaixe com a cliente.`;
+        // With the waitlist on, the client is offered the list before the team is called.
+        if (!input.remarcar_appointment_id && (await listaLigada(ctx))) {
+          return {
+            ok: false,
+            permitido: false,
+            motivo: "sem_horario",
+            handoff: false,
+            lista_de_espera: true,
+            mensagem:
+              "não encontrei horário para esse pedido. Não diga só que não há horário: diga com carinho " +
+              "que esse horário está ocupado e ofereça colocá-la na lista de espera (avec_waitlist, acao " +
+              "entrar), com os dias e a faixa de horário que ela pode. Se ela não quiser a lista, chame " +
+              "crm_request_human_handoff com o pedido e o todo, para a equipe ver um encaixe.",
+            todo,
+          };
+        }
         return {
           ...refusal(
             "sem_horario",
@@ -747,7 +773,7 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
               "cliente, com carinho, que a nossa equipe de atendimento vai ver o melhor horário e " +
               "já responde por aqui. Depois chame crm_request_human_handoff com o pedido e o todo.",
           ),
-          todo: `Sem horário na agenda pelo sistema para ${pedido}${quando ? ` (${quando})` : ""}: ver um encaixe com a cliente.`,
+          todo,
         };
       }
       return { ok: true, opcoes: escolhidas.map((o) => opcaoView(salao, o)) };
