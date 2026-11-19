@@ -50,7 +50,10 @@ const PEDE_PARA_SAIR = [
   // comunicativos, não apaga o padrão inteiro.
   "pare de mandar essas fotos",
   "quero sair da lista",
-  "quero cancelar a inscrição",
+  // `quero cancelar a inscrição` saiu daqui na #4579: sem objeto de
+  // comunicação, a frase é a matrícula de um curso ou a inscrição num concurso
+  // e agora ESCALA sem bloquear — o caso vive em
+  // `tests/unit/opt-out-cancelar-sozinho-e-compra.test.ts`.
   "me descadastra aí",
   // ─── Formas que passavam batido (medido por @deskcommopp4s-cmd, #1607) ─────
   //
@@ -492,15 +495,15 @@ describe("cancelar o PLANO escala sem bloquear — a palavra de duas caras (#288
       "sair da lista",
       "dar de baja la suscripcion",
       "quiero dar de baja la suscripcion",
-      "quero cancelar a inscrição",
+      "quero cancelar a inscrição das mensagens",
     ]) {
       expect(ehPedidoDeOptOut(texto), texto).toBe(true);
     }
   });
 
-  // Berseba: bare "cancelar" is not an opt-out (BERSEBA.md, "Opt-out never locks a person out").
-  it("`cancelar` SOZINHO, sem objeto, não bloqueia (Berseba)", () => {
+  it("`cancelar` SOZINHO não bloqueia nem escala — é resposta de menu (#4579)", () => {
     expect(ehPedidoDeOptOut("cancelar")).toBe(false);
+    expect(ehOptOutProvavel("cancelar")).toBe(false);
   });
 });
 
@@ -629,21 +632,22 @@ describe("ehPedidoDeOptOut — pedido INEQUÍVOCO, o que autoriza bloquear", () 
     expect(ehPedidoDeOptOut("tem como parar a dor?")).toBe(false);
   });
 
-  // Berseba: bare "cancelar" cancels an appointment, not the channel (see the
-  // comment in PALAVRAS_DE_OPT_OUT). Only cancelling the subscription blocks.
-  it("bare cancelar is not an opt-out; cancelling the subscription is", () => {
+  it("cancelar sozinho não é palavra de saída; cancelar UMA COISA também não", () => {
+    // #4579: no atendimento, "cancelar" sozinho é resposta a um menu — não
+    // descadastro. "quero cancelar o pedido" é a compra, nunca o canal.
     expect(ehPedidoDeOptOut("cancelar")).toBe(false);
-    expect(ehPedidoDeOptOut("Cancelar")).toBe(false);
-    expect(ehOptOutProvavel("Cancelar")).toBe(false);
     expect(ehPedidoDeOptOut("quero cancelar o pedido")).toBe(false);
-    expect(ehPedidoDeOptOut("quero cancelar a inscrição")).toBe(true);
+    // Upstream #4579: "cancelar a inscrição" without an object escalates, it no longer blocks.
+    expect(ehPedidoDeOptOut("quero cancelar a inscrição")).toBe(false);
+    expect(ehOptOutProvavel("quero cancelar a inscrição")).toBe(true);
     expect(ehPedidoDeOptOut("Cancelar.")).toBe(false);
     expect(ehPedidoDeOptOut("Cancelar 👍")).toBe(false);
   });
 
-  it("cancelling the messages or one's own subscription blocks, in pt and es", () => {
+  it("cancelling the messages blocks (Berseba); one's own subscription does not (upstream #4579)", () => {
     expect(ehPedidoDeOptOut("quero cancelar as mensagens")).toBe(true);
-    expect(ehPedidoDeOptOut("cancelar minha inscrição")).toBe(true);
+    // Upstream #4579: no longer blocks (upstream's ambiguous pattern takes only "a inscrição").
+    expect(ehPedidoDeOptOut("cancelar minha inscrição")).toBe(false);
     // "cancelar mi suscripción" alone escalates without blocking since upstream #2886 (it may be the plan).
     // one message, not the channel
     expect(ehPedidoDeOptOut("pode cancelar a mensagem que mandei?")).toBe(false);

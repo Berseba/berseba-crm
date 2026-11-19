@@ -1046,7 +1046,7 @@ describe("registration", () => {
       expect(handler, name).toBeDefined();
       expect(entry?.category, name).toBe(handler?.category);
       expect(entry?.oQueToca, name).toBe("Agenda do estúdio (Mirae)");
-      expect(entry?.pacotes, name).toEqual(["atender"]);
+      expect(entry?.pacotes, name).toEqual(["reter"]);
     }
   });
 

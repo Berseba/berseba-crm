@@ -534,7 +534,7 @@ describe("wiring", () => {
     const corpo = fonte.slice(fonte.indexOf("export async function aplicarEfeitosPosEntrada"));
     const checagem = corpo.indexOf("await devolverAoAgenteSePrazoVenceu(admin, entrada)");
     expect(checagem).toBeGreaterThan(corpo.indexOf("await aplicarOptOut(admin, entrada)"));
-    expect(checagem).toBeLessThan(corpo.indexOf("await abrirDemanda(admin, entrada)"));
+    expect(checagem).toBeLessThan(corpo.indexOf("await abrirDemanda(admin, entrada"));
     expect(checagem).toBeLessThan(corpo.indexOf("await pedirDespachoDoAgente(admin, entrada)"));
   });
 

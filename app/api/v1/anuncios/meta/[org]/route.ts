@@ -57,6 +57,7 @@ import {
 } from "@/lib/plataformas-de-anuncio/pagina-de-captura";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { comIdDaRequisicao } from "@/lib/api/wrappers";
 
 export const dynamic = "force-dynamic";
 
@@ -83,10 +84,10 @@ export async function GET(req: NextRequest, ctx: RouteContext): Promise<Response
   // `lib/plataformas-de-anuncio/capture-rate-limit.ts`.
   const limite = await checkCaptureRateLimit("meta", org, clientIp(req));
   if (limite === "blocked") {
-    return new NextResponse(null, {
+    return comIdDaRequisicao(new NextResponse(null, {
       status: 429,
       headers: { "Retry-After": String(CAPTURE_WINDOW_SECONDS) },
-    });
+    }), req);
   }
 
   const parametros = new URL(req.url).searchParams;
