@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { useTagDeIdioma } from "@/hooks/i18n/useLocaleDeData";
 import { useT } from "@/hooks/i18n/useT";
 import { apiClient } from "@/lib/api/client";
 import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
@@ -63,10 +64,8 @@ const CHAVE = ["avec", "lista-de-espera"];
 const SELECT = "min-h-11 w-full rounded-md border border-border bg-background px-2 text-sm";
 
 const dataBr = (d: string | null | undefined) => (d ? `${d.slice(8, 10)}/${d.slice(5, 7)}` : "");
-const horaDe = (iso: string) =>
-  new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" }).format(
-    new Date(iso),
-  );
+const horaDe = (iso: string, tag: string) =>
+  new Date(iso).toLocaleTimeString(tag, { timeZone: "America/Sao_Paulo", hour: "2-digit", minute: "2-digit" });
 
 function Prazos({ config }: { config: Config | null }) {
   const t = useT();
@@ -291,6 +290,7 @@ function Linha({
   agir?: (acao: "subir" | "descer" | "remover" | "procurar") => void;
 }) {
   const t = useT();
+  const tagDoIdioma = useTagDeIdioma();
   const servico = estado.servicos.find((s) => s.id === inscricao.pedido.servico)?.nome ?? inscricao.pedido.servico;
   const profissional = inscricao.pedido.profissional
     ? (estado.profissionais[inscricao.pedido.profissional] ?? inscricao.pedido.profissional)
@@ -306,7 +306,7 @@ function Linha({
   const situacao = (() => {
     switch (inscricao.status) {
       case "offered":
-        return `${t("Oferta enviada")}: ${dataBr(inscricao.oferta?.data)} ${inscricao.oferta?.inicio ?? ""} · ${t("até")} ${inscricao.oferta_expira_em ? horaDe(inscricao.oferta_expira_em) : ""}`;
+        return `${t("Oferta enviada")}: ${dataBr(inscricao.oferta?.data)} ${inscricao.oferta?.inicio ?? ""} · ${t("até")} ${inscricao.oferta_expira_em ? horaDe(inscricao.oferta_expira_em, tagDoIdioma) : ""}`;
       case "booked":
         return `${t("Encaixada")} ${dataBr(inscricao.resultado?.data)} ${inscricao.resultado?.inicio ?? ""}`;
       case "cancelled":

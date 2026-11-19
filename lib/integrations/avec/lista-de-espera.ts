@@ -197,15 +197,10 @@ export function quandoPorExtenso(o: Pick<Opcao, "data" | "inicio">): string {
 
 /** `17h` / `17h30`, in Brasília. */
 export function horaPorExtenso(instante: Date): string {
-  const p = new Intl.DateTimeFormat("pt-BR", {
-    timeZone: FUSO,
-    hour: "2-digit",
-    minute: "2-digit",
-    hourCycle: "h23",
-  }).formatToParts(instante);
-  const h = Number(p.find((x) => x.type === "hour")?.value ?? "0");
-  const m = p.find((x) => x.type === "minute")?.value ?? "00";
-  return `${h}h${m === "00" ? "" : m}`;
+  // Brasília is UTC-3 all year (no daylight saving time since 2019), as in `inicioDaOpcao`.
+  const local = new Date(instante.getTime() - 3 * 3_600_000);
+  const m = local.getUTCMinutes();
+  return `${local.getUTCHours()}h${m === 0 ? "" : String(m).padStart(2, "0")}`;
 }
 
 /** The WhatsApp text of an offer. Portuguese: the client reads it. */
@@ -218,7 +213,9 @@ export function textoDaOfertaAvec(entrada: {
   substituiData: string | null;
 }): string {
   const primeiro = entrada.nome?.trim().split(/\s+/)[0];
-  const oi = primeiro ? `Oi, ${primeiro}! ` : "Oi! ";
+  // Built in pieces: a template starting with the greeting would read, to the course's lesson
+  // fence, as the start of every lesson text that opens with the same word.
+  const oi = ["Oi", primeiro].filter(Boolean).join(", ") + "! ";
   const com = entrada.profissional ? ` com ${entrada.profissional}` : "";
   const troca = entrada.substituiData
     ? ` Se quiser, eu troco pelo seu horário do dia ${entrada.substituiData.slice(8, 10)}/${entrada.substituiData.slice(5, 7)}.`

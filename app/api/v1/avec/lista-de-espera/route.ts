@@ -13,6 +13,7 @@ import { configDaListaDeEsperaSchema } from "@/lib/agenda/lista-de-espera";
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
+import { nomeDoContato, type ContatoNomeavel } from "@/lib/contacts/rotulo-do-contato";
 import { requireSupportWrite } from "@/lib/impersonate/support";
 import { conferirPedido } from "@/lib/integrations/avec/busca";
 import { dataSchema, horaSchema, hojeNoSalao, MAX_DIAS_A_FRENTE, somarDias } from "@/lib/integrations/avec/lista-de-espera";
@@ -81,9 +82,7 @@ export async function GET(): Promise<Response> {
         .in("id", ids)
     : { data: [] };
   const nomes = new Map(
-    ((contatos ?? []) as Array<{ id: string; name: string | null; display_name: string | null; phone_number: string | null }>).map(
-      (c) => [c.id, c.name?.trim() || c.display_name?.trim() || c.phone_number || null],
-    ),
+    ((contatos ?? []) as Array<ContatoNomeavel & { id: string }>).map((c) => [c.id, nomeDoContato(c)]),
   );
   const comNome = (l: Record<string, unknown>) => ({ ...l, contato: nomes.get(String(l.contact_id)) ?? null });
 
