@@ -30,6 +30,11 @@
  */
 export const AUDIT_ACTIONS = [
   // ── Berseba ──────────────────────────────────────────────────────────────
+  // The avec salon's waitlist (`app/api/v1/avec/lista-de-espera/`, migration 9007): the
+  // organization's settings, an entry added by the team, an entry removed by the team.
+  "avec.lista_de_espera_configurada",
+  "avec.lista_de_espera_inscrita",
+  "avec.lista_de_espera_removida",
   // "Registrar toque" on the lead (`app/api/v1/leads/[id]/touches/route.ts`,
   // migration 9005). Metadata: the channel and whether a note was typed, never
   // the note itself.

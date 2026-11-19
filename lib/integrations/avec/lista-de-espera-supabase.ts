@@ -23,7 +23,7 @@ import {
   type PortasDaEspera,
   type RepoDaEspera,
 } from "./lista-de-espera-motor";
-import { ofertaPorId, salaoDa } from "./ofertas";
+import { ofertaPorId, salaoDa, type Salao } from "./ofertas";
 
 type SB = SupabaseClient;
 
@@ -198,6 +198,11 @@ export function repoSupabase(admin: SB): RepoDaEspera {
       return linha.name?.trim() || null;
     },
   };
+}
+
+/** The salon of the organization, or `null` when it does not use avec. */
+export function salaoDaOrganizacao(org: string): Salao | null {
+  return avecConfigFor(org) ? salaoDa(org) : null;
 }
 
 /** avec's side of the ports for one organization, or `null` when it has no salon or no avec. */

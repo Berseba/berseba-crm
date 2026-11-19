@@ -436,6 +436,23 @@ const DO_SERVIDOR: RecursoOpcional[] = [
 ];
 
 const DA_EMPRESA: RecursoOpcional[] = [
+  {
+    // Berseba (migration 9007): the avec salon's waitlist. The menu door shows for organizations
+    // that use avec (`AVEC_API_ORG_IDS`); this line says whether the company turned it on.
+    id: "lista_de_espera_do_salao",
+    nome: "Lista de espera do salão",
+    oQueFaz:
+      "Quando abre um horário no avec, a vaga é oferecida no WhatsApp a uma cliente da lista por vez, com prazo para responder.",
+    nivel: "organizacao",
+    padrao: "desligado",
+    quemDecide: "manager",
+    href: "/app/lista-de-espera",
+    capacidade: "lista_de_espera_avec",
+    ler: peloSettings((s) => {
+      const lista = s.lista_de_espera;
+      return Boolean(lista && typeof lista === "object" && (lista as Record<string, unknown>).ativa === true);
+    }),
+  },
   { id: "cadencias_da_empresa", nome: "Cadências de e-mail da empresa", oQueFaz: "Sequências opcionais com inscrição manual e descadastro, usando o e-mail da instalação.", nivel: "organizacao", padrao: "desligado", quemDecide: "admin", href: "/app/settings/cadencias", modulo: "cadencias", capacidade: "cadencias", ler: (f) => f.settings === null || f.modulos === null ? "nao_lido" : capacidadesLigadas(f.settings, f.modulos).includes("cadencias") ? "ligado" : "desligado" },
   {
     id: "conversa_fica_com_quem_atendeu",

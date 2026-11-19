@@ -119,6 +119,11 @@ CRONS="
 # Idempotente pelo índice único (recurrence_source_id, due_date) — duas rodadas
 # juntas gravam uma ocorrência só.
 */10 * * * *|45|api/v1/cron/task-recurrence
+# Berseba: A LISTA DE ESPERA DO SALÃO NO AVEC. De 10 em 10 minutos: vence as
+# ofertas sem resposta, passa a vaga para a próxima e procura vaga no avec para
+# a fila. Só organizações em AVEC_API_ORG_IDS com a lista ligada; as outras não
+# fazem consulta nenhuma. Até 120 s porque cada inscrição consulta o avec.
+*/10 * * * *|120|api/v1/cron/avec-waitlist
 */15 * * * *|45|api/v1/cron/agenda-expira-pendentes
 */15 * * * *|60|api/v1/cron/risk-watcher
 # O CASO PARADO. De hora em hora, e não a cada 5 minutos: o prazo é de 24h, e
