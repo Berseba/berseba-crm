@@ -18,6 +18,7 @@ import type { CapacidadeDaOrganizacao } from "@/lib/organizacao/capacidades";
 import { TOOLS_AVEC } from "./avec"; // Berseba
 import { TOOLS_MIRAE } from "./mirae"; // Berseba
 import { TOOLS_ATOS } from "./atos"; // Berseba
+import { TOOLS_LEAD_EVENTS } from "./lead-events"; // Berseba
 import { TOOLS_AGENDAMENTO } from "./agendamento";
 import { TOOLS_AMIGO } from "./amigo";
 import { TOOLS_ATENDIMENTO } from "./atendimento";
@@ -41,6 +42,7 @@ export const TOOL_CATALOG: ReadonlyArray<McpToolCatalogEntry> = [
   ...TOOLS_AVEC, // Berseba
   ...TOOLS_MIRAE, // Berseba
   ...TOOLS_ATOS, // Berseba
+  ...TOOLS_LEAD_EVENTS, // Berseba
   ...TOOLS_AGENDAMENTO,
   ...TOOLS_AMIGO,
   ...TOOLS_ATENDIMENTO,
