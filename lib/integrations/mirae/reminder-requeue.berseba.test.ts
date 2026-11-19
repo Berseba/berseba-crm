@@ -58,6 +58,24 @@ function fakePool(over: { done?: boolean; live?: boolean } = {}) {
 }
 
 describe("requeueStaleMiraeReminder", () => {
+  it("a charge notice is queued again even with another return live (the link must reach the person)", async () => {
+    const charge = {
+      ...REMINDER,
+      kind: "charge_notice",
+      appointment_start_at: null,
+      professional_first_name: null,
+      charge: { link: "https://www.asaas.com/i/abc", due_date: "2026-11-25", amount_cents: 29900 },
+    };
+    const { pool, calls } = fakePool({ live: true });
+    const avisar = vi.fn();
+    const job = { ...JOB, payload: { ...JOB.payload, mirae_reminder: charge } };
+    expect(await requeueStaleMiraeReminder(pool, job as never, NOW, avisar)).toBe("requeued");
+    expect(calls.some((c) => c.sql.includes("as live"))).toBe(false);
+    const insert = calls.find((c) => c.sql.includes("insert into cron_jobs"))!;
+    expect((insert.params[2] as { mirae_reminder: unknown }).mirae_reminder).toEqual(charge);
+    expect(avisar).not.toHaveBeenCalled();
+  });
+
   it("queues the same reminder again, due now, on the current boundary", async () => {
     const { pool, calls } = fakePool();
     const avisar = vi.fn();
@@ -90,7 +108,7 @@ describe("requeueStaleMiraeReminder", () => {
     expect(iLive).toBeGreaterThan(iLock);
     expect(iInsert).toBeGreaterThan(iLive);
     // The horizon is the appointment.
-    expect(calls[iLive]!.params).toEqual(["org", "contact", new Date("2026-11-18T12:00:00.000Z")]);
+    expect(calls[iLive]!.params).toEqual(["org", "contact", new Date("2026-11-18T12:00:00.000Z"), "charge_notice"]);
     expect(client.release).toHaveBeenCalled();
   });
 

@@ -1146,6 +1146,16 @@ const HOSTS_DECLARADOS: Record<string, EntradaDeHost> = {
       "placeholder do campo de client id do Google: exibe o FORMATO do identificador (e o host que ele carrega) para quem vai criar a credencial no console.",
   },
   // ── entrada conferida e identificador de fio ─────────────────────────────
+  "www.asaas.com": {
+    categoria: "PLATAFORMA",
+    motivo:
+      "Berseba: host aceito na validação do link de fatura (`https://www.asaas.com/i/<id>`) que o Mirae manda num aviso de cobrança (`lib/integrations/mirae/asaas-link.ts`): é entrada que o CRM CONFERE antes de a assistente copiar o link para a aluna, nunca endereço que ele busca. Sem a linha, qualquer host passaria por link de pagamento.",
+  },
+  "sandbox.asaas.com": {
+    categoria: "PLATAFORMA",
+    motivo:
+      "Berseba: o mesmo link de fatura do Asaas no ambiente de testes, aceito só fora de produção (`asaasInvoiceHosts`, `lib/integrations/mirae/asaas-link.ts`). Conferido, nunca chamado.",
+  },
   "meet.google.com": {
     categoria: "PLATAFORMA",
     motivo:
@@ -1500,6 +1510,9 @@ describe("catraca de host de terceiro no código que embarca", () => {
       // protocolo manda. Entrou aqui porque a régua nova do #914 passou a
       // enxergá-lo, e não porque o produto ganhou host novo.
       "s.whatsapp.net",
+      // Decisão escrita (Berseba, Matheus, 2026-11-19): o link da fatura do Asaas
+      // que o Mirae manda no aviso de cobrança é conferido por host — nunca chamado.
+      "sandbox.asaas.com",
       // Decisão escrita (spec 24, auditoria de site): assinatura de construtor
       // (Google Sites) — nunca chamada, nunca exibida.
       "sites.google.com",
@@ -1520,6 +1533,9 @@ describe("catraca de host de terceiro no código que embarca", () => {
       // Decisão escrita (spec 24, auditoria de site): assinatura de construtor
       // (WordPress.com gratuito) — nunca chamada, nunca exibida.
       "wordpress.com",
+      // Decisão escrita (Berseba, Matheus, 2026-11-19): o link da fatura do Asaas
+      // que o Mirae manda no aviso de cobrança é conferido por host — nunca chamado.
+      "www.asaas.com",
       // Decisão escrita (#2354): a CNPD, autoridade de controlo citada na
       // alínea f) do relatório de acesso de Portugal. Categoria própria,
       // AUTORIDADE, porque não é painel, amostra nem plataforma: é o endereço

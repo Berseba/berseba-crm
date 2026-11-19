@@ -1,7 +1,7 @@
 /**
  * Berseba: POST /api/v1/mirae/reminder-messages — a Mirae reminder becomes a message written by
- * the agent: a draft a person approves, or (organization setting `auto`, confirmations only) the
- * agent's automatic send through the normal send gate (berseba-crm#127).
+ * the agent: a draft a person approves, or (organization setting `auto`, confirmations and charge
+ * notices only) the agent's automatic send through the normal send gate (berseba-crm#127).
  *
  * Same auth, buckets and answers as `/api/v1/mirae/milestones`: Bearer `dsk_…` with `mcp:write`
  * and at least `agent` (`authorizeMiraeWrite`); the organization comes from the token row, never
@@ -10,8 +10,11 @@
  *
  * Mirae calls from a queue that retries on 409/429/5xx, so every business outcome is a 200 with
  * `data.outcome` (`drafted`, `scheduled`, `already_drafted`, `already_handled`,
- * `contact_not_found`, `contact_blocked`); a malformed body is a 400 and reminder messages turned
- * off for the organization a 422, both final.
+ * `contact_not_found`, `contact_blocked`); a malformed body is a 400, and reminder messages turned
+ * off for the organization (`reminder_messages_disabled`) or a `kind: "charge"` whose
+ * `charge_link` (`https://www.asaas.com/i/<id>`), `charge_due_date` (`YYYY-MM-DD`, yesterday to 45
+ * days ahead) or `charge_amount_cents` (integer, 1 to 10,000,000) is missing or invalid
+ * (`invalid_charge`, fields in `details.fields`) a 422, all final.
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
@@ -77,6 +80,14 @@ export async function POST(req: NextRequest): Promise<Response> {
       replayed: result.replayed ?? false,
     };
 
+    if (result.outcome === "invalid_charge") {
+      logger.warn("mirae.reminder_message_invalid_charge", { ...log, fields: result.invalidFields ?? [] });
+      return fail("invalid_charge", "The charge link, due date or amount is missing or invalid.", 422, {
+        requestId,
+        details: { fields: result.invalidFields ?? [] },
+      });
+    }
+
     if (result.outcome === "disabled") {
       logger.warn("mirae.reminder_message_disabled", log);
       return fail(
@@ -103,6 +114,7 @@ export async function POST(req: NextRequest): Promise<Response> {
           actor_type: "api_token",
           actor_api_token_id: auth.apiTokenId,
           reminder_id: parsed.data.reminder_id,
+          kind: parsed.data.kind ?? null,
           delivery: result.delivery,
           cron_job_id: result.cronJobId,
         },
