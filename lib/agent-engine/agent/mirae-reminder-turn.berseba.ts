@@ -37,6 +37,7 @@ import {
   checkMiraeAppointment,
   type AppointmentCheck,
 } from '@/lib/integrations/mirae/reminder-precheck';
+import { sentChargeMessages } from '@/lib/integrations/mirae/charge-sent';
 
 import { insertInboxItem } from '../db/repository';
 import { withFields } from '../obs/logger';
@@ -322,26 +323,6 @@ export interface MiraeReminderTurnPorts {
   checkAppointment: typeof checkMiraeAppointment;
   avisar: typeof avisarLembreteQueNaoSaiu;
   sentCharge: typeof sentChargeMessages;
-}
-
-/**
- * The bodies of the outbound messages of this conversation that carry the charge link, newest
- * first. The Asaas link identifies the invoice, so any time counts: a retried job whose first run
- * already sent it finds it here.
- */
-export async function sentChargeMessages(
-  pool: Pick<pg.Pool, 'query'>,
-  input: { tenantId: string; conversationId: string; link: string },
-): Promise<string[]> {
-  const { rows } = await pool.query<{ body: string }>(
-    `select body from messages
-      where organization_id = $1 and conversation_id = $2 and direction = 'outbound'
-        and status <> 'failed' and strpos(coalesce(body, ''), $3) > 0
-      order by created_at desc
-      limit 5`,
-    [input.tenantId, input.conversationId, input.link],
-  );
-  return rows.map((r) => r.body);
 }
 
 /** Pure: does this text carry the amount and the due date as the briefing wrote them? */

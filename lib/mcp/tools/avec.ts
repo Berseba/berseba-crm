@@ -30,7 +30,30 @@ import {
   rescheduleAppointment,
   type AvecAppointment,
 } from "@/lib/integrations/avec/client";
+import type { ConfigDaListaDeEspera } from "@/lib/agenda/lista-de-espera";
+import { conferirPedido, fold, opcoesDoPedido, principaisPara } from "@/lib/integrations/avec/busca";
 import { avecConfigFor, type AvecConfig } from "@/lib/integrations/avec/config";
+import {
+  MAX_DIAS_A_FRENTE,
+  chaveDaVaga,
+  hojeNoSalao,
+  horaSchema,
+  janelaDeBusca,
+  motivoParaNaoServir,
+  ocupacaoDa,
+  sobrepoe,
+  somarDias,
+  type InscricaoAvec,
+} from "@/lib/integrations/avec/lista-de-espera";
+import type { OfertaGuardada } from "@/lib/integrations/avec/lista-de-espera-motor";
+import {
+  configDaEsperaAvec,
+  dispararBuscaDaEspera,
+  encerrarAoMarcar,
+  lerOferta,
+  ocupacoesSeguradasPorOutras,
+  repoSupabase,
+} from "@/lib/integrations/avec/lista-de-espera-supabase";
 import {
   COMPRIMENTOS,
   MAX_OPCOES,
@@ -44,10 +67,12 @@ import {
   salaoDa,
   servicosAvulsos,
   validarOpcao,
+  type Comprimento,
   type Opcao,
   type Salao,
 } from "@/lib/integrations/avec/ofertas";
 import { logger } from "@/lib/logger";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 import type { McpContext, McpToolDefinition } from "../types";
 
@@ -351,14 +376,6 @@ export const avecMyAppointments: McpToolDefinition<typeof myAppointmentsShape> =
   },
 };
 
-const fold = (s: string) =>
-  s
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
-
 const SEM_OFERTAS = refusal(
   "sem_ofertas",
   true,
@@ -367,14 +384,10 @@ const SEM_OFERTAS = refusal(
 
 /** Today in Brasília, `YYYY-MM-DD`. */
 export function hojeEmBrasilia(now = new Date()): string {
-  return new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo" }).format(now);
+  return hojeNoSalao(now);
 }
 
-function addDays(date: string, days: number): string {
-  const d = new Date(`${date}T12:00:00Z`);
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
-}
+const addDays = somarDias;
 
 /** `27/10`: the agent repeats this, never computes it. */
 const dataBr = (date: string) => `${date.slice(8, 10)}/${date.slice(5, 7)}`;
@@ -422,22 +435,6 @@ export const avecFindServices: McpToolDefinition<typeof findServicesShape> = {
     };
   },
 };
-
-/** The professionals of an oferta the client accepts: all, or the one she named. */
-function principaisPara(
-  salao: Salao,
-  oferta: NonNullable<ReturnType<typeof ofertaPorId>>,
-  profissional: string | undefined,
-): string[] | null {
-  const todas = oferta.porProfissional.map((p) => p.profissional);
-  if (!profissional) return todas;
-  const alvo = fold(profissional);
-  const achadas = todas.filter((id) => {
-    const nome = fold(salao.profissionais[id]?.nome ?? "");
-    return id === profissional.trim() || nome === alvo || nome.split(" ")[0] === alvo;
-  });
-  return achadas.length ? achadas : null;
-}
 
 function opcaoView(salao: Salao, o: Opcao) {
   return {
@@ -555,6 +552,30 @@ async function visitaAvulsa(
           ? TODO_BY_CODE.not_allowed!
           : `Remarcar ou cancelar ${appointment.service ?? "o serviço"} de ${dataBr(appointment.date)} às ${appointment.start_time} no avec.`,
   };
+}
+
+/** The waitlist is on for this organization. A failure reads as off: the old rule applies. */
+async function listaLigada(ctx: McpContext): Promise<boolean> {
+  try {
+    return (await configDaEsperaAvec(createAdminClient(), ctx.organizationId)) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/** The waitlist's holds for other clients. A failure never blocks the search: it shows all. */
+async function seguradasPorOutras(ctx: McpContext) {
+  try {
+    return await ocupacoesSeguradasPorOutras(
+      createAdminClient(),
+      ctx.organizationId,
+      ctx.contatoDoTurno ?? null,
+      new Date(),
+    );
+  } catch (err) {
+    logger.warn("avec: waitlist holds unreadable", { error: err instanceof Error ? err.message : String(err) });
+    return [];
+  }
 }
 
 export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
@@ -712,6 +733,9 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
           (o) => !oferta.semSabado || new Date(`${o.data}T12:00:00Z`).getUTCDay() !== 6,
         );
       }
+      // A slot the waitlist offered to another client is hers until the deadline.
+      const seguradas = await seguradasPorOutras(ctx);
+      if (seguradas.length) opcoes = opcoes.filter((o) => !sobrepoe(ocupacaoDa(o), seguradas));
       const escolhidas = escolherOpcoes(opcoes, pref, hoje);
       if (escolhidas.length === 0) {
         // No slot the salon would offer: a person finds a fit (Matheus, 2026-10-23).
@@ -725,6 +749,23 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
         ]
           .filter(Boolean)
           .join(", ");
+        const todo = `Sem horário na agenda pelo sistema para ${pedido}${quando ? ` (${quando})` : ""}: ver um encaixe com a cliente.`;
+        // With the waitlist on, the client is offered the list before the team is called.
+        if (!input.remarcar_appointment_id && (await listaLigada(ctx))) {
+          return {
+            ok: false,
+            permitido: false,
+            motivo: "sem_horario",
+            handoff: false,
+            lista_de_espera: true,
+            mensagem:
+              "não encontrei horário para esse pedido. Não diga só que não há horário: diga com carinho " +
+              "que esse horário está ocupado e ofereça colocá-la na lista de espera (avec_waitlist, acao " +
+              "entrar), com os dias e a faixa de horário que ela pode. Se ela não quiser a lista, chame " +
+              "crm_request_human_handoff com o pedido e o todo, para a equipe ver um encaixe.",
+            todo,
+          };
+        }
         return {
           ...refusal(
             "sem_horario",
@@ -733,7 +774,7 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
               "cliente, com carinho, que a nossa equipe de atendimento vai ver o melhor horário e " +
               "já responde por aqui. Depois chame crm_request_human_handoff com o pedido e o todo.",
           ),
-          todo: `Sem horário na agenda pelo sistema para ${pedido}${quando ? ` (${quando})` : ""}: ver um encaixe com a cliente.`,
+          todo,
         };
       }
       return { ok: true, opcoes: escolhidas.map((o) => opcaoView(salao, o)) };
@@ -803,6 +844,8 @@ export const avecCancel: McpToolDefinition<typeof cancelShape> = {
         reason: input.reason,
         idempotencyKey: key,
       });
+      // The freed slot may be someone's on the waitlist.
+      dispararBuscaDaEspera(ctx.organizationId);
       return { ok: true, appointment_id: result.id, status: result.status };
     });
   },
@@ -919,6 +962,8 @@ export const avecReschedule: McpToolDefinition<typeof rescheduleShape> = {
         slotId: slotId!,
         idempotencyKey: key,
       });
+      // The old slot is free now: it may be someone's on the waitlist.
+      dispararBuscaDaEspera(ctx.organizationId);
       return {
         ok: true,
         agendamento: { ...appointmentView(moved), data_br: dataBr(moved.date) },
@@ -977,55 +1022,96 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
       };
     }
     if (!avecIdempotencyKey(ctx, "avec_book", input)) return NO_JOB;
-    const feitos: AvecAppointment[] = [];
-    for (const [i, slot] of opcao.slots.entries()) {
-      // The name is in the key: after "which of the two records?", the retry is another write.
-      const key = avecIdempotencyKey(ctx, "avec_book", {
-        opcao_id: input.opcao_id,
-        etapa: i,
-        nome: input.nome_completo ?? null,
-      })!;
-      try {
-        feitos.push(
-          await createAppointment(ready.config, {
-            phone: ready.phone,
-            // Who the client said will be served must match the record; the WhatsApp name only
-            // breaks a tie between records of the phone (Berseba/berseba-mayara-morales#28, #29).
-            clientName: input.nome_completo ?? ready.name ?? undefined,
-            nameMustMatch: Boolean(input.nome_completo),
-            slotId: slot.slotId,
-            note: i === 0 ? input.note : undefined,
-            idempotencyKey: key,
-          }),
-        );
-      } catch (err) {
-        if (i === 0) {
-          if (
-            err instanceof AvecApiError &&
-            err.code === "ambiguous_client" &&
-            !input.nome_completo
-          ) {
-            // Be proactive before handing off: the full name usually tells which record it is.
-            return {
+    // A slot the waitlist is holding for another client is not hers to take.
+    const seguradas = await seguradasPorOutras(ctx);
+    const pontos = opcao.slots.map((s) => ({ profissional: s.profissional, data: s.data, inicio: s.inicio, fim: s.inicio + 1 }));
+    if (seguradas.length && sobrepoe(pontos, seguradas)) {
+      return {
+        ok: false,
+        code: "slot_unavailable",
+        handoff: false,
+        mensagem:
+          "esse horário acabou de ser oferecido a outra cliente da lista de espera. Busque horários de " +
+          "novo com avec_free_slots e ofereça outro.",
+      };
+    }
+    const marcada = await marcarVisita(ctx, ready, salao, opcao, {
+      tool: "avec_book",
+      opcaoId: input.opcao_id,
+      note: input.note,
+      nomeCompleto: input.nome_completo,
+      repetir: "avec_book de novo com o mesmo opcao_id e nome_completo",
+    });
+    if (!marcada.ok) return marcada.falha;
+    // She booked the service she was waiting for: her entry leaves the waitlist.
+    void encerrarAoMarcar(ctx.organizationId, ctx.contatoDoTurno!, opcao.oferta.id, opcao.slots[0]!.data, new Date());
+    return visitaMarcadaView(salao, opcao, marcada.feitos);
+  },
+};
+
+type FalhaDaMarcacao = { ok: false; code: string } & Record<string, unknown>;
+
+/**
+ * Books every step of a visit option in avec, in the recipe's order. Shared by `avec_book` and
+ * the waitlist's acceptance; the idempotency keys keep the `avec_book` format.
+ */
+async function marcarVisita(
+  ctx: McpContext,
+  ready: { config: AvecConfig; phone: string; name: string | null },
+  salao: Salao,
+  opcao: NonNullable<ReturnType<typeof validarOpcao>>,
+  opts: { tool: string; opcaoId: string; note?: string; nomeCompleto?: string; repetir: string },
+): Promise<{ ok: true; feitos: AvecAppointment[] } | { ok: false; falha: FalhaDaMarcacao }> {
+  const feitos: AvecAppointment[] = [];
+  for (const [i, slot] of opcao.slots.entries()) {
+    // The name is in the key: after "which of the two records?", the retry is another write.
+    const key = avecIdempotencyKey(ctx, opts.tool, {
+      opcao_id: opts.opcaoId,
+      etapa: i,
+      nome: opts.nomeCompleto ?? null,
+    })!;
+    try {
+      feitos.push(
+        await createAppointment(ready.config, {
+          phone: ready.phone,
+          // Who the client said will be served must match the record; the WhatsApp name only
+          // breaks a tie between records of the phone (Berseba/berseba-mayara-morales#28, #29).
+          clientName: opts.nomeCompleto ?? ready.name ?? undefined,
+          nameMustMatch: Boolean(opts.nomeCompleto),
+          slotId: slot.slotId,
+          note: i === 0 ? opts.note : undefined,
+          idempotencyKey: key,
+        }),
+      );
+    } catch (err) {
+      if (i === 0) {
+        if (err instanceof AvecApiError && err.code === "ambiguous_client" && !opts.nomeCompleto) {
+          // Be proactive before handing off: the full name usually tells which record it is.
+          return {
+            ok: false,
+            falha: {
               ok: false,
               code: err.code,
               handoff: false,
               mensagem:
                 'o salão tem mais de uma ficha com este telefone. Pergunte com naturalidade: "Pra ' +
                 'eu confirmar aqui, qual é o nome completo de quem vai ser atendida?" e chame ' +
-                "avec_book de novo com o mesmo opcao_id e nome_completo.",
-            };
-          }
-          const twice =
-            err instanceof AvecApiError && err.code === "slot_unavailable" && slotTakenBefore(ctx);
-          return failure(err, { slotTakenTwice: twice, isWrite: true });
+                `${opts.repetir}.`,
+            },
+          };
         }
-        logger.warn("avec: visit booked in part", {
-          step: i,
-          code: err instanceof AvecApiError ? err.code : "unexpected",
-        });
-        const hhmm = `${String(Math.floor(slot.inicio / 60)).padStart(2, "0")}:${String(slot.inicio % 60).padStart(2, "0")}`;
-        return {
+        const twice =
+          err instanceof AvecApiError && err.code === "slot_unavailable" && slotTakenBefore(ctx);
+        return { ok: false, falha: failure(err, { slotTakenTwice: twice, isWrite: true }) as FalhaDaMarcacao };
+      }
+      logger.warn("avec: visit booked in part", {
+        step: i,
+        code: err instanceof AvecApiError ? err.code : "unexpected",
+      });
+      const hhmm = `${String(Math.floor(slot.inicio / 60)).padStart(2, "0")}:${String(slot.inicio % 60).padStart(2, "0")}`;
+      return {
+        ok: false,
+        falha: {
           ok: false,
           code: err instanceof AvecApiError ? err.code : "internal_error",
           handoff: true,
@@ -1037,26 +1123,457 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
           todo:
             `Ficou marcado no avec: ${feitos.map((f) => `${f.service ?? "serviço"} ${dataBr(f.date)} ${f.start_time} (${f.professional ?? ""})`).join("; ")}. ` +
             `Falta marcar a etapa ${i + 1} de ${opcao.oferta.rotulo} às ${hhmm} (${nomeDe(salao, slot.profissional) ?? "auxiliar"}): conferir e completar no avec, depois confirmar com a cliente.`,
+        },
+      };
+    }
+  }
+  return { ok: true, feitos };
+}
+
+function visitaMarcadaView(
+  salao: Salao,
+  opcao: NonNullable<ReturnType<typeof validarOpcao>>,
+  feitos: AvecAppointment[],
+) {
+  const first = feitos[0]!;
+  return {
+    ok: true as const,
+    agendamento: {
+      servico: opcao.oferta.rotulo,
+      dia_semana: weekdayOf(first.date),
+      data: first.date,
+      data_br: dataBr(first.date),
+      inicio: first.start_time,
+      termina_por_volta_de: feitos
+        .map((f) => f.end_time)
+        .sort()
+        .at(-1),
+      profissional: nomeDe(salao, opcao.principal) ?? first.professional,
+      status: first.status_name ?? first.status,
+    },
+    etapas: feitos.map(appointmentView),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// waitlist (lib/integrations/avec/lista-de-espera*.ts)
+// ---------------------------------------------------------------------------
+
+const hora = horaSchema.optional();
+
+const waitlistShape = {
+  acao: z
+    .enum(["entrar", "aceitar", "recusar", "sair"])
+    .describe("aceitar = ela disse SIM à vaga oferecida; recusar = não quer essa vaga; sair = não quer mais a lista."),
+  servico: z.string().trim().max(40).optional().describe("Código de avec_find_services."),
+  comprimento: z.enum(["curto", "medio", "longo", "extra_longo"]).optional(),
+  profissional: z.string().trim().max(60).optional().describe("Só se ela pediu uma."),
+  data_de: date.describe("Primeiro dia em que ela pode vir."),
+  data_ate: date.describe("Último dia (um dia só: igual a data_de)."),
+  depois_de: hora.describe('Começar a partir de, ex.: "14:00".'),
+  ate: hora.describe('Começar no máximo até, ex.: "11:00".'),
+  substitui_data: date.describe("Se ela quer adiantar um horário que já tem: o dia dele (cancelado no SIM)."),
+  observacao: freeText("Algo que a equipe precisa saber."),
+  mesmo_assim: z.boolean().optional().describe("Ela recusou as opções de ha_horario."),
+  nome_completo: z.string().trim().min(3).max(120).optional().describe("Só se a ferramenta pedir."),
+};
+
+type PedidoDaTool = { servico: string; comprimento: Comprimento | null; profissional: string | null };
+
+const LISTA_DESLIGADA = {
+  ok: false,
+  handoff: false,
+  motivo: "lista_desligada",
+  mensagem:
+    "a lista de espera não está ligada neste salão. Não ofereça lista de espera: siga a regra de quando não há horário.",
+};
+
+export const avecWaitlist: McpToolDefinition<typeof waitlistShape> = {
+  name: "avec_waitlist",
+  description:
+    "Lista de espera do salão para a cliente DESTA conversa. entrar: sem o horário que ela quer, " +
+    "ofereça antes o mais próximo; se ela preferir esperar (ou adiantar um horário que já tem), " +
+    "coloque com serviço, dias e faixa de horário. Quando abrir vaga, o sistema chama uma pessoa " +
+    "por vez aqui, com prazo. aceitar: ela respondeu SIM à vaga; marca e confirma no avec.",
+  inputSchema: waitlistShape,
+  category: "write",
+  requiresRole: "ai_operator",
+  requiresScope: "mcp:write",
+  redigirParaAuditoria: (args) => redactFreeText("nome_completo")(redactFreeText("observacao")(args)),
+  handler: async (input, ctx) => {
+    const ready = await prepare(ctx);
+    if ("ok" in ready) return ready;
+    const salao = salaoDa(ctx.organizationId);
+    if (!salao) return SEM_OFERTAS;
+    const admin = createAdminClient();
+    const org = ctx.organizationId;
+    const contato = ctx.contatoDoTurno!;
+    const config = await configDaEsperaAvec(admin, org);
+    if (!config) return LISTA_DESLIGADA;
+    const agora = new Date();
+    try {
+      if (input.acao === "entrar") return await entrarNaLista(ctx, ready, salao, admin, config, input, agora);
+      if (input.acao === "aceitar") return await aceitarVaga(ctx, ready, salao, admin, agora, input.nome_completo);
+      if (input.acao === "recusar") {
+        const oferta = await ofertaAbertaDe(admin, org, contato);
+        if (!oferta) return SEM_OFERTA_ABERTA;
+        await repoSupabase(admin).voltarParaFila(org, oferta.id, oferta.chave, agora);
+        dispararBuscaDaEspera(org);
+        return {
+          ok: true,
+          mensagem: "ela continua na lista para outras vagas. Diga isso a ela com carinho.",
         };
       }
+      // sair
+      let saida = admin
+        .from("avec_waitlist")
+        .update({ status: "cancelled", encerrada_em: agora.toISOString(), updated_at: agora.toISOString() })
+        .eq("organization_id", org)
+        .eq("contact_id", contato)
+        .in("status", ["waiting", "offered"]);
+      if (input.servico) saida = saida.eq("pedido->>servico", input.servico);
+      const { data, error } = await saida.select("id, status");
+      if (error) throw new Error(error.message);
+      dispararBuscaDaEspera(org);
+      return { ok: true, removidas: (data ?? []).length };
+    } catch (err) {
+      return failure(err);
     }
-    const first = feitos[0]!;
-    return {
-      ok: true,
-      agendamento: {
-        servico: opcao.oferta.rotulo,
-        dia_semana: weekdayOf(first.date),
-        data: first.date,
-        data_br: dataBr(first.date),
-        inicio: first.start_time,
-        termina_por_volta_de: feitos
-          .map((f) => f.end_time)
-          .sort()
-          .at(-1),
-        profissional: nomeDe(salao, opcao.principal) ?? first.professional,
-        status: first.status_name ?? first.status,
-      },
-      etapas: feitos.map(appointmentView),
-    };
   },
 };
+
+const SEM_OFERTA_ABERTA = {
+  ok: false,
+  handoff: false,
+  motivo: "sem_oferta",
+  mensagem:
+    "não há vaga da lista de espera oferecida a ela agora. Se ela quer marcar, busque com avec_free_slots.",
+};
+
+async function ofertaAbertaDe(
+  admin: ReturnType<typeof createAdminClient>,
+  org: string,
+  contato: string,
+): Promise<{ id: string; chave: string | null; expira: Date; oferta: OfertaGuardada; substituiData: string | null } | null> {
+  const { data, error } = await admin
+    .from("avec_waitlist")
+    .select("id, oferta, oferta_chave, oferta_expira_em, substitui_data")
+    .eq("organization_id", org)
+    .eq("contact_id", contato)
+    .eq("status", "offered")
+    .order("ofertada_em", { ascending: false })
+    .limit(1);
+  if (error) throw new Error(error.message);
+  const linha = (data ?? [])[0] as Record<string, unknown> | undefined;
+  const oferta = lerOferta(linha?.oferta);
+  if (!linha || !oferta || typeof linha.oferta_expira_em !== "string") return null;
+  return {
+    id: String(linha.id),
+    chave: typeof linha.oferta_chave === "string" ? linha.oferta_chave : null,
+    expira: new Date(linha.oferta_expira_em),
+    oferta,
+    substituiData: typeof linha.substitui_data === "string" ? linha.substitui_data : null,
+  };
+}
+
+async function entrarNaLista(
+  ctx: McpContext,
+  ready: { config: AvecConfig; phone: string; name: string | null },
+  salao: Salao,
+  admin: ReturnType<typeof createAdminClient>,
+  config: ConfigDaListaDeEspera,
+  input: z.infer<z.ZodObject<typeof waitlistShape>>,
+  agora: Date,
+) {
+  const hoje = hojeEmBrasilia(agora);
+  if (!input.servico || !input.data_de) {
+    return {
+      ok: false,
+      handoff: false,
+      mensagem: "para entrar na lista, mande servico e data_de (e data_ate, se ela pode em mais de um dia).",
+    };
+  }
+  const dataAte = input.data_ate ?? input.data_de;
+  if (input.data_de < hoje || dataAte < input.data_de || dataAte > addDays(hoje, MAX_DIAS_A_FRENTE)) {
+    return {
+      ok: false,
+      handoff: false,
+      mensagem: `confira os dias com a cliente: de hoje (${dataBr(hoje)}) em diante, até ${MAX_DIAS_A_FRENTE} dias.`,
+    };
+  }
+  if (input.depois_de && input.ate && input.ate < input.depois_de) {
+    return { ok: false, handoff: false, mensagem: "a faixa de horário está invertida: confira com a cliente." };
+  }
+  const pedidoBruto: PedidoDaTool = {
+    servico: input.servico,
+    comprimento: input.comprimento ?? null,
+    profissional: input.profissional ?? null,
+  };
+  const conferido = conferirPedido(salao, pedidoBruto);
+  if (!conferido.ok) {
+    const oferta = ofertaPorId(salao, input.servico);
+    const mensagens: Record<string, string> = {
+      servico_desconhecido: "serviço desconhecido: use o campo servico de avec_find_services.",
+      precisa_comprimento:
+        "este serviço depende do comprimento do cabelo: pergunte se é curto, médio, longo ou extra longo.",
+      profissional_nao_faz: `essa profissional não faz este serviço aqui. Quem faz: ${(oferta?.porProfissional ?? [])
+        .map((p) => nomeDe(salao, p.profissional))
+        .join(", ")}. Pergunte à cliente.`,
+      comprimento_com_a_equipe: "esse comprimento fica com a equipe: " + HANDOFF_INSTRUCTION,
+    };
+    return {
+      ok: false,
+      handoff: conferido.motivo === "comprimento_com_a_equipe",
+      mensagem: mensagens[conferido.motivo],
+    };
+  }
+  // A named professional is stored by id; "any" stays null.
+  const pedido = {
+    servico: input.servico,
+    comprimento: conferido.comprimento,
+    profissional: input.profissional && conferido.principais.length === 1 ? conferido.principais[0]! : null,
+  };
+  const inscricao: InscricaoAvec = {
+    id: "nova",
+    contactId: ctx.contatoDoTurno!,
+    pedido,
+    dataDe: input.data_de,
+    dataAte,
+    depoisDe: input.depois_de ?? null,
+    ate: input.ate ?? null,
+    substituiData: input.substitui_data ?? null,
+    ordem: 0,
+    createdAt: agora,
+    recusadas: [],
+  };
+
+  // A slot that serves her already exists: offer it now instead of making her wait. When she
+  // turned those down (`mesmo_assim`), they are remembered as refused.
+  const recusadasAoEntrar: string[] = [];
+  const janela = janelaDeBusca(inscricao, hoje);
+  if (janela) {
+    const opcoes = (await opcoesDoPedido(ready.config, salao, pedido, janela.de, janela.ate)) ?? [];
+    const seguradas = await ocupacoesSeguradasPorOutras(admin, ctx.organizationId, ctx.contatoDoTurno!, agora);
+    const livres = opcoes
+      .filter((o) => motivoParaNaoServir(inscricao, o, seguradas, agora, config) === null)
+      .sort((a, b) => a.data.localeCompare(b.data) || a.inicio.localeCompare(b.inicio))
+      .slice(0, MAX_OPCOES);
+    if (input.mesmo_assim) recusadasAoEntrar.push(...livres.map(chaveDaVaga));
+    else if (livres.length) {
+      return {
+        ok: false,
+        handoff: false,
+        motivo: "ha_horario",
+        mensagem:
+          "há horário livre no que ela pediu: ofereça estas opções (para marcar, avec_book com o opcao_id). " +
+          "Só coloque na lista se ela não quiser nenhuma.",
+        opcoes: livres.map((o) => opcaoView(salao, o)),
+      };
+    }
+  }
+
+  const linha = {
+    pedido,
+    data_de: input.data_de,
+    data_ate: dataAte,
+    depois_de: input.depois_de ?? null,
+    ate: input.ate ?? null,
+    substitui_data: input.substitui_data ?? null,
+    observacoes: input.observacao ?? null,
+    updated_at: agora.toISOString(),
+  };
+  const { data: existente, error: erroLeitura } = await admin
+    .from("avec_waitlist")
+    .select("id, recusadas")
+    .eq("organization_id", ctx.organizationId)
+    .eq("contact_id", ctx.contatoDoTurno!)
+    .eq("pedido->>servico", pedido.servico)
+    .in("status", ["waiting", "offered"])
+    .limit(1);
+  if (erroLeitura) throw new Error(erroLeitura.message);
+  const jaEstava = (existente ?? [])[0] as { id: string; recusadas: string[] | null } | undefined;
+  // The slots she turned down now join the ones she refused before.
+  const recusadas = [...new Set([...(jaEstava?.recusadas ?? []), ...recusadasAoEntrar])].slice(-50);
+  if (recusadas.length) Object.assign(linha, { recusadas });
+  const { error } = jaEstava
+    ? await admin
+        .from("avec_waitlist")
+        .update(linha)
+        .eq("organization_id", ctx.organizationId)
+        .eq("id", jaEstava.id)
+    : await admin.from("avec_waitlist").insert({
+        ...linha,
+        organization_id: ctx.organizationId,
+        contact_id: ctx.contatoDoTurno!,
+        created_by_kind: "ai",
+      });
+  if (error) throw new Error(error.message);
+  return {
+    ok: true,
+    inscricao: {
+      servico: ofertaPorId(salao, pedido.servico)?.rotulo ?? pedido.servico,
+      profissional: pedido.profissional ? nomeDe(salao, pedido.profissional) : "qualquer profissional",
+      dias: input.data_de === dataAte ? dataBr(input.data_de) : `${dataBr(input.data_de)} a ${dataBr(dataAte)}`,
+      horario:
+        input.depois_de || input.ate
+          ? [input.depois_de ? `a partir das ${input.depois_de}` : null, input.ate ? `até as ${input.ate}` : null]
+              .filter(Boolean)
+              .join(" ")
+          : "qualquer horário",
+      ...(input.substitui_data ? { adiantar_o_horario_de: dataBr(input.substitui_data) } : {}),
+      ja_estava_na_lista: Boolean(jaEstava),
+    },
+    mensagem:
+      "Diga que ela está na lista de espera e que, se abrir um horário, você chama aqui na hora. " +
+      "Não prometa que vai abrir.",
+  };
+}
+
+/** How long an accepted offer stays held while avec books it. */
+const PRAZO_DA_MARCACAO_MS = 5 * 60_000;
+
+async function aceitarVaga(
+  ctx: McpContext,
+  ready: { config: AvecConfig; phone: string; name: string | null },
+  salao: Salao,
+  admin: ReturnType<typeof createAdminClient>,
+  agora: Date,
+  nomeCompleto?: string,
+) {
+  const org = ctx.organizationId;
+  const aberta = await ofertaAbertaDe(admin, org, ctx.contatoDoTurno!);
+  if (!aberta) return SEM_OFERTA_ABERTA;
+  if (aberta.expira.getTime() <= agora.getTime()) {
+    return {
+      ok: false,
+      handoff: false,
+      motivo: "oferta_vencida",
+      mensagem:
+        "o prazo dessa vaga já passou e ela pode ter ido para a próxima da lista. Peça desculpas e busque " +
+        "horários com avec_free_slots.",
+    };
+  }
+  // Claim it: the cron cannot expire it while avec books, and a second accept finds it claimed.
+  const { data: reivindicada, error: erroClaim } = await admin
+    .from("avec_waitlist")
+    // Never shortens the hold: at least 5 more minutes, or the deadline she was given.
+    .update({
+      oferta_expira_em: new Date(
+        Math.max(aberta.expira.getTime(), agora.getTime() + PRAZO_DA_MARCACAO_MS),
+      ).toISOString(),
+    })
+    .eq("organization_id", org)
+    .eq("id", aberta.id)
+    .eq("status", "offered")
+    .gt("oferta_expira_em", agora.toISOString())
+    .select("id");
+  if (erroClaim) throw new Error(erroClaim.message);
+  if ((reivindicada ?? []).length !== 1) {
+    return {
+      ok: false,
+      handoff: false,
+      motivo: "oferta_vencida",
+      mensagem:
+        "o prazo dessa vaga já passou e ela pode ter ido para a próxima da lista. Peça desculpas e busque " +
+        "horários com avec_free_slots.",
+    };
+  }
+  const opcao = validarOpcao(salao, aberta.oferta.opcao_id);
+  if (!opcao) return failure(new Error("avec_waitlist: stored offer no longer matches the recipes"));
+  if (!avecIdempotencyKey(ctx, "avec_waitlist", { espera: aberta.id })) return NO_JOB;
+
+  const marcada = await marcarVisita(ctx, ready, salao, opcao, {
+    tool: "avec_waitlist",
+    opcaoId: aberta.oferta.opcao_id,
+    note: "Encaixe da lista de espera",
+    nomeCompleto,
+    repetir: 'avec_waitlist de novo com acao "aceitar" e nome_completo',
+  });
+  if (!marcada.ok) {
+    if (marcada.falha.code === "slot_unavailable") {
+      await repoSupabase(admin).voltarParaFila(org, aberta.id, aberta.chave, agora);
+      return {
+        ok: false,
+        handoff: false,
+        motivo: "vaga_perdida",
+        mensagem:
+          "alguém ocupou esse horário antes. Peça desculpas com carinho: ela continua na lista e você chama " +
+          "de novo quando abrir outro.",
+      };
+    }
+    return marcada.falha;
+  }
+
+  const avisos: string[] = [];
+  const first = marcada.feitos[0]!;
+  try {
+    await confirmAppointment(ready.config, {
+      appointmentId: first.id,
+      phone: ready.phone,
+      idempotencyKey: avecIdempotencyKey(ctx, "avec_waitlist", { espera: aberta.id, confirmar: true })!,
+    });
+  } catch (err) {
+    logger.warn("avec_waitlist: booked but not confirmed", {
+      code: err instanceof AvecApiError ? err.code : "unexpected",
+    });
+    avisos.push("O horário ficou marcado, mas não consegui deixar como Confirmado no avec.");
+  }
+
+  const canceladas: string[] = [];
+  let todo: string | null = null;
+  if (aberta.substituiData && aberta.substituiData !== first.date) {
+    try {
+      const antigas = (
+        await listAppointments(ready.config, {
+          phone: ready.phone,
+          from: aberta.substituiData,
+          to: aberta.substituiData,
+        })
+      ).filter((a) => a.status !== null && CHANGEABLE_STATUS.has(a.status));
+      // The API hides who each booking is for. More bookings that day than this recipe's steps
+      // may be someone else on the same phone (a daughter): the team cancels the right one.
+      if (antigas.length > opcao.slots.length) throw new Error("old day has more than one visit");
+      for (const a of antigas) {
+        await cancelAppointment(ready.config, {
+          appointmentId: a.id,
+          phone: ready.phone,
+          reason: "Adiantado pela lista de espera",
+          idempotencyKey: avecIdempotencyKey(ctx, "avec_waitlist", { espera: aberta.id, cancelar: a.id })!,
+        });
+        canceladas.push(`${a.service ?? "serviço"} ${dataBr(a.date)} ${a.start_time}`);
+      }
+    } catch (err) {
+      logger.warn("avec_waitlist: old visit not cancelled", {
+        code: err instanceof AvecApiError ? err.code : "unexpected",
+      });
+      todo = `Cancelar no avec o horário antigo da cliente em ${dataBr(aberta.substituiData)} (ela foi encaixada antes pela lista de espera).`;
+    }
+  }
+
+  const { error } = await admin
+    .from("avec_waitlist")
+    .update({
+      status: "booked",
+      oferta_chave: null,
+      resultado: {
+        agendamentos: marcada.feitos.map((f) => f.id),
+        data: first.date,
+        inicio: first.start_time,
+        canceladas,
+      },
+      encerrada_em: agora.toISOString(),
+      updated_at: agora.toISOString(),
+    })
+    .eq("organization_id", org)
+    .eq("id", aberta.id)
+    .eq("status", "offered");
+  if (error) logger.warn("avec_waitlist: booked but the entry was not closed", { error: error.message });
+  if (canceladas.length) dispararBuscaDaEspera(org);
+
+  return {
+    ...visitaMarcadaView(salao, opcao, marcada.feitos),
+    ...(canceladas.length ? { horario_antigo_cancelado: canceladas } : {}),
+    ...(avisos.length ? { avisos } : {}),
+    ...(todo ? { handoff: true, todo, mensagem: "confirme o novo horário à cliente. " + HANDOFF_INSTRUCTION } : {}),
+  };
+}

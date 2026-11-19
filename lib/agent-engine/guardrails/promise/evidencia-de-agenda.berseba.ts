@@ -22,9 +22,12 @@ export const FERRAMENTAS_DE_AGENDA_DO_AVEC: ReadonlySet<string> = new Set([
   "avec_reschedule",
   "avec_confirm",
   "avec_my_appointments",
+  // Accepting a waitlist offer books the visit (`agendamento`, same shape as avec_book).
+  "avec_waitlist",
 ]);
 
 const TITULOS: Record<string, string> = {
+  avec_waitlist: "Encaixe da lista de espera gravado e confirmado na agenda do salão neste atendimento",
   avec_book: "Agendamento gravado na agenda do salão neste atendimento",
   avec_reschedule: "Agendamento remarcado e gravado na agenda do salão neste atendimento",
   avec_confirm: "Presença confirmada na agenda do salão neste atendimento",

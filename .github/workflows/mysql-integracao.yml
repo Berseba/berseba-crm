@@ -64,5 +64,8 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: "1"
           SENTRY_DSN: "off"
+          # Berseba: same heap ceiling as build-and-size (perf.yml). Our code tips the type
+          # check inside `next build` past the runner's ~4.1 GB default (OOM on PR #151).
+          NODE_OPTIONS: --max-old-space-size=6144
       - name: O standalone leva o mysql2 completo?
         run: node scripts/verificar-standalone-mysql.mjs

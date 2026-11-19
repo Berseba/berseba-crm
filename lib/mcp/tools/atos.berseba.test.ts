@@ -476,7 +476,7 @@ describe("registration", () => {
       expect(entry?.category, name).toBe(handler?.category);
       expect(entry?.risco, name).toBe(READS.includes(name) ? "seguro" : "critico");
       expect(entry?.oQueToca, name).toBe("Agenda do estúdio (Atos)");
-      expect(entry?.pacotes, name).toEqual(["atender"]);
+      expect(entry?.pacotes, name).toEqual(["reter"]);
     }
   });
 

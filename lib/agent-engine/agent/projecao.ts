@@ -30,7 +30,6 @@
 import { detectarVazamentoInterno } from '../guardrails/vazamento-interno';
 import type { LeadContext } from '../edge/crm/get-lead-context';
 import { rotuloDoRemetente } from '@/lib/messaging/remetente-de-grupo';
-import { OUTBOUND_AUTHOR_LABEL, type OutboundAuthorLabel } from '../edge/crm/outbound-author.berseba';
 
 /**
  * QUANDO a projeção arma — e a regra se justifica sozinha.
@@ -56,8 +55,7 @@ export function turnoProjeta(toolNamesDoCatalogo: readonly string[]): boolean {
 
 /** Uma mensagem como o Conversador a lê — sem endereço interno de nada. */
 export interface MensagemProjetada {
-  /** Berseba: outbound names its author (agent, team or automation), never a shared 'nós'. */
-  de: 'cliente' | OutboundAuthorLabel;
+  de: 'cliente' | 'nós';
   texto: string;
   quando: string;
   /** marcador legível quando houve mídia ("[imagem]"); nunca o caminho dela. */
@@ -140,10 +138,7 @@ export function projetarContexto(ctx: LeadContext): ContextoProjetado {
       const base: MensagemProjetada = {
         // 'inbound'/'outbound' é vocabulário de sistema e já apareceu parafraseado
         // em resposta de modelo. Quem fala com uma pessoa pensa "ela disse" / "eu disse".
-        // Berseba: "nós" made every outbound the agent's own speech, the team's
-        // renewal offer included (outbound-author.berseba.ts). No author reads
-        // as the team: authorship is only claimed when the row proves it.
-        de: m.direction === 'inbound' ? 'cliente' : OUTBOUND_AUTHOR_LABEL[m.author ?? 'team'],
+        de: m.direction === 'inbound' ? 'cliente' : 'nós',
         // O corpo passa INTACTO — e isto é decisão, não omissão. A tradução de
         // erro é calibrada para texto que o SISTEMA produziu; aplicá-la à fala
         // reescreveria o cliente. "Meu site tem um webhook quebrado" é frase

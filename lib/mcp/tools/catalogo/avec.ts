@@ -3,7 +3,8 @@
  *
  * They exist only for the organizations in `AVEC_API_ORG_IDS` (`lib/integrations/avec/config.ts`):
  * for every other one the served catalog, the agent turn and the external MCP drop them.
- * Bundle `atender` only: `vender` already sits near `TETO_TOOLS_POR_AGENTE`. The writes are
+ * Bundle `reter` (upstream puts the Amigo clinic agenda there too): since upstream v1.118.0
+ * `atender` alone holds 25 tools, and ours would push it past `TETO_TOOLS_POR_AGENTE`. The writes are
  * `critico`, so turning a bundle on never adds them: someone has to tick each one.
  */
 import { declararTools } from "./tipos";
@@ -17,7 +18,7 @@ export const TOOLS_AVEC = declararTools([
       "Mostra os horários que a cliente desta conversa já tem marcados na agenda do salão, pelo telefone dela, para o assistente confirmar dia e hora sem inventar.",
     oQueToca: "Agenda do salão (avec)",
     risco: "seguro",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "avec_find_services",
@@ -27,7 +28,7 @@ export const TOOLS_AVEC = declararTools([
       "Mostra a lista de serviços que o salão liberou para o assistente marcar sozinho, quem faz cada um e o que perguntar antes; o resto fica com a equipe.",
     oQueToca: "Agenda do salão (avec)",
     risco: "seguro",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "avec_free_slots",
@@ -37,7 +38,7 @@ export const TOOLS_AVEC = declararTools([
       "Busca de 2 a 3 horários reais na agenda do salão, com dia, hora e profissional, preferindo os colados em clientes que a profissional já tem no dia.",
     oQueToca: "Agenda do salão (avec)",
     risco: "seguro",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "avec_book",
@@ -47,7 +48,7 @@ export const TOOLS_AVEC = declararTools([
       "Marca um horário novo na agenda do salão para a cliente desta conversa, depois de ela confirmar serviço, profissional, dia e hora.",
     oQueToca: "Agenda do salão (avec)",
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "avec_reschedule",
@@ -57,7 +58,7 @@ export const TOOLS_AVEC = declararTools([
       "Muda o dia ou a hora de um agendamento da cliente desta conversa na agenda do salão, com a mesma profissional e o mesmo serviço.",
     oQueToca: "Agenda do salão (avec)",
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "avec_confirm",
@@ -67,7 +68,7 @@ export const TOOLS_AVEC = declararTools([
       "Marca como Confirmado, na agenda do salão, os horários do dia da cliente desta conversa, quando ela confirma que vem (como o botão Confirmar do avec).",
     oQueToca: "Agenda do salão (avec)",
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "avec_cancel",
@@ -77,6 +78,16 @@ export const TOOLS_AVEC = declararTools([
       "Cancela um agendamento da cliente desta conversa na agenda do salão, depois de oferecer remarcar e de ela confirmar o cancelamento.",
     oQueToca: "Agenda do salão (avec)",
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
+  },
+  {
+    name: "avec_waitlist",
+    category: "write",
+    rotulo: "Lista de espera do salão",
+    explicacao:
+      "Coloca a cliente desta conversa na lista de espera do salão, marca e confirma no avec a vaga que a lista ofereceu quando ela aceita, ou tira ela da lista.",
+    oQueToca: "Agenda do salão (avec) e lista de espera",
+    risco: "critico",
+    pacotes: ["reter"],
   },
 ]);

@@ -9,6 +9,8 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { sentChargeMessages } from "@/lib/integrations/mirae/charge-sent";
+
 import { SPINNING_DEFAULTS } from "../spinning/defaults";
 import { decideSpinning, hashNormalized, normalizeCopy } from "../spinning/engine";
 
@@ -21,7 +23,6 @@ import {
   lembreteDoMirae,
   quandoLegivel,
   runMiraeReminderTurn,
-  sentChargeMessages,
   trazValorEVencimento,
   valorLegivel,
   vencimentoLegivel,
@@ -505,8 +506,10 @@ describe("charge notice", () => {
   describe("spinning guard (default knobs)", () => {
     // Same plan, same due date: what the agent writes to each student differs only in the name
     // and the link, so the copies are near-identical across the studio's number.
+    // Starts with the name: a template literal's static prefix counts as on-screen text for the
+    // course fence (`curso/licoes-apontam-para-a-tela.test.ts`), and "Oi, " would match lessons.
     const message = (name: string, link: string) =>
-      `Oi, ${name}! Tudo bem? Aqui é do estúdio. A cobrança da próxima parcela do seu plano já está ` +
+      `${name}, tudo bem? Aqui é do estúdio. A cobrança da próxima parcela do seu plano já está ` +
       `disponível: R$ 299,00, com vencimento em 25/11. Para pagar é só acessar o link: ${link} ` +
       "Qualquer dúvida, estamos por aqui!";
     const windowOf = (texts: string[]) =>

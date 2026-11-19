@@ -3,7 +3,7 @@
  *
  * They exist only for the organizations in `MIRAE_API_ORG_IDS` (`lib/integrations/mirae/config.ts`):
  * for every other one the served catalog, the agent turn and the external MCP drop them.
- * Bundle `atender` only, like avec. The writes are `critico`, so turning a bundle on never adds
+ * Bundle `reter`, like avec. The writes are `critico`, so turning a bundle on never adds
  * them: someone has to tick each one.
  */
 import { declararTools } from "./tipos";
@@ -17,7 +17,7 @@ export const TOOLS_MIRAE = declararTools([
       "Mostra a avaliação e as aulas que a pessoa desta conversa já tem marcadas na agenda do estúdio, pelo telefone dela, e se ela é interessada, aluna ou ex-aluna.",
     oQueToca: "Agenda do estúdio (Mirae)",
     risco: "seguro",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "mirae_services",
@@ -27,7 +27,7 @@ export const TOOLS_MIRAE = declararTools([
       "Mostra o que o assistente marca sozinho (avaliação inicial e aula), os planos com valores que o estúdio liberou para as integrações e os prazos do estúdio.",
     oQueToca: "Agenda do estúdio (Mirae)",
     risco: "seguro",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "mirae_free_slots",
@@ -37,7 +37,7 @@ export const TOOLS_MIRAE = declararTools([
       "Busca até 2 horários reais na agenda do estúdio, escolhidos pela regra do próprio estúdio, com dia, hora e profissional.",
     oQueToca: "Agenda do estúdio (Mirae)",
     risco: "seguro",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "mirae_book",
@@ -47,7 +47,7 @@ export const TOOLS_MIRAE = declararTools([
       "Marca a avaliação inicial ou a aula na agenda do estúdio para a pessoa desta conversa, depois de ela confirmar dia e hora. A avaliação marcada leva o card para a etapa de avaliação agendada.",
     oQueToca: "Agenda do estúdio (Mirae)",
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "mirae_reschedule",
@@ -57,7 +57,7 @@ export const TOOLS_MIRAE = declararTools([
       "Muda o dia ou a hora da avaliação ou da aula da pessoa desta conversa na agenda do estúdio, dentro do prazo que o estúdio permite.",
     oQueToca: "Agenda do estúdio (Mirae)",
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
   {
     name: "mirae_cancel",
@@ -67,6 +67,6 @@ export const TOOLS_MIRAE = declararTools([
       "Cancela a avaliação ou a aula da pessoa desta conversa na agenda do estúdio, depois de oferecer remarcar e de ela confirmar.",
     oQueToca: "Agenda do estúdio (Mirae)",
     risco: "critico",
-    pacotes: ["atender"],
+    pacotes: ["reter"],
   },
 ]);

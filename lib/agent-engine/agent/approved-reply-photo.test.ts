@@ -54,6 +54,7 @@ describe("prepareApprovedReplyPhoto — the photo of an approved Assisted-mode r
     expect(result).toEqual({
       ok: true,
       photo: {
+        kind: "image",
         storagePath: `${ORG}/${CONVERSATION}/catalogo-11111111-2222-4333-8444-555555555555.jpg`,
         mime: "image/jpeg",
       },
