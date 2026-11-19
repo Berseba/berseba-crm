@@ -19,6 +19,14 @@ vi.mock("@/lib/env", () => ({
   env: { INTERNAL_CRON_SECRET: "segredo", INTERNAL_SECRET: "", JOB_QUEUE_RETENTION_DAYS: "", AUDIT_LOG_RETENTION_DAYS: "" },
 }));
 vi.mock("@/lib/audit", () => ({ audit: (...args: unknown[]) => h.auditou(...args) }));
+// Berseba: our ad click cleanup runs in the same cron (BERSEBA.md); its own audit is tested in
+// its own file, and this fake admin client does not carry its query chain.
+vi.mock("@/lib/plataformas-de-anuncio/click-ref-retention", () => ({
+  runUnmatchedClickRetention: async () => ({
+    unmatched_clicks_deleted: { google_ads_click_refs: 0, meta_ads_click_refs: 0 },
+    unmatched_clicks_failures: 0,
+  }),
+}));
 vi.mock("@/lib/lgpd/cascata", async (original) => ({
   ...(await original<typeof Cascata>()),
   varrerRedacoesIncompletas: async () => ({ examinados: 0, comResiduo: 0, completados: [], temResto: false, falhas: [] }),
