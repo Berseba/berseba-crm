@@ -262,6 +262,35 @@ export function dispararBuscaDaEspera(org: string): void {
   });
 }
 
+/**
+ * The client booked this service herself (`avec_book`): her live entries for it leave the list,
+ * and a slot held for her is free again. Never throws: the entry would only cost a later offer.
+ */
+export async function encerrarAoMarcar(org: string, contactId: string, servico: string, agora: Date): Promise<void> {
+  try {
+    const { data, error } = await createAdminClient()
+      .from("avec_waitlist")
+      .update({
+        status: "booked",
+        resultado: { via: "avec_book" },
+        encerrada_em: agora.toISOString(),
+        updated_at: agora.toISOString(),
+      })
+      .eq("organization_id", org)
+      .eq("contact_id", contactId)
+      .eq("pedido->>servico", servico)
+      .in("status", [...VIVAS])
+      .select("id, status");
+    if (error) throw new Error(error.message);
+    if ((data ?? []).length) dispararBuscaDaEspera(org);
+  } catch (erro) {
+    logger.warn("avec_waitlist: entry not closed after a booking", {
+      organization_id: org,
+      error: erro instanceof Error ? erro.message : String(erro),
+    });
+  }
+}
+
 /** What the offers in progress hold, for every contact but `excetoContato`. */
 export async function ocupacoesSeguradasPorOutras(
   db: SB,

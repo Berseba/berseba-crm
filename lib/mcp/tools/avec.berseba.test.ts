@@ -35,6 +35,7 @@ vi.mock("@/lib/integrations/avec/lista-de-espera-supabase", async (importOrigina
   ocupacoesSeguradasPorOutras: vi.fn().mockResolvedValue([]),
   configDaEsperaAvec: vi.fn().mockResolvedValue(null),
   dispararBuscaDaEspera: vi.fn(),
+  encerrarAoMarcar: vi.fn().mockResolvedValue(undefined),
 }));
 
 const tools = await import("./avec");

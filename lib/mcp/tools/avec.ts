@@ -45,6 +45,7 @@ import type { OfertaGuardada } from "@/lib/integrations/avec/lista-de-espera-mot
 import {
   configDaEsperaAvec,
   dispararBuscaDaEspera,
+  encerrarAoMarcar,
   lerOferta,
   ocupacoesSeguradasPorOutras,
   repoSupabase,
@@ -1029,6 +1030,8 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
       repetir: "avec_book de novo com o mesmo opcao_id e nome_completo",
     });
     if (!marcada.ok) return marcada.falha;
+    // She booked the service she was waiting for: her entry leaves the waitlist.
+    void encerrarAoMarcar(ctx.organizationId, ctx.contatoDoTurno!, opcao.oferta.id, new Date());
     return visitaMarcadaView(salao, opcao, marcada.feitos);
   },
 };

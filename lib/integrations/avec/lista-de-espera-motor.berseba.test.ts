@@ -146,6 +146,20 @@ describe("procurarVagas", () => {
     expect(buscas).toEqual(["escova:2026-12-15:2026-12-20"]);
   });
 
+  it("never sends two offers at once to the same client", async () => {
+    const linhas = [
+      entrada("a", 1),
+      entrada("a2", 2, { contactId: "c-a", pedido: { servico: "corte", comprimento: null, profissional: null } }),
+    ];
+    const { portas, enviados } = montar(linhas, [
+      opcao("2026-12-16", "15:00", "16:00"),
+      opcao("2026-12-17", "10:00", "11:00"),
+    ]);
+    await procurarVagas(portas, ORG, config, agora);
+    expect(enviados.map((e) => e.contato)).toEqual(["c-a"]);
+    expect(linhas.find((l) => l.id === "a2")!.status).toBe("waiting");
+  });
+
   it("can search one entry only", async () => {
     const linhas = [entrada("a", 1), entrada("b", 2)];
     const { portas, enviados } = montar(linhas, [opcao("2026-12-16", "15:00", "16:00")]);

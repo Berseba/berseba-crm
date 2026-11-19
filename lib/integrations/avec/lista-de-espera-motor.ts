@@ -98,6 +98,8 @@ export async function procurarVagas(
   if (opcoes.soInscricao) fila = fila.filter((i) => i.id === opcoes.soInscricao);
   const seguradas = await repo.seguradas(org, agora);
   const ocupadas: Ocupacao[] = seguradas.flatMap((s) => s.ocupacao);
+  // One offer per client at a time, even with two entries (two services).
+  const comOferta = new Set(seguradas.map((s) => s.contactId));
   // One avec search per request and window: two entries asking the same thing share it.
   const cache = new Map<string, Promise<Opcao[] | null>>();
   const buscar = (pedido: PedidoDaEspera, de: string, ate: string) => {
@@ -109,6 +111,7 @@ export async function procurarVagas(
   let avaliadas = 0;
   let ofertadas = 0;
   for (const inscricao of fila.slice(0, TETO_DA_RODADA)) {
+    if (comOferta.has(inscricao.contactId)) continue;
     const janela = janelaDeBusca(inscricao, hoje);
     if (!janela) continue;
     avaliadas += 1;
@@ -144,6 +147,7 @@ export async function procurarVagas(
     });
     if (await canal.avisar(org, inscricao.contactId, texto)) {
       ocupadas.push(...oferta.ocupacao);
+      comOferta.add(inscricao.contactId);
       ofertadas += 1;
     } else {
       // A slot held for someone who was not told is a stuck slot: release it now.
