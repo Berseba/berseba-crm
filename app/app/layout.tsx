@@ -28,6 +28,7 @@ import { env } from "@/lib/env";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { modulosLigados } from "@/lib/instalacao/modulos";
+import { avecConfigFor } from "@/lib/integrations/avec/config";
 import { capacidadesLigadas } from "@/lib/organizacao/capacidades";
 import { telefoniaEmUso } from "@/lib/telefonia/em-uso";
 import { ehOperante } from "@/lib/organizacao/operante";
@@ -198,7 +199,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       cliente_pela_venda: clientePelaVendaLigado(orgRow?.settings),
       modulos_ligados: modulos,
       // Mesma linha de `settings` já lida acima — nenhuma consulta a mais.
-      capacidades_ligadas: capacidadesLigadas(orgRow?.settings, modulos, telefonia),
+      capacidades_ligadas: [
+        ...capacidadesLigadas(orgRow?.settings, modulos, telefonia),
+        // Berseba: the avec salon's waitlist door, for organizations that use avec.
+        ...(avecConfigFor(activeOrg.orgId) ? (["lista_de_espera_avec"] as const) : []),
+      ],
     };
 
     // A faixa do teste grátis (spec da cobrança §9): uma consulta a mais SÓ com

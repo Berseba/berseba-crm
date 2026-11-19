@@ -61,6 +61,7 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   avec_reschedule: { tokens: 170, motivo: BERSEBA },
   avec_cancel: { tokens: 175, motivo: BERSEBA },
   avec_confirm: { tokens: 136, motivo: BERSEBA },
+  avec_waitlist: { tokens: 520, motivo: BERSEBA },
   mirae_my_appointments: { tokens: 320, motivo: BERSEBA },
   mirae_services: { tokens: 127, motivo: BERSEBA },
   mirae_free_slots: { tokens: 387, motivo: BERSEBA },
@@ -248,7 +249,7 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
 // lista inteira e ganhou `tags_adicionar`/`tags_remover`. MEDIDO no merge com a
 // main pós-#4886 e #4684: 40675 (2026-11-18).
 // Berseba: upstream 40675 + 5724 of our agenda tools (avec, Mirae, Atos).
-const TETO_TOTAL = 46399;
+const TETO_TOTAL = 46919;
 
 const VARIANTE = "schedule_followup (com negócio)";
 

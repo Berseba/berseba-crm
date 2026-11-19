@@ -189,6 +189,11 @@ CRONS="
 # catalogo_do_feed (lib/cron/piso-ocioso.ts) faz a batida sair antes de
 # qualquer leitura no banco.
 25 */2 * * *|120|api/v1/cron/catalog-feed-sync
+# Berseba: A LISTA DE ESPERA DO SALÃO NO AVEC. De 10 em 10 minutos: vence as
+# ofertas sem resposta, passa a vaga para a próxima e procura vaga no avec para
+# a fila. Só organizações em AVEC_API_ORG_IDS com a lista ligada; as outras não
+# fazem consulta nenhuma. Até 120 s porque cada inscrição consulta o avec.
+*/10 * * * *|120|api/v1/cron/avec-waitlist
 "
 
 # CRONTAB_PATH é ponto de injeção do teste (tests/shell/scheduler-entrypoint.test.sh).

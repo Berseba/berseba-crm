@@ -210,6 +210,18 @@ export const NAV_CATALOG = [
     sidebar: true,
   },
   {
+    // Berseba (migration 9007): the avec salon's waitlist. Only for organizations that use avec
+    // (`lista_de_espera_avec`, set by the layout from AVEC_API_ORG_IDS).
+    href: "/app/lista-de-espera",
+    label: "Lista de espera do salão",
+    description: "Clientes esperando um horário no avec, na ordem em que a vaga é oferecida.",
+    icon: "CalendarBlank",
+    group: "crm",
+    section: "O dia a dia da venda",
+    minRole: "agent",
+    capacidade: "lista_de_espera_avec",
+  },
+  {
     // Módulo opcional (ADR-0002, doc 208): a porta só existe depois que o
     // administrador da instalação instala `lista_de_espera` em `/admin/modulos`.
     href: "/app/agenda/lista-de-espera",

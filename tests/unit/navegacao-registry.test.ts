@@ -180,6 +180,8 @@ describe("hubSections", () => {
     expect(secoes.map((s) => s.section)).toEqual(["O dia a dia da venda", "Preparar a venda", "Fechar a venda"]);
     expect(secoes.flatMap((s) => s.items.map((i) => i.href))).toEqual([
       "/app/prospecting",
+      // Berseba (9007): the avec salon's waitlist. Only for organizations that use avec.
+      "/app/lista-de-espera",
       // Doc 208 (A): a fila de espera da agenda. Só com o módulo instalado.
       "/app/agenda/lista-de-espera",
       "/app/kanban",

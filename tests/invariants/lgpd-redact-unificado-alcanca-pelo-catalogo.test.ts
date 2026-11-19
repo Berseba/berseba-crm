@@ -152,6 +152,15 @@ const DECISOES: Record<string, Decisao> = {
     caminho: "cascata",
     razao: "Passo 1 da própria cascata: nome/rótulo, email, telefone, CPF, data de nascimento, consent, source_metadata e tags; is_anonymized/anonymized_at viram o que responde ao titular.",
   },
+  avec_waitlist: {
+    decidida: "redigir",
+    caminho: "gatilho",
+    razao:
+      "Berseba (migration 9007): a inscrição na lista de espera do salão no avec (pedido, dias, " +
+      "observação da equipe) não tem versão anonimizada que ainda sirva. Quem apaga é " +
+      "`trg_avec_waitlist_anonimizado`, em `contacts` AFTER UPDATE OF is_anonymized, a mesma porta " +
+      "de `contact_identities`.",
+  },
   contact_identities: {
     decidida: "redigir",
     caminho: "gatilho",

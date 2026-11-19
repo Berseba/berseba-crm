@@ -123,6 +123,7 @@ describe("evidenciasDaAgenda", () => {
       "avec_confirm",
       "avec_my_appointments",
       "avec_reschedule",
+      "avec_waitlist",
     ]);
   });
 });

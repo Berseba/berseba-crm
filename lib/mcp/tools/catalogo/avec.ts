@@ -80,4 +80,14 @@ export const TOOLS_AVEC = declararTools([
     risco: "critico",
     pacotes: ["reter"],
   },
+  {
+    name: "avec_waitlist",
+    category: "write",
+    rotulo: "Lista de espera do salão",
+    explicacao:
+      "Coloca a cliente desta conversa na lista de espera do salão, marca e confirma no avec a vaga que a lista ofereceu quando ela aceita, ou tira ela da lista.",
+    oQueToca: "Agenda do salão (avec) e lista de espera",
+    risco: "critico",
+    pacotes: ["reter"],
+  },
 ]);

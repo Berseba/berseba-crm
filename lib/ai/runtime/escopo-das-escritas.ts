@@ -64,6 +64,8 @@ export const ESCOPO_DAS_ESCRITAS: Readonly<Record<string, Readonly<Record<string
   avec_reschedule: { appointment_id: "configuracao", opcao_id: "configuracao" },
   avec_cancel: { appointment_id: "configuracao" },
   avec_confirm: { appointment_id: "configuracao" },
+  // No id argument: it acts on the turn's contact's own waitlist entry.
+  avec_waitlist: {},
   // ---- Berseba: Mirae agenda (Fiore Pilates). Same reason: Mirae ids, scoped by Mirae to the
   // phone of the turn's contact, see lib/mcp/tools/mirae.ts.
   mirae_book: { opcao_id: "configuracao" },

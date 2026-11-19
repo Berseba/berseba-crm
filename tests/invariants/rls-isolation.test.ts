@@ -688,6 +688,13 @@ beforeAll(() => {
                   encode(sha256(convert_to('rls-invariant-' || v_org::text, 'UTF8')), 'hex'), 15000, 'pendente');
         end if;
 
+        -- Berseba 9007 — the avec salon's waitlist entry of the contact. Leaking
+        -- it hands the neighbour who wants which service and when.
+        if not exists (select 1 from public.avec_waitlist where organization_id = v_org) then
+          insert into public.avec_waitlist (organization_id, contact_id, pedido, data_de, data_ate)
+          values (v_org, v_contact, '{"servico":"escova"}'::jsonb, current_date, current_date + 7);
+        end if;
+
         -- 9419 (#3764, fatia 1) — a identidade de rede social do contato.
         -- Vazar a linha entrega ao vizinho o perfil de uma pessoa que não é
         -- cliente dele. O identificador é distinto por organização porque o
@@ -950,6 +957,10 @@ export const TABLES = [
   // organização; a escrita exige `agent` (mesmo piso da 9043), e o eixo do
   // `viewer` é medido em `identidades-do-contato.test.ts`.
   "contact_identities",
+  // Berseba migration 9007 — the avec salon's waitlist. Read by organization
+  // with no role gate (the team works the queue); writes are server-only (no
+  // write grant to authenticated).
+  "avec_waitlist",
   // ⚠️ `cobranca_assinaturas` (migration 0583) NÃO entra nesta lista, pelo mesmo
   // motivo de `webhook_lead_captures`: a leitura é só do `admin` e o usuário
   // semeado aqui é `agent`, então o controle positivo falharia por ACERTO. A

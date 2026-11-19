@@ -19,6 +19,7 @@ import {
   avecFreeSlots,
   avecMyAppointments,
   avecReschedule,
+  avecWaitlist,
 } from "./avec";
 // Berseba: Mirae agenda tools (Fiore Pilates)
 import {
@@ -147,6 +148,7 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   avecReschedule,
   avecConfirm,
   avecCancel,
+  avecWaitlist,
   // Berseba: Mirae agenda (read, then write)
   miraeMyAppointments,
   miraeServices,
