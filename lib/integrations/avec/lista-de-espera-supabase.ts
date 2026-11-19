@@ -14,10 +14,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 import { opcoesDoPedido } from "./busca";
 import { avecConfigFor } from "./config";
-import { pedidoDaEsperaSchema, type InscricaoAvec, type Ocupacao } from "./lista-de-espera";
+import { pedidoDaEsperaSchema, sobrepoe, type InscricaoAvec, type Ocupacao } from "./lista-de-espera";
 import {
   procurarVagas,
   rodadaDaEspera,
+  soltarOfertas,
   type AgendaDaEspera,
   type OfertaGuardada,
   type PortasDaEspera,
@@ -131,6 +132,21 @@ export function repoSupabase(admin: SB): RepoDaEspera {
       return (data ?? []).length === 1;
     },
 
+    async conflita(org, id, contactId, ocupacao, agora) {
+      const { data, error } = await admin
+        .from(TABELA)
+        .select("id, contact_id, oferta")
+        .eq("organization_id", org)
+        .eq("status", "offered")
+        .gt("oferta_expira_em", agora.toISOString())
+        .neq("id", id)
+        .limit(200);
+      if (error) throw new Error(`avec_waitlist: conflita: ${error.message}`);
+      return ((data ?? []) as Array<{ contact_id: string; oferta: unknown }>).some(
+        (l) => l.contact_id === contactId || sobrepoe(lerOferta(l.oferta)?.ocupacao ?? [], ocupacao),
+      );
+    },
+
     async voltarParaFila(org, id, recusada, agora) {
       const { data: atual, error: erroLeitura } = await admin
         .from(TABELA)
@@ -236,8 +252,13 @@ export function configDaEsperaAvec(admin: SB, org: string): Promise<ConfigDaList
 /** One full round for one organization (the cron). `null` = off for it. */
 export async function rodadaAvec(admin: SB, org: string, agora: Date) {
   const config = await configDaEsperaAvec(admin, org);
-  const portas = config ? portasAvec(admin, org) : null;
-  if (!config || !portas) return null;
+  if (!config) {
+    // Switched off (or the org stopped): no offer stays held.
+    const soltas = await soltarOfertas(repoSupabase(admin), org, agora);
+    return soltas ? { avaliadas: 0, ofertadas: 0, vencidas: 0, encerradas: 0, soltas } : null;
+  }
+  const portas = portasAvec(admin, org);
+  if (!portas) return null;
   return rodadaDaEspera(portas, org, config, agora);
 }
 

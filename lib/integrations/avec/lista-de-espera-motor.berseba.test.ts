@@ -72,6 +72,17 @@ function montar(linhas: Linha[], livres: Opcao[], opts: { naoSai?: string[]; bus
         Object.assign(l, { status: "offered", oferta, chave, expira: expiraEm });
         return true;
       },
+      conflita: async (_org, id, contato, ocupacao, t) =>
+        linhas.some(
+          (x) =>
+            x.id !== id &&
+            x.status === "offered" &&
+            x.expira! > t &&
+            (x.contactId === contato ||
+              x.oferta!.ocupacao.some((o) =>
+                ocupacao.some((p) => o.profissional === p.profissional && o.data === p.data && o.inicio < p.fim && p.inicio < o.fim),
+              )),
+        ),
       voltarParaFila: async (_org, id, recusada) => {
         const l = linhas.find((x) => x.id === id)!;
         Object.assign(l, {
@@ -165,6 +176,31 @@ describe("procurarVagas", () => {
     const { portas, enviados } = montar(linhas, [opcao("2026-12-16", "15:00", "16:00")]);
     await procurarVagas(portas, ORG, config, agora, { soInscricao: "b" });
     expect(enviados.map((e) => e.contato)).toEqual(["c-b"]);
+  });
+});
+
+describe("concurrent rounds", () => {
+  it("a round that finds an overlapping offer made meanwhile yields before sending", async () => {
+    const linhas = [entrada("a", 1), entrada("b", 2)];
+    const { portas, enviados } = montar(linhas, [opcao("2026-12-16", "15:00", "16:00")]);
+    // Another round held 15:30 with Mayara for someone else between our read and our hold.
+    const outra = entrada("z", 9, { contactId: "c-z" });
+    Object.assign(outra, {
+      status: "offered",
+      chave: "x",
+      expira: new Date(agora.getTime() + 3_600_000),
+      oferta: { ocupacao: [{ profissional: "mayara", data: "2026-12-16", inicio: 930, fim: 990 }] },
+    });
+    const seguradas = portas.repo.seguradas;
+    portas.repo.seguradas = async (...args) => {
+      const r = await seguradas(...args);
+      linhas.push(outra);
+      return r;
+    };
+    await procurarVagas(portas, ORG, config, agora);
+    expect(enviados).toEqual([]);
+    expect(linhas.find((l) => l.id === "a")!.status).toBe("waiting");
+    expect(linhas.find((l) => l.id === "a")!.recusadas).toEqual([]);
   });
 });
 

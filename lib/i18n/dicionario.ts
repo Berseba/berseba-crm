@@ -71,7 +71,6 @@ export const DICIONARIO: Traducoes = {
   "Lista de espera ligada": { es: "Lista de espera encendida" },
   "Longo": { es: "Largo" },
   "Mostrar encerradas": { es: "Mostrar finalizadas" },
-  "Médio": { es: "Medio" },
   "Ninguém na lista de espera.": { es: "Nadie en la lista de espera." },
   "Não oferecer se faltar menos de (horas)": { es: "No ofrecer si faltan menos de (horas)" },
   "O prazo nunca passa do horário da vaga menos a folga. As mensagens só saem na janela de envio do número.": { es: "El plazo nunca pasa del horario del turno menos el margen. Los mensajes solo salen en la ventana de envío del número." },

@@ -35,6 +35,8 @@ import { conferirPedido, fold, opcoesDoPedido, principaisPara } from "@/lib/inte
 import { avecConfigFor, type AvecConfig } from "@/lib/integrations/avec/config";
 import {
   MAX_DIAS_A_FRENTE,
+  chaveDaVaga,
+  horaSchema,
   janelaDeBusca,
   motivoParaNaoServir,
   ocupacaoDa,
@@ -1022,6 +1024,19 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
       };
     }
     if (!avecIdempotencyKey(ctx, "avec_book", input)) return NO_JOB;
+    // A slot the waitlist is holding for another client is not hers to take.
+    const seguradas = await seguradasPorOutras(ctx);
+    const pontos = opcao.slots.map((s) => ({ profissional: s.profissional, data: s.data, inicio: s.inicio, fim: s.inicio + 1 }));
+    if (seguradas.length && sobrepoe(pontos, seguradas)) {
+      return {
+        ok: false,
+        code: "slot_unavailable",
+        handoff: false,
+        mensagem:
+          "esse horário acabou de ser oferecido a outra cliente da lista de espera. Busque horários de " +
+          "novo com avec_free_slots e ofereça outro.",
+      };
+    }
     const marcada = await marcarVisita(ctx, ready, salao, opcao, {
       tool: "avec_book",
       opcaoId: input.opcao_id,
@@ -1146,10 +1161,7 @@ function visitaMarcadaView(
 // waitlist (lib/integrations/avec/lista-de-espera*.ts)
 // ---------------------------------------------------------------------------
 
-const hora = z
-  .string()
-  .regex(/^\d{2}:\d{2}$/, "use HH:MM")
-  .optional();
+const hora = horaSchema.optional();
 
 const waitlistShape = {
   acao: z
@@ -1164,6 +1176,8 @@ const waitlistShape = {
   ate: hora.describe('Começar no máximo até, ex.: "11:00".'),
   substitui_data: date.describe("Se ela quer adiantar um horário que já tem: o dia dele (cancelado no SIM)."),
   observacao: freeText("Algo que a equipe precisa saber."),
+  mesmo_assim: z.boolean().optional().describe("Ela recusou as opções de ha_horario."),
+  nome_completo: z.string().trim().min(3).max(120).optional().describe("Só se a ferramenta pedir."),
 };
 
 type PedidoDaTool = { servico: string; comprimento: Comprimento | null; profissional: string | null };
@@ -1187,7 +1201,7 @@ export const avecWaitlist: McpToolDefinition<typeof waitlistShape> = {
   category: "write",
   requiresRole: "ai_operator",
   requiresScope: "mcp:write",
-  redigirParaAuditoria: redactFreeText("observacao"),
+  redigirParaAuditoria: (args) => redactFreeText("nome_completo")(redactFreeText("observacao")(args)),
   handler: async (input, ctx) => {
     const ready = await prepare(ctx);
     if ("ok" in ready) return ready;
@@ -1201,7 +1215,7 @@ export const avecWaitlist: McpToolDefinition<typeof waitlistShape> = {
     const agora = new Date();
     try {
       if (input.acao === "entrar") return await entrarNaLista(ctx, ready, salao, admin, config, input, agora);
-      if (input.acao === "aceitar") return await aceitarVaga(ctx, ready, salao, admin, agora);
+      if (input.acao === "aceitar") return await aceitarVaga(ctx, ready, salao, admin, agora, input.nome_completo);
       if (input.acao === "recusar") {
         const oferta = await ofertaAbertaDe(admin, org, contato);
         if (!oferta) return SEM_OFERTA_ABERTA;
@@ -1335,7 +1349,9 @@ async function entrarNaLista(
     recusadas: [],
   };
 
-  // A slot that serves her already exists: offer it now instead of making her wait.
+  // A slot that serves her already exists: offer it now instead of making her wait. When she
+  // turned those down (`mesmo_assim`), they are remembered as refused.
+  const recusadasAoEntrar: string[] = [];
   const janela = janelaDeBusca(inscricao, hoje);
   if (janela) {
     const opcoes = (await opcoesDoPedido(ready.config, salao, pedido, janela.de, janela.ate)) ?? [];
@@ -1344,7 +1360,8 @@ async function entrarNaLista(
       .filter((o) => motivoParaNaoServir(inscricao, o, seguradas, agora, config) === null)
       .sort((a, b) => a.data.localeCompare(b.data) || a.inicio.localeCompare(b.inicio))
       .slice(0, MAX_OPCOES);
-    if (livres.length) {
+    if (input.mesmo_assim) recusadasAoEntrar.push(...livres.map(chaveDaVaga));
+    else if (livres.length) {
       return {
         ok: false,
         handoff: false,
@@ -1365,6 +1382,7 @@ async function entrarNaLista(
     ate: input.ate ?? null,
     substitui_data: input.substitui_data ?? null,
     observacoes: input.observacao ?? null,
+    ...(recusadasAoEntrar.length ? { recusadas: recusadasAoEntrar.slice(0, 50) } : {}),
     updated_at: agora.toISOString(),
   };
   const { data: existente, error: erroLeitura } = await admin
@@ -1411,17 +1429,41 @@ async function entrarNaLista(
   };
 }
 
+/** How long an accepted offer stays held while avec books it. */
+const PRAZO_DA_MARCACAO_MS = 5 * 60_000;
+
 async function aceitarVaga(
   ctx: McpContext,
   ready: { config: AvecConfig; phone: string; name: string | null },
   salao: Salao,
   admin: ReturnType<typeof createAdminClient>,
   agora: Date,
+  nomeCompleto?: string,
 ) {
   const org = ctx.organizationId;
   const aberta = await ofertaAbertaDe(admin, org, ctx.contatoDoTurno!);
   if (!aberta) return SEM_OFERTA_ABERTA;
   if (aberta.expira.getTime() <= agora.getTime()) {
+    return {
+      ok: false,
+      handoff: false,
+      motivo: "oferta_vencida",
+      mensagem:
+        "o prazo dessa vaga já passou e ela pode ter ido para a próxima da lista. Peça desculpas e busque " +
+        "horários com avec_free_slots.",
+    };
+  }
+  // Claim it: the cron cannot expire it while avec books, and a second accept finds it claimed.
+  const { data: reivindicada, error: erroClaim } = await admin
+    .from("avec_waitlist")
+    .update({ oferta_expira_em: new Date(agora.getTime() + PRAZO_DA_MARCACAO_MS).toISOString() })
+    .eq("organization_id", org)
+    .eq("id", aberta.id)
+    .eq("status", "offered")
+    .gt("oferta_expira_em", agora.toISOString())
+    .select("id");
+  if (erroClaim) throw new Error(erroClaim.message);
+  if ((reivindicada ?? []).length !== 1) {
     return {
       ok: false,
       handoff: false,
@@ -1439,7 +1481,8 @@ async function aceitarVaga(
     tool: "avec_waitlist",
     opcaoId: aberta.oferta.opcao_id,
     note: "Encaixe da lista de espera",
-    repetir: 'avec_waitlist de novo com acao "aceitar"',
+    nomeCompleto,
+    repetir: 'avec_waitlist de novo com acao "aceitar" e nome_completo',
   });
   if (!marcada.ok) {
     if (marcada.falha.code === "slot_unavailable") {
@@ -1482,6 +1525,9 @@ async function aceitarVaga(
           to: aberta.substituiData,
         })
       ).filter((a) => a.status !== null && CHANGEABLE_STATUS.has(a.status));
+      // The API hides who each booking is for. More bookings that day than this recipe's steps
+      // may be someone else on the same phone (a daughter): the team cancels the right one.
+      if (antigas.length > opcao.slots.length) throw new Error("old day has more than one visit");
       for (const a of antigas) {
         await cancelAppointment(ready.config, {
           appointmentId: a.id,
@@ -1503,6 +1549,7 @@ async function aceitarVaga(
     .from("avec_waitlist")
     .update({
       status: "booked",
+      oferta_chave: null,
       resultado: {
         agendamentos: marcada.feitos.map((f) => f.id),
         data: first.date,
@@ -1513,7 +1560,8 @@ async function aceitarVaga(
       updated_at: agora.toISOString(),
     })
     .eq("organization_id", org)
-    .eq("id", aberta.id);
+    .eq("id", aberta.id)
+    .eq("status", "offered");
   if (error) logger.warn("avec_waitlist: booked but the entry was not closed", { error: error.message });
   if (canceladas.length) dispararBuscaDaEspera(org);
 

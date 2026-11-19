@@ -43,6 +43,11 @@ export interface RepoDaEspera {
   seguradas(org: string, agora: Date): Promise<Array<{ contactId: string; ocupacao: Ocupacao[] }>>;
   /** `waiting` → `offered`. `false` = the entry changed or the slot is held already. */
   ofertar(org: string, id: string, oferta: OfertaGuardada, chave: string, expiraEm: Date, agora: Date): Promise<boolean>;
+  /**
+   * After holding: does another offer in progress (another round, another client) overlap this
+   * one, or is there another offer to the same client? The round that sees a conflict yields.
+   */
+  conflita(org: string, id: string, contactId: string, ocupacao: Ocupacao[], agora: Date): Promise<boolean>;
   /** Back to `waiting`; `recusada` is remembered so the same slot is never offered again. */
   voltarParaFila(org: string, id: string, recusada: string | null, agora: Date): Promise<void>;
   /** Offers whose deadline passed: their id and slot key. */
@@ -136,6 +141,12 @@ export async function procurarVagas(
     };
     const chave = chaveDaVaga(vaga);
     if (!(await repo.ofertar(org, inscricao.id, oferta, chave, expiraEm, agora))) continue;
+    // Two rounds can run at once (cron, a cancellation, the button). Whoever sees the other
+    // yields before any message goes out; if both see each other, the next round offers it.
+    if (await repo.conflita(org, inscricao.id, inscricao.contactId, oferta.ocupacao, agora)) {
+      await repo.voltarParaFila(org, inscricao.id, null, agora);
+      continue;
+    }
 
     const texto = textoDaOfertaAvec({
       nome: await repo.nomeDoContato(org, inscricao.contactId),
@@ -161,6 +172,14 @@ export async function procurarVagas(
  * The round of the cron: entries whose days are over leave the list, offers past their deadline
  * go back to the queue (the slot is remembered as refused), then the search runs.
  */
+/** With the list switched off, offers in progress are released (nothing new is offered). */
+export async function soltarOfertas(repo: RepoDaEspera, org: string, agora: Date): Promise<number> {
+  const longe = new Date(agora.getTime() + 366 * 86_400_000);
+  const abertas = await repo.vencidas(org, longe);
+  for (const o of abertas) await repo.voltarParaFila(org, o.id, null, agora);
+  return abertas.length;
+}
+
 export async function rodadaDaEspera(
   portas: PortasDaEspera,
   org: string,

@@ -55,12 +55,18 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   if (acao === "remover") {
-    const { error: erro } = await admin
+    const { data: removidas, error: erro } = await admin
       .from("avec_waitlist")
       .update({ status: "cancelled", encerrada_em: agora.toISOString(), updated_at: agora.toISOString() })
       .eq("organization_id", org)
-      .eq("id", id);
+      .eq("id", id)
+      .in("status", ["waiting", "offered"])
+      .select("id");
     if (erro) return fail("internal_error", "Não foi possível remover.", 500, { requestId });
+    // Booked or closed meanwhile (the client said yes): nothing to remove.
+    if ((removidas ?? []).length !== 1) {
+      return fail("conflict", "Esta inscrição acabou de mudar. Atualize a tela.", 409, { requestId });
+    }
     void audit({
       action: "avec.lista_de_espera_removida",
       organizationId: org,

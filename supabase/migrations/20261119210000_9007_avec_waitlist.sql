@@ -84,6 +84,11 @@ create unique index if not exists uniq_avec_waitlist_vaga_segurada
   on public.avec_waitlist (organization_id, oferta_chave)
   where status = 'offered';
 
+-- One offer per client at a time, even with two entries (two services).
+create unique index if not exists uniq_avec_waitlist_uma_oferta_por_cliente
+  on public.avec_waitlist (organization_id, contact_id)
+  where status = 'offered';
+
 create index if not exists idx_avec_waitlist_ofertas_a_vencer
   on public.avec_waitlist (oferta_expira_em)
   where status = 'offered';

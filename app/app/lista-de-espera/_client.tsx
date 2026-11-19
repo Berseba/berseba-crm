@@ -181,7 +181,15 @@ function NovaInscricao({ servicos }: { servicos: Servico[] }) {
       <h2 className="text-sm font-semibold">{t("Adicionar à lista")}</h2>
       <div className="space-y-1">
         <Label htmlFor="espera_busca">{t("Cliente")}</Label>
-        <Input id="espera_busca" value={busca} onChange={(e) => setBusca(e.target.value)} placeholder={t("Nome ou telefone")} />
+        <Input
+          id="espera_busca"
+          value={busca}
+          onChange={(e) => {
+            setBusca(e.target.value);
+            setContatoId("");
+          }}
+          placeholder={t("Nome ou telefone")}
+        />
         {(contatos ?? []).length > 0 ? (
           <select aria-label={t("Cliente")} className={SELECT} value={contatoId} onChange={(e) => setContatoId(e.target.value)}>
             <option value="">{t("Escolha a cliente")}</option>
