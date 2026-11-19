@@ -97,6 +97,7 @@ import { consultarJevNoFollowup } from '@/lib/ai/decisao/followup';
 import { enviarComSaidaConfiguravel } from "@/lib/prospecting/saida-configuravel";
 import {
   avisarLembreteIlegivel,
+  avisarLembreteQueNaoSaiu,
   lembreteDoMirae,
   MIRAE_REMINDER_SOURCE,
   runMiraeReminderTurn,
@@ -484,6 +485,16 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
         lead_id: leadId,
         motivo: 'canal_desativado',
       });
+      // Berseba: a Mirae charge notice is never dropped in silence; the team gets the charge.
+      const cobrancaSemCanal = lembreteDoMirae(job.payload);
+      if (cobrancaSemCanal?.charge) {
+        await avisarLembreteQueNaoSaiu(pool, {
+          tenantId,
+          conversationId: boundary!.conversation_id,
+          reminder: cobrancaSemCanal,
+          motivo: 'O canal do WhatsApp desta conversa está desativado.',
+        });
+      }
       return;
     }
     const target: ReentrySendTarget = { tenantId, leadId, conversationId: boundary!.conversation_id, channelSessionId: targetRows[0]!.channel_session_id };

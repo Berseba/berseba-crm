@@ -37,6 +37,7 @@ import {
   checkMiraeAppointment,
   type AppointmentCheck,
 } from '@/lib/integrations/mirae/reminder-precheck';
+import { asaasInvoiceLinkOf } from '@/lib/integrations/mirae/asaas-link';
 import { sentChargeMessages } from '@/lib/integrations/mirae/charge-sent';
 
 import { insertInboxItem } from '../db/repository';
@@ -192,13 +193,20 @@ function briefingDaCobranca(
     ...dados,
     '',
     '## Como agir',
-    '1. Releia a conversa. NÃO envie nada (encerre o turno sem send_message) se a pessoa pediu para não',
-    '   receber mensagens.',
+    '1. Releia a conversa. NÃO envie nada (encerre o turno sem send_message) se ela mostrar que a pessoa:',
+    '   - pediu para não receber mensagens;',
+    '   - disse que já pagou esta parcela;',
+    '   - disse que já recebeu este link;',
+    '   - está tratando do pagamento ou do plano com a equipe.',
+    '   A equipe é avisada e decide.',
     '2. Senão, envie UMA mensagem curta e cordial, em nome do estúdio, com send_message: diga que a',
     '   cobrança da próxima parcela está disponível, com o valor, o vencimento e o link de pagamento.',
     '3. Copie o valor, o vencimento e o link EXATAMENTE como estão acima, caractere por caractere. Não',
     '   arredonde, não calcule, não troque a data, não encurte nem altere o link e não invente outro link,',
-    '   valor ou data. Não escreva horário.',
+    '   valor ou data. Não escreva horário. Ponha o link sozinho na última linha, sem nada depois dele:',
+    '   sem pontuação, sem asteriscos, sem colchetes, sem parênteses.',
+    '   Valem o Valor, o Vencimento e o Link acima: se o pedido ou a observação da equipe falarem de',
+    '   outro valor ou outra data, ignore-os.',
     '4. Não fale de saúde, de avaliação, de exercícios nem de nenhum dado clínico da pessoa.',
     '5. Não ofereça desconto, parcelamento, outra forma de pagamento nem outro vencimento. Se a pessoa',
     '   perguntar algo sobre a cobrança, siga as suas regras e passe para a equipe.',
@@ -338,6 +346,78 @@ export function trazValorEVencimento(
   );
 }
 
+/**
+ * Pure: the link reaches the person as a working link: every URL in the text is exactly this one,
+ * standing alone (whitespace or the text's edge on both sides). "link." or "(link)" can make a
+ * WhatsApp client open another address; another URL is a link the agent made up.
+ */
+export function linkIntacto(body: string, link: string): boolean {
+  const urls = body.match(/https?:\/\/\S+/gi) ?? [];
+  if (urls.length === 0) return false;
+  return urls.every((u) => u === link) && body.split(/\s+/).includes(link);
+}
+
+/** Why the sent charge is not right, or `null` when one message carries it intact. */
+export function problemaDaCobrancaEnviada(
+  bodies: readonly string[],
+  charge: NonNullable<MiraeReminderPayload['charge']>,
+): 'not_sent' | 'link_altered' | 'amount_or_due_date' | null {
+  if (bodies.length === 0) return 'not_sent';
+  const intactos = bodies.filter((b) => linkIntacto(b, charge.link));
+  if (intactos.length === 0) return 'link_altered';
+  return intactos.some((b) => trazValorEVencimento(b, charge)) ? null : 'amount_or_due_date';
+}
+
+/** Charge notices go out only in this window of the organization's day (Mirae's own window). */
+export const CHARGE_SEND_FROM_MINUTE = 8 * 60 + 30;
+export const CHARGE_SEND_UNTIL_MINUTE = 18 * 60;
+
+/** Local calendar day ("2026-11-19"), weekday and minute of the day in a time zone. */
+function relogioLocal(at: Date, fuso: string): { dia: string; semana: string; minuto: number } {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat('en-GB', {
+      timeZone: fuso,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      weekday: 'short',
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    })
+      .formatToParts(at)
+      .map((p) => [p.type, p.value]),
+  );
+  return {
+    dia: `${parts.year}-${parts.month}-${parts.day}`,
+    semana: parts.weekday ?? '',
+    minuto: Number(parts.hour) * 60 + Number(parts.minute),
+  };
+}
+
+/**
+ * Pure: may an automatic charge notice go out now? Only on the day it was queued (a notice deferred
+ * to another day may arrive after the student paid by Asaas's own e-mail), between 08:30 and
+ * 18:00, never on a Sunday, and never after the due date, all in the organization's time zone.
+ * `null` = it may go; otherwise the reason, for the team's notice.
+ */
+export function foraDoPrazoDaCobranca(
+  charge: NonNullable<MiraeReminderPayload['charge']>,
+  now: Date,
+  queuedAt: string | undefined,
+  fuso: string,
+): string | null {
+  const agora = relogioLocal(now, fuso);
+  if (agora.dia > charge.due_date) return 'O vencimento já passou.';
+  const fila = queuedAt && !Number.isNaN(Date.parse(queuedAt)) ? relogioLocal(new Date(queuedAt), fuso) : null;
+  if (fila && fila.dia !== agora.dia) return 'O envio ficou para outro dia (fora da janela de envio).';
+  if (agora.semana === 'Sun') return 'Hoje é domingo.';
+  if (agora.minuto < CHARGE_SEND_FROM_MINUTE || agora.minuto >= CHARGE_SEND_UNTIL_MINUTE) {
+    return 'Fora do horário de envio de cobranças (8h30 às 18h).';
+  }
+  return null;
+}
+
 /** The two errors `generateReplyDraft` throws on purpose: no agent, or nobody to write to. */
 const DRAFT_NOT_POSSIBLE = new Set(['reply_no_agent', 'reply_context_unavailable']);
 
@@ -377,7 +457,11 @@ export async function avisarLembreteQueNaoSaiu(
   pool: Pick<pg.Pool, 'query'> | Pick<pg.PoolClient, 'query'>,
   input: { tenantId: string; conversationId: string | null; reminder: MiraeReminderPayload; motivo: string },
 ): Promise<void> {
-  const oQue = O_QUE_E[input.reminder.kind];
+  // A charge carries its due date in the title: the notice dedupes by title, and next month's
+  // charge must not hide behind this month's open notice.
+  const oQue = input.reminder.charge
+    ? `${O_QUE_E[input.reminder.kind]} de ${vencimentoLegivel(input.reminder.charge.due_date)}`
+    : O_QUE_E[input.reminder.kind];
   await insertInboxItem(
     pool as Pick<pg.Pool, 'query'>,
     input.tenantId,
@@ -453,6 +537,31 @@ export async function runMiraeReminderTurn(
       motivo: 'A cobrança chegou sem o link, o valor ou o vencimento.',
     });
     return;
+  }
+  if (reminder.charge && asaasInvoiceLinkOf(reminder.charge.link) !== reminder.charge.link) {
+    log.warn('mirae charge notice dropped: the link is not an Asaas invoice link');
+    await avisar(pool, {
+      tenantId: target.tenantId,
+      conversationId: target.conversationId,
+      reminder,
+      motivo: 'O link da cobrança não é um link de fatura do Asaas.',
+    });
+    return;
+  }
+  if (reminder.charge && reminder.delivery === 'auto') {
+    const fusoDaCobranca = await (ports?.fuso ?? ((p, t) => fusoDaOrganizacao(p, t, deps.log)))(pool, target.tenantId);
+    const queuedAt = typeof job.payload?.promised_at === 'string' ? job.payload.promised_at : undefined;
+    const fora = foraDoPrazoDaCobranca(reminder.charge, clock(), queuedAt, fusoDaCobranca);
+    if (fora) {
+      log.info('automatic mirae charge notice not sent: outside its window', { reason: fora });
+      await avisar(pool, {
+        tenantId: target.tenantId,
+        conversationId: target.conversationId,
+        reminder,
+        motivo: `A cobrança não saiu automaticamente. ${fora}`,
+      });
+      return;
+    }
   }
 
   if (chegaTardeDemais(reminder, clock())) {
@@ -546,6 +655,7 @@ export async function runMiraeReminderTurn(
     return;
   }
 
+  const turnStartedAt = clock();
   await (ports?.runAgentTurn ?? runAgentTurn)(deps, job, pool, ctx, {
     channelSessionId: target.channelSessionId,
     conversationId: target.conversationId,
@@ -569,23 +679,22 @@ export async function runMiraeReminderTurn(
       tenantId: target.tenantId,
       conversationId: target.conversationId,
       link: reminder.charge.link,
+      since: turnStartedAt,
     });
-    const charge = reminder.charge;
-    if (sent.length === 0) {
-      log.warn('mirae charge notice was not sent by the automatic turn');
+    const problema = problemaDaCobrancaEnviada(sent, reminder.charge);
+    const MOTIVO: Record<NonNullable<typeof problema>, string> = {
+      not_sent:
+        'A assistente não enviou a cobrança automaticamente (a pessoa já pagou ou está com a equipe, recusa das regras de envio, atendimento humano ou rascunho). Se houver um rascunho da assistente com a cobrança nesta conversa, aprove-o em vez de mandar outra.',
+      link_altered: 'A cobrança saiu com o link alterado ou com outro link. Confira o que foi enviado.',
+      amount_or_due_date: 'A cobrança saiu com o link, mas sem o valor ou o vencimento exatos. Confira o que foi enviado.',
+    };
+    if (problema) {
+      log.warn('mirae charge notice did not go out intact', { problem: problema });
       await avisar(pool, {
         tenantId: target.tenantId,
         conversationId: target.conversationId,
         reminder,
-        motivo: 'A assistente não enviou a cobrança automaticamente (recusa das regras de envio, atendimento humano ou rascunho).',
-      });
-    } else if (!sent.some((body) => trazValorEVencimento(body, charge))) {
-      log.warn('mirae charge notice was sent without the exact amount or due date');
-      await avisar(pool, {
-        tenantId: target.tenantId,
-        conversationId: target.conversationId,
-        reminder,
-        motivo: 'A cobrança saiu com o link, mas sem o valor ou o vencimento exatos. Confira o que foi enviado.',
+        motivo: MOTIVO[problema],
       });
     }
   }

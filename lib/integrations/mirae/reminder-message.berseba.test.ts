@@ -6,13 +6,13 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { followupTurnPayloadSchema } from "@/lib/agent-engine/agent/followup-turn";
+import { isAsaasInvoiceLink } from "@/lib/integrations/mirae/asaas-link";
 import { lembreteDoMirae } from "@/lib/agent-engine/agent/mirae-reminder-turn.berseba";
 
 import {
   chargeNoticeOf,
   deliveryFor,
   hasLiveReturnBefore,
-  isAsaasInvoiceLink,
   miraeReminderMessageSchema,
   queueMiraeReminderMessage,
   reminderDbPg,
@@ -777,11 +777,18 @@ describe("charge notice (Mirae ADR-052 addendum 2026-11-18)", () => {
   });
 
   it.each([
-    ["http (not https)", { charge_link: "http://www.asaas.com/i/abc" }, ["charge_link"]],
-    ["another host", { charge_link: "https://asaas.com.evil.example/i/abc" }, ["charge_link"]],
-    ["a look-alike host", { charge_link: "https://fakeasaas.com/i/abc" }, ["charge_link"]],
-    ["credentials in the URL", { charge_link: "https://user@www.asaas.com/i/abc" }, ["charge_link"]],
-    ["not a URL", { charge_link: "asaas.com/i/abc" }, ["charge_link"]],
+    ["http (not https)", { charge_link: "http://www.asaas.com/i/abcd1234" }, ["charge_link"]],
+    ["another host", { charge_link: "https://asaas.com.evil.example/i/abcd1234" }, ["charge_link"]],
+    ["a look-alike host", { charge_link: "https://fakeasaas.com/i/abcd1234" }, ["charge_link"]],
+    ["the bare domain", { charge_link: "https://asaas.com/i/abcd1234" }, ["charge_link"]],
+    ["another subdomain", { charge_link: "https://evil.asaas.com/i/abcd1234" }, ["charge_link"]],
+    ["credentials in the URL", { charge_link: "https://user@www.asaas.com/i/abcd1234" }, ["charge_link"]],
+    ["not an invoice path", { charge_link: "https://www.asaas.com/b/pdf/abcd1234" }, ["charge_link"]],
+    ["a query", { charge_link: "https://www.asaas.com/i/abcd1234?x=1" }, ["charge_link"]],
+    ["a fragment", { charge_link: "https://www.asaas.com/i/abcd1234#x" }, ["charge_link"]],
+    ["upper case (not the exact form)", { charge_link: "https://WWW.ASAAS.COM/i/abcd1234" }, ["charge_link"]],
+    ["an invisible character", { charge_link: "https://www.asaas.com/i/abcd\u200b1234" }, ["charge_link"]],
+    ["not a URL", { charge_link: "asaas.com/i/abcd1234" }, ["charge_link"]],
     ["no link", { charge_link: undefined }, ["charge_link"]],
     ["a date that does not exist", { charge_due_date: "2026-02-30" }, ["charge_due_date"]],
     ["a Brazilian date", { charge_due_date: "25/11/2026" }, ["charge_due_date"]],
@@ -792,6 +799,9 @@ describe("charge notice (Mirae ADR-052 addendum 2026-11-18)", () => {
     ["a full-width dot", { charge_link: "https://asaas\uff0ecom/i/x" }, ["charge_link"]],
     ["a link too long", { charge_link: `https://www.asaas.com/i/${"a".repeat(2000)}` }, ["charge_link"]],
     ["a year out of range", { charge_due_date: "0000-01-01" }, ["charge_due_date"]],
+    ["a due date already past", { charge_due_date: "2026-11-15" }, ["charge_due_date"]],
+    ["a due date too far ahead", { charge_due_date: "2027-03-01" }, ["charge_due_date"]],
+    ["an amount above R$ 100.000,00", { charge_amount_cents: 10_000_001 }, ["charge_amount_cents"]],
     ["everything missing", { charge_link: null, charge_due_date: null, charge_amount_cents: null }, [
       "charge_link",
       "charge_due_date",
@@ -805,25 +815,45 @@ describe("charge notice (Mirae ADR-052 addendum 2026-11-18)", () => {
     expect(jobs).toEqual([]);
   });
 
-  it("accepts Asaas's own hosts and ignores charge fields on other kinds", () => {
-    expect(isAsaasInvoiceLink("https://www.asaas.com/i/abc")).toBe(true);
-    expect(isAsaasInvoiceLink("https://sandbox.asaas.com/i/abc")).toBe(true);
-    expect(isAsaasInvoiceLink("https://asaas.com/i/abc")).toBe(true);
-    expect(isAsaasInvoiceLink("https://www.asaas.com:8443/i/abc")).toBe(false);
-    expect(isAsaasInvoiceLink("https://WWW.ASAAS.COM/i/abc")).toBe(true);
-    expect(chargeNoticeOf({ kind: "evaluation", charge_link: "http://x" })).toEqual({ ok: true, charge: null });
+  it("accepts only Asaas's invoice link, the sandbox one outside production", () => {
+    expect(isAsaasInvoiceLink("https://www.asaas.com/i/abcd1234", "production")).toBe(true);
+    expect(isAsaasInvoiceLink("https://sandbox.asaas.com/i/abcd1234", "production")).toBe(false);
+    expect(isAsaasInvoiceLink("https://sandbox.asaas.com/i/abcd1234", "test")).toBe(true);
+    expect(isAsaasInvoiceLink("https://www.asaas.com:8443/i/abcd1234", "test")).toBe(false);
+    expect(isAsaasInvoiceLink("https://www.asaas.com/i/abc", "test")).toBe(false);
+    expect(chargeNoticeOf({ kind: "evaluation", charge_link: "http://x" }, NOW)).toEqual({ ok: true, charge: null });
   });
 
-  it("stores the parsed link, and ignores an appointment time sent along", async () => {
+  it("ignores an appointment time sent along with a charge", async () => {
     const { db, jobs } = fakeDb({ settings: AUTO, contacts: [STUDENT], conversations: [CONVERSATION] });
-    await run(db, {
-      ...CHARGE_BODY,
-      charge_link: "https://WWW.ASAAS.COM/i/k7f2x9q1ab3c",
-      appointment_start_at: "2026-11-17T12:30:00.000Z",
-    });
+    await run(db, { ...CHARGE_BODY, appointment_start_at: "2026-11-17T12:30:00.000Z" });
+    expect(lembreteDoMirae(jobs[0]!.payload)).toMatchObject({ appointment_start_at: null, charge: { link: LINK } });
+  });
+
+  it("Mirae's exact charge body (mirae-local#829, crm-connector.ts and charge-notice/rules.ts)", async () => {
+    const mirae = {
+      reminder_id: "rem_charge_1",
+      delivery_key: "rem_charge_1:2026-11-18T11:30:00.000Z",
+      phone: "(14) 99659-8955",
+      studentName: "Ana",
+      title: "Avisar cobrança",
+      note: "Parcela de 25/11, R$ 299,00: mandar o link de pagamento.",
+      as_of: "2026-11-18T11:30:00.000Z",
+      kind: "charge",
+      charge_link: LINK,
+      charge_due_date: "2026-11-25",
+      charge_amount_cents: 29_900,
+    };
+    const parsed = miraeReminderMessageSchema.safeParse(mirae);
+    expect(parsed.success).toBe(true);
+    const { db, jobs } = fakeDb({ settings: AUTO, contacts: [STUDENT], conversations: [CONVERSATION] });
+    expect(await run(db, parsed.data!)).toMatchObject({ outcome: "scheduled", delivery: "auto" });
     expect(lembreteDoMirae(jobs[0]!.payload)).toMatchObject({
-      appointment_start_at: null,
-      charge: { link: "https://www.asaas.com/i/k7f2x9q1ab3c" },
+      delivery_key: "rem_charge_1:2026-11-18T11:30:00.000Z",
+      kind: "charge_notice",
+      title: "Avisar cobrança",
+      note: "Parcela de 25/11, R$ 299,00: mandar o link de pagamento.",
+      charge: { link: LINK, due_date: "2026-11-25", amount_cents: 29_900 },
     });
   });
 

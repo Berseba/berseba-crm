@@ -48,6 +48,7 @@ import { z } from "zod";
 
 import { parseServiceBoundary, type ServiceBoundary } from "@/lib/atendimento/fronteira";
 import { escolherContatoCanonico } from "@/lib/channels/contato-por-telefone";
+import { asaasInvoiceLinkOf } from "@/lib/integrations/mirae/asaas-link";
 import { normalizePhoneBR, phoneLookupVariants } from "@/lib/channels/phone-variants";
 import {
   CHARGE_NOTICE_KIND,
@@ -146,43 +147,27 @@ const KIND_ALIASES: Record<string, MiraeReminderKind> = {
 
 export type ChargeNotice = NonNullable<MiraeReminderPayload["charge"]>;
 
-export const MAX_CHARGE_LINK_LENGTH = 2000;
+/** R$ 100.000,00: a studio installment above this is a mistake, never a message to a student. */
+export const MAX_CHARGE_AMOUNT_CENTS = 10_000_000;
+/** Mirae generates the charge 7 days before the due date; the notice never goes further out. */
+export const MAX_DUE_DATE_AHEAD_DAYS = 45;
 
-/**
- * Pure: the link as it will be stored and sent (the parsed `href`), when it is an `https` URL on
- * `asaas.com` or a subdomain (`www.`, `sandbox.`), else `null`. Printable ASCII only, with no `\`
- * nor `@`: a link a WhatsApp client or a link detector could read as pointing elsewhere is refused.
- */
-export function asaasInvoiceLinkOf(raw: unknown): string | null {
-  if (typeof raw !== "string") return null;
-  const link = raw.trim();
-  if (link.length === 0 || link.length > MAX_CHARGE_LINK_LENGTH) return null;
-  if (!/^[\x21-\x7e]+$/.test(link) || /[\\@]/.test(link)) return null;
-  let url: URL;
-  try {
-    url = new URL(link);
-  } catch {
-    return null;
-  }
-  const host = url.hostname;
-  const ok =
-    url.protocol === "https:" &&
-    url.username === "" &&
-    url.password === "" &&
-    url.port === "" &&
-    (host === "asaas.com" || host.endsWith(".asaas.com"));
-  return ok ? url.href : null;
-}
-
-export function isAsaasInvoiceLink(raw: unknown): boolean {
-  return asaasInvoiceLinkOf(raw) !== null;
-}
-
-/** Pure: a real calendar day written `YYYY-MM-DD`, in this century. */
+/** Pure: a real calendar day written `YYYY-MM-DD`. */
 function isCalendarDate(raw: unknown): raw is string {
-  if (typeof raw !== "string" || !/^(20\d{2})-\d{2}-\d{2}$/.test(raw)) return false;
+  if (typeof raw !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
   const at = new Date(`${raw}T00:00:00.000Z`);
   return !Number.isNaN(at.getTime()) && at.toISOString().slice(0, 10) === raw;
+}
+
+/**
+ * Pure: a due date the notice can still be about: not before yesterday (UTC, so a call late in
+ * the Brazilian evening is not refused) and at most `MAX_DUE_DATE_AHEAD_DAYS` ahead.
+ */
+function isReasonableDueDate(raw: string, now: Date): boolean {
+  const day = Date.parse(`${raw}T00:00:00.000Z`);
+  const today = Date.parse(`${now.toISOString().slice(0, 10)}T00:00:00.000Z`);
+  const DAY = 24 * 60 * 60_000;
+  return day >= today - DAY && day <= today + MAX_DUE_DATE_AHEAD_DAYS * DAY;
 }
 
 /**
@@ -191,17 +176,25 @@ function isCalendarDate(raw: unknown): raw is string {
  */
 export function chargeNoticeOf(
   input: Pick<MiraeReminderMessageInput, "kind" | "charge_link" | "charge_due_date" | "charge_amount_cents">,
+  now: Date,
 ): { ok: true; charge: ChargeNotice | null } | { ok: false; invalidFields: string[] } {
   if (reminderKindOf(input.kind) !== CHARGE_NOTICE_KIND) return { ok: true, charge: null };
-  const invalidFields: string[] = [];
   const link = asaasInvoiceLinkOf(input.charge_link);
-  if (link === null) invalidFields.push("charge_link");
   const dueDate = input.charge_due_date;
-  if (!isCalendarDate(dueDate)) invalidFields.push("charge_due_date");
+  const validDueDate = isCalendarDate(dueDate) && isReasonableDueDate(dueDate, now);
   const amount = input.charge_amount_cents;
-  const validAmount = typeof amount === "number" && Number.isSafeInteger(amount) && amount > 0;
-  if (!validAmount) invalidFields.push("charge_amount_cents");
-  if (link === null || !isCalendarDate(dueDate) || !validAmount) return { ok: false, invalidFields };
+  const validAmount =
+    typeof amount === "number" && Number.isSafeInteger(amount) && amount > 0 && amount <= MAX_CHARGE_AMOUNT_CENTS;
+  if (link === null || !validDueDate || !validAmount || !isCalendarDate(dueDate)) {
+    return {
+      ok: false,
+      invalidFields: [
+        ...(link === null ? ["charge_link"] : []),
+        ...(validDueDate ? [] : ["charge_due_date"]),
+        ...(validAmount ? [] : ["charge_amount_cents"]),
+      ],
+    };
+  }
   return { ok: true, charge: { link, due_date: dueDate, amount_cents: amount } };
 }
 
@@ -343,7 +336,7 @@ export async function queueMiraeReminderMessage(
 ): Promise<ReminderResult> {
   const key = deliveryKeyOf(input);
   // A charge without a valid link, due date and amount is refused before anything is read.
-  const charge = chargeNoticeOf(input);
+  const charge = chargeNoticeOf(input, ctx.now);
   if (!charge.ok) return { outcome: "invalid_charge", invalidFields: charge.invalidFields };
   return db.withKeyLock(ctx.organizationId, key, async (tx) => {
     const setting = reminderDeliveryOf(await tx.readSettings(ctx.organizationId));

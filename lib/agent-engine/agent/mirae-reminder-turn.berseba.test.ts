@@ -22,6 +22,9 @@ import {
   chegaTardeDemais,
   lembreteDoMirae,
   quandoLegivel,
+  foraDoPrazoDaCobranca,
+  linkIntacto,
+  problemaDaCobrancaEnviada,
   runMiraeReminderTurn,
   trazValorEVencimento,
   valorLegivel,
@@ -318,6 +321,11 @@ describe("wiring (source contract)", () => {
     expect(iIlegivel).toBeGreaterThan(iLembrete);
     expect(iTemplate).toBeGreaterThan(iIlegivel);
     expect(fonte.slice(iIlegivel, iIlegivel + 200)).toContain("await avisarLembreteIlegivel(");
+    // A charge on a disabled channel is consumed with a notice for the team, never in silence.
+    const iDesativado = fonte.indexOf("if (targetRows[0].canal_desativado === 'true') {");
+    const trecho = fonte.slice(iDesativado, fonte.indexOf("return;", iDesativado + 400) + 7);
+    expect(trecho).toContain("if (cobrancaSemCanal?.charge) {");
+    expect(trecho).toContain("await avisarLembreteQueNaoSaiu(pool, {");
   });
 
   it("an automatic reminder is a turn that talks to the person: the send window defers it", () => {
@@ -376,6 +384,11 @@ describe("charge notice", () => {
     expect(b).toContain("não invente outro link");
     expect(b).toContain("nenhum dado clínico");
     expect(b).toContain("pediu para não");
+    expect(b).toContain("disse que já pagou esta parcela");
+    expect(b).toContain("disse que já recebeu este link");
+    expect(b).toContain("tratando do pagamento ou do plano com a equipe");
+    expect(b).toContain("Ponha o link sozinho na última linha");
+    expect(b).toContain("se o pedido ou a observação da equipe falarem de");
     // Not a confirmation: no agenda read, no confirmation request.
     expect(b).not.toContain("mirae_my_appointments");
     expect(b).not.toContain("confirmar a presença");
@@ -403,7 +416,7 @@ describe("charge notice", () => {
     expect(opening).toContain("R$ 299,00");
     expect(opening).toContain("25/11");
     expect(input.aberturaDoRascunho).toContain(LINK);
-    expect(p.sentCharge).toHaveBeenCalledWith({}, { tenantId: "org", conversationId: "conv", link: LINK });
+    expect(p.sentCharge).toHaveBeenCalledWith({}, { tenantId: "org", conversationId: "conv", link: LINK, since: NOW });
     expect(p.avisar).not.toHaveBeenCalled();
   });
 
@@ -440,15 +453,35 @@ describe("charge notice", () => {
     expect(trazValorEVencimento("R$ 299,00 até 26/11", charge)).toBe(false);
   });
 
-  it("sentChargeMessages reads outbound messages of the conversation that carry the link, by organization", async () => {
-    const query = vi.fn(async () => ({ rows: [{ body: SENT_OK }] }));
-    expect(await sentChargeMessages({ query } as never, { tenantId: "org", conversationId: "conv", link: LINK })).toEqual([
-      SENT_OK,
-    ]);
+  it("sentChargeMessages joins this turn's messages (a reply split into bubbles) and keeps older link messages apart", async () => {
+    const query = vi.fn(async () => ({
+      rows: [
+        { body: `Mensagem antiga com o link ${LINK}`, this_turn: false },
+        { body: "Oi, Ana! A parcela de R$ 299,00 vence em 25/11.", this_turn: true },
+        { body: LINK, this_turn: true },
+      ],
+    }));
+    const texts = await sentChargeMessages({ query } as never, {
+      tenantId: "org",
+      conversationId: "conv",
+      link: LINK,
+      since: NOW,
+    });
+    expect(texts).toEqual([`Oi, Ana! A parcela de R$ 299,00 vence em 25/11.\n\n${LINK}`, `Mensagem antiga com o link ${LINK}`]);
+    // Split bubbles: the joined text carries link, amount and date, so no false notice.
+    expect(problemaDaCobrancaEnviada(texts.slice(0, 1), CHARGE.charge!)).toBeNull();
     const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
     expect(sql).toContain("organization_id = $1 and conversation_id = $2 and direction = 'outbound'");
-    expect(sql).toContain("strpos(coalesce(body, ''), $3) > 0");
-    expect(params).toEqual(["org", "conv", LINK]);
+    expect(sql).toContain("created_at >= $4 or strpos(coalesce(body, ''), $3) > 0");
+    expect(params.slice(0, 3)).toEqual(["org", "conv", LINK]);
+    expect((params[3] as Date).getTime()).toBe(NOW.getTime() - 10_000);
+  });
+
+  it("this turn's messages without the link are not a charge text", async () => {
+    const query = vi.fn(async () => ({ rows: [{ body: "Oi! Tudo bem?", this_turn: true }] }));
+    expect(
+      await sentChargeMessages({ query } as never, { tenantId: "org", conversationId: "conv", link: LINK, since: NOW }),
+    ).toEqual([]);
   });
 
   it("draft: an agent draft with the charge briefing", async () => {
@@ -471,6 +504,22 @@ describe("charge notice", () => {
     expect((p.avisar.mock.calls[0] as unknown as [unknown, { motivo: string }])[1].motivo).toContain(
       "não traz o link da cobrança",
     );
+  });
+
+  it("the notice title carries the due date, so next month's charge is not hidden by an open one", async () => {
+    const query = vi.fn(async () => ({ rows: [{ id: "n" }] }));
+    await avisarLembreteQueNaoSaiu({ query } as never, { tenantId: "org", conversationId: "conv", reminder: CHARGE, motivo: "M." });
+    await avisarLembreteQueNaoSaiu({ query } as never, {
+      tenantId: "org",
+      conversationId: "conv",
+      reminder: { ...CHARGE, charge: { ...CHARGE.charge!, due_date: "2026-12-25" } },
+      motivo: "M.",
+    });
+    const titles = query.mock.calls.map((c) => (c as unknown as [string, unknown[]])[1].find((v) => typeof v === "string" && v.startsWith("Lembrete do Mirae")));
+    expect(titles).toEqual([
+      "Lembrete do Mirae não saiu (cobrança da parcela de 25/11)",
+      "Lembrete do Mirae não saiu (cobrança da parcela de 25/12)",
+    ]);
   });
 
   it("the team's notice of a charge carries the link, the amount and the due date", async () => {
@@ -559,6 +608,114 @@ describe("charge notice", () => {
           knobs: SPINNING_DEFAULTS,
         }).allow,
       ).toBe(false);
+    });
+  });
+});
+
+describe("charge notice: deterministic checks", () => {
+  const LINK = "https://www.asaas.com/i/k7f2x9q1ab3c";
+  const CHARGE = { link: LINK, due_date: "2026-11-25", amount_cents: 29900 };
+  const SP = "America/Sao_Paulo";
+  // 2026-11-18 is a Wednesday; São Paulo is UTC-3.
+  const at = (iso: string) => new Date(iso);
+
+  it("goes out the same day it was queued, 08:30 to 18:00, not on Sunday, not after the due date", () => {
+    const queued = "2026-11-18T11:30:00.000Z"; // 08:30 local
+    expect(foraDoPrazoDaCobranca(CHARGE, at("2026-11-18T11:30:00.000Z"), queued, SP)).toBeNull();
+    expect(foraDoPrazoDaCobranca(CHARGE, at("2026-11-18T20:59:00.000Z"), queued, SP)).toBeNull(); // 17:59
+    expect(foraDoPrazoDaCobranca(CHARGE, at("2026-11-18T21:00:00.000Z"), queued, SP)).toContain("8h30 às 18h");
+    expect(foraDoPrazoDaCobranca(CHARGE, at("2026-11-18T11:29:00.000Z"), queued, SP)).toContain("8h30 às 18h");
+    // Deferred to the next day by the send window: never sent automatically.
+    expect(foraDoPrazoDaCobranca(CHARGE, at("2026-11-19T12:00:00.000Z"), queued, SP)).toContain("outro dia");
+    // Sunday 2026-11-22.
+    expect(
+      foraDoPrazoDaCobranca(CHARGE, at("2026-11-22T13:00:00.000Z"), "2026-11-22T12:00:00.000Z", SP),
+    ).toContain("domingo");
+    expect(
+      foraDoPrazoDaCobranca(CHARGE, at("2026-11-26T13:00:00.000Z"), "2026-11-26T12:00:00.000Z", SP),
+    ).toContain("vencimento já passou");
+    // On the due date itself, it may go.
+    expect(foraDoPrazoDaCobranca(CHARGE, at("2026-11-25T13:00:00.000Z"), "2026-11-25T12:00:00.000Z", SP)).toBeNull();
+  });
+
+  it("the link must stand alone and be the only URL", () => {
+    expect(linkIntacto(`Segue o link:\n${LINK}`, LINK)).toBe(true);
+    expect(linkIntacto(`Link: ${LINK} obrigado`, LINK)).toBe(true);
+    expect(linkIntacto(`Link: ${LINK}.`, LINK)).toBe(false);
+    expect(linkIntacto(`[pagar](${LINK})`, LINK)).toBe(false);
+    expect(linkIntacto(`*${LINK}*`, LINK)).toBe(false);
+    expect(linkIntacto(`${LINK} ou https://www.asaas.com/i/outro123`, LINK)).toBe(false);
+    expect(linkIntacto("sem link", LINK)).toBe(false);
+  });
+
+  it("names what went wrong with what was sent", () => {
+    const ok = `R$ 299,00, vence 25/11.\n${LINK}`;
+    expect(problemaDaCobrancaEnviada([], CHARGE)).toBe("not_sent");
+    expect(problemaDaCobrancaEnviada([`R$ 299,00, vence 25/11: ${LINK}.`], CHARGE)).toBe("link_altered");
+    expect(problemaDaCobrancaEnviada([`R$ 290,00, vence 25/11.\n${LINK}`], CHARGE)).toBe("amount_or_due_date");
+    expect(problemaDaCobrancaEnviada([ok], CHARGE)).toBeNull();
+  });
+
+  describe("in the turn", () => {
+    const REMINDER_AUTO: MiraeReminderPayload = {
+      delivery_key: "rem_charge_1:2026-11-18T11:30:00.000Z",
+      reminder_id: "rem_charge_1",
+      delivery: "auto",
+      kind: "charge_notice",
+      title: "Avisar cobrança",
+      note: "Parcela de 25/11, R$ 299,00: mandar o link de pagamento.",
+      student_name: "Ana",
+      appointment_start_at: null,
+      professional_first_name: null,
+      charge: CHARGE,
+    };
+    const queuedJob = { ...JOB, payload: { promised_at: "2026-11-18T11:30:00.000Z" } } as never;
+    const go = (p: ReturnType<typeof ports>, now: string, r: MiraeReminderPayload = REMINDER_AUTO) =>
+      runMiraeReminderTurn(deps, queuedJob, {} as never, { workerId: "w" }, () => new Date(now), TARGET, r, p as never);
+
+    it("outside its window: nothing runs, and the team gets the charge", async () => {
+      const p = ports();
+      await go(p, "2026-11-19T12:00:00.000Z");
+      expect(p.runAgentTurn).not.toHaveBeenCalled();
+      expect(p.generateReplyDraft).not.toHaveBeenCalled();
+      expect(p.avisar).toHaveBeenCalledTimes(1);
+      expect((p.avisar.mock.calls[0] as unknown as [unknown, { motivo: string }])[1].motivo).toContain(
+        "não saiu automaticamente",
+      );
+    });
+
+    it("inside its window: the turn runs", async () => {
+      const p = ports({ sentCharge: vi.fn(async () => [`R$ 299,00 até 25/11.\n${LINK}`]) });
+      await go(p, "2026-11-18T14:00:00.000Z");
+      expect(p.runAgentTurn).toHaveBeenCalledTimes(1);
+      expect(p.avisar).not.toHaveBeenCalled();
+    });
+
+    it("a draft is not held by the window: a person sends it", async () => {
+      const p = ports({ generateReplyDraft: vi.fn(async () => ({ id: "d", status: "pending", original_body: LINK })) });
+      await go(p, "2026-11-22T23:00:00.000Z", { ...REMINDER_AUTO, delivery: "draft" });
+      expect(p.generateReplyDraft).toHaveBeenCalledTimes(1);
+      expect(p.avisar).not.toHaveBeenCalled();
+    });
+
+    it("the worker checks the link again: a payload with another link sends nothing", async () => {
+      const p = ports();
+      await go(p, "2026-11-18T14:00:00.000Z", {
+        ...REMINDER_AUTO,
+        charge: { ...CHARGE, link: "https://evil.example/i/abcd1234" },
+      });
+      expect(p.runAgentTurn).not.toHaveBeenCalled();
+      expect((p.avisar.mock.calls[0] as unknown as [unknown, { motivo: string }])[1].motivo).toContain(
+        "não é um link de fatura do Asaas",
+      );
+    });
+
+    it("the agent changed the link (trailing punctuation): the team is told", async () => {
+      const p = ports({ sentCharge: vi.fn(async () => [`R$ 299,00 até 25/11: ${LINK}.`]) });
+      await go(p, "2026-11-18T14:00:00.000Z");
+      expect((p.avisar.mock.calls[0] as unknown as [unknown, { motivo: string }])[1].motivo).toContain(
+        "link alterado",
+      );
     });
   });
 });

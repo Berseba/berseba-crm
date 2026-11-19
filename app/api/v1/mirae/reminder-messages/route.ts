@@ -12,9 +12,9 @@
  * `data.outcome` (`drafted`, `scheduled`, `already_drafted`, `already_handled`,
  * `contact_not_found`, `contact_blocked`); a malformed body is a 400, and reminder messages turned
  * off for the organization (`reminder_messages_disabled`) or a `kind: "charge"` whose
- * `charge_link` (https on `asaas.com`), `charge_due_date` (`YYYY-MM-DD`) or `charge_amount_cents`
- * (positive integer) is missing or invalid (`invalid_charge`, fields in `details.fields`) a 422,
- * all final.
+ * `charge_link` (`https://www.asaas.com/i/<id>`), `charge_due_date` (`YYYY-MM-DD`, yesterday to 45
+ * days ahead) or `charge_amount_cents` (integer, 1 to 10,000,000) is missing or invalid
+ * (`invalid_charge`, fields in `details.fields`) a 422, all final.
  */
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
@@ -114,6 +114,7 @@ export async function POST(req: NextRequest): Promise<Response> {
           actor_type: "api_token",
           actor_api_token_id: auth.apiTokenId,
           reminder_id: parsed.data.reminder_id,
+          kind: parsed.data.kind ?? null,
           delivery: result.delivery,
           cron_job_id: result.cronJobId,
         },

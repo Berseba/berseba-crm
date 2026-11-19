@@ -35,6 +35,6 @@ export const SPINNING_DEFAULTS: SpinningKnobs = {
   // above, and each student gets their own (Mirae charge notice, `mirae-reminder-turn.berseba.ts`).
   allowlistPatterns: [
     'https?://\\S*(pay|pag|checkout|pix|boleto|cobranc)',
-    'https://([a-z0-9-]+\\.)*asaas\\.com/',
+    'https://(www|sandbox)\\.asaas\\.com/i/[a-z0-9]+(\\s|$)',
   ],
 };

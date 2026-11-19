@@ -118,7 +118,8 @@ describe("POST /api/v1/mirae/reminder-messages", () => {
       title: "Cobrança da parcela 3/12",
       kind: "charge",
       charge_link: "https://www.asaas.com/i/k7f2x9q1ab3c",
-      charge_due_date: "2026-11-25",
+      // The route reads the real clock: a due date a week from today.
+      charge_due_date: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString().slice(0, 10),
       charge_amount_cents: 29900,
     };
     // The real rule: an invalid charge is refused before the database is touched.
@@ -137,7 +138,7 @@ describe("POST /api/v1/mirae/reminder-messages", () => {
       expect(queue.mock.calls[0]![2]).toMatchObject({
         kind: "charge",
         charge_link: "https://www.asaas.com/i/k7f2x9q1ab3c",
-        charge_due_date: "2026-11-25",
+        charge_due_date: CHARGE.charge_due_date,
         charge_amount_cents: 29900,
       });
     });
