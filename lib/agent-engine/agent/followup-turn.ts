@@ -85,7 +85,12 @@ import {
 } from './followup-flow-classify';
 import { consultarJevNoFollowup } from '@/lib/ai/decisao/followup';
 import { enviarComSaidaConfiguravel } from "@/lib/prospecting/saida-configuravel";
-import { lembreteDoMirae, runMiraeReminderTurn } from './mirae-reminder-turn.berseba';
+import {
+  avisarLembreteIlegivel,
+  lembreteDoMirae,
+  MIRAE_REMINDER_SOURCE,
+  runMiraeReminderTurn,
+} from './mirae-reminder-turn.berseba';
 
 
 const DAY_MS = 86_400_000;
@@ -634,6 +639,12 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
     const lembrete = lembreteDoMirae(job.payload);
     if (lembrete !== null) {
       await runMiraeReminderTurn(deps, job, pool, ctx, clock, { ...target, boundary }, lembrete);
+      return;
+    }
+    // A Mirae reminder this worker cannot read (a kind from a newer image, say) never becomes a
+    // generic automatic return: the team is told instead.
+    if (job.payload?.source === MIRAE_REMINDER_SOURCE) {
+      await avisarLembreteIlegivel(pool, { tenantId, conversationId: target.conversationId });
       return;
     }
 

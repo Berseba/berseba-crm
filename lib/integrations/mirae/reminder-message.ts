@@ -86,10 +86,13 @@ export const miraeReminderMessageSchema = z
     kind: z.string().trim().max(60).optional(),
     appointment_start_at: isoDateTime.nullish(),
     professional_first_name: z.string().trim().max(80).nullish(),
-    /** `kind: "charge"` only. Their meaning is checked by `chargeNoticeOf` (422, not 400). */
-    charge_link: z.string().trim().max(2000).nullish(),
-    charge_due_date: z.string().trim().max(40).nullish(),
-    charge_amount_cents: z.number().nullish(),
+    /**
+     * `kind: "charge"` only. Typed loosely on purpose: `chargeNoticeOf` checks them, and any
+     * problem is a 422 `invalid_charge` naming the field, never a generic 400.
+     */
+    charge_link: z.unknown().optional(),
+    charge_due_date: z.unknown().optional(),
+    charge_amount_cents: z.unknown().optional(),
   })
   .passthrough();
 export type MiraeReminderMessageInput = z.infer<typeof miraeReminderMessageSchema>;
@@ -143,29 +146,41 @@ const KIND_ALIASES: Record<string, MiraeReminderKind> = {
 
 export type ChargeNotice = NonNullable<MiraeReminderPayload["charge"]>;
 
-/** Pure: an `https` URL on `asaas.com` (or a subdomain: `www.`, `sandbox.`), with nothing hidden in it. */
-export function isAsaasInvoiceLink(raw: string): boolean {
+export const MAX_CHARGE_LINK_LENGTH = 2000;
+
+/**
+ * Pure: the link as it will be stored and sent (the parsed `href`), when it is an `https` URL on
+ * `asaas.com` or a subdomain (`www.`, `sandbox.`), else `null`. Printable ASCII only, with no `\`
+ * nor `@`: a link a WhatsApp client or a link detector could read as pointing elsewhere is refused.
+ */
+export function asaasInvoiceLinkOf(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const link = raw.trim();
+  if (link.length === 0 || link.length > MAX_CHARGE_LINK_LENGTH) return null;
+  if (!/^[\x21-\x7e]+$/.test(link) || /[\\@]/.test(link)) return null;
   let url: URL;
   try {
-    url = new URL(raw);
+    url = new URL(link);
   } catch {
-    return false;
+    return null;
   }
-  const host = url.hostname.toLowerCase();
-  return (
+  const host = url.hostname;
+  const ok =
     url.protocol === "https:" &&
     url.username === "" &&
     url.password === "" &&
     url.port === "" &&
-    (host === "asaas.com" || host.endsWith(".asaas.com")) &&
-    // The agent copies it character by character: no whitespace for it to break the link on.
-    !/\s/.test(raw)
-  );
+    (host === "asaas.com" || host.endsWith(".asaas.com"));
+  return ok ? url.href : null;
 }
 
-/** Pure: a real calendar day written `YYYY-MM-DD`. */
-function isCalendarDate(raw: string): boolean {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+export function isAsaasInvoiceLink(raw: unknown): boolean {
+  return asaasInvoiceLinkOf(raw) !== null;
+}
+
+/** Pure: a real calendar day written `YYYY-MM-DD`, in this century. */
+function isCalendarDate(raw: unknown): raw is string {
+  if (typeof raw !== "string" || !/^(20\d{2})-\d{2}-\d{2}$/.test(raw)) return false;
   const at = new Date(`${raw}T00:00:00.000Z`);
   return !Number.isNaN(at.getTime()) && at.toISOString().slice(0, 10) === raw;
 }
@@ -179,21 +194,21 @@ export function chargeNoticeOf(
 ): { ok: true; charge: ChargeNotice | null } | { ok: false; invalidFields: string[] } {
   if (reminderKindOf(input.kind) !== CHARGE_NOTICE_KIND) return { ok: true, charge: null };
   const invalidFields: string[] = [];
-  const link = input.charge_link ?? "";
-  if (!isAsaasInvoiceLink(link)) invalidFields.push("charge_link");
-  const dueDate = input.charge_due_date ?? "";
+  const link = asaasInvoiceLinkOf(input.charge_link);
+  if (link === null) invalidFields.push("charge_link");
+  const dueDate = input.charge_due_date;
   if (!isCalendarDate(dueDate)) invalidFields.push("charge_due_date");
   const amount = input.charge_amount_cents;
-  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount <= 0) {
-    invalidFields.push("charge_amount_cents");
-  }
-  if (invalidFields.length > 0) return { ok: false, invalidFields };
-  return { ok: true, charge: { link, due_date: dueDate, amount_cents: amount as number } };
+  const validAmount = typeof amount === "number" && Number.isSafeInteger(amount) && amount > 0;
+  if (!validAmount) invalidFields.push("charge_amount_cents");
+  if (link === null || !isCalendarDate(dueDate) || !validAmount) return { ok: false, invalidFields };
+  return { ok: true, charge: { link, due_date: dueDate, amount_cents: amount } };
 }
 
 /** Pure: Mirae's kind, or `manual` for anything this CRM does not know. */
 export function reminderKindOf(raw: string | undefined): MiraeReminderKind {
-  if (raw && raw in KIND_ALIASES) return KIND_ALIASES[raw]!;
+  // Own keys only: `"toString" in {}` is true.
+  if (raw && Object.hasOwn(KIND_ALIASES, raw)) return KIND_ALIASES[raw]!;
   return (MIRAE_REMINDER_KINDS as readonly string[]).includes(raw ?? "")
     ? (raw as MiraeReminderKind)
     : "manual";
@@ -391,7 +406,8 @@ export async function queueMiraeReminderMessage(
       // The phone as Mirae has it: the pre-check retries with it when the CRM's spelling finds
       // nobody in Mirae (9th digit).
       mirae_phone: input.phone.replace(/\D/g, "") || null,
-      appointment_start_at: input.appointment_start_at ?? null,
+      // A charge has no appointment: a time sent along would make the turn drop it as "too late".
+      appointment_start_at: charge.charge ? null : (input.appointment_start_at ?? null),
       professional_first_name: input.professional_first_name ?? null,
       ...(charge.charge ? { charge: charge.charge } : {}),
     };

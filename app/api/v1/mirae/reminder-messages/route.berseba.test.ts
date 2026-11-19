@@ -7,6 +7,8 @@
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type * as ReminderMessage from "@/lib/integrations/mirae/reminder-message";
+
 const { auth, queue, support, pool, auditFn } = vi.hoisted(() => ({
   auth: vi.fn(),
   queue: vi.fn(),
@@ -121,7 +123,7 @@ describe("POST /api/v1/mirae/reminder-messages", () => {
     };
     // The real rule: an invalid charge is refused before the database is touched.
     const realRule = async () => {
-      const actual = await vi.importActual<typeof import("@/lib/integrations/mirae/reminder-message")>(
+      const actual = await vi.importActual<typeof ReminderMessage>(
         "@/lib/integrations/mirae/reminder-message",
       );
       queue.mockImplementationOnce(actual.queueMiraeReminderMessage);
@@ -154,9 +156,11 @@ describe("POST /api/v1/mirae/reminder-messages", () => {
       expect(auditFn).not.toHaveBeenCalled();
     });
 
-    it("an amount that is not a number is a malformed body (400)", async () => {
-      expect((await call({ ...CHARGE, charge_amount_cents: "299,00" })).status).toBe(400);
-      expect(queue).not.toHaveBeenCalled();
+    it("an amount that is not a number is an invalid charge too (422, naming the field)", async () => {
+      await realRule();
+      const res = await call({ ...CHARGE, charge_amount_cents: "299,00" });
+      expect(res.status).toBe(422);
+      expect((await res.json()).error.details).toEqual({ fields: ["charge_amount_cents"] });
     });
   });
 

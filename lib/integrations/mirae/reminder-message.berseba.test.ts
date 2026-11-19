@@ -787,6 +787,11 @@ describe("charge notice (Mirae ADR-052 addendum 2026-11-18)", () => {
     ["a Brazilian date", { charge_due_date: "25/11/2026" }, ["charge_due_date"]],
     ["zero amount", { charge_amount_cents: 0 }, ["charge_amount_cents"]],
     ["fractional amount", { charge_amount_cents: 299.5 }, ["charge_amount_cents"]],
+    ["amount as a string", { charge_amount_cents: "29900" }, ["charge_amount_cents"]],
+    ["a backslash that hides another host", { charge_link: "https://asaas.com\\@evil.com/i/x" }, ["charge_link"]],
+    ["a full-width dot", { charge_link: "https://asaas\uff0ecom/i/x" }, ["charge_link"]],
+    ["a link too long", { charge_link: `https://www.asaas.com/i/${"a".repeat(2000)}` }, ["charge_link"]],
+    ["a year out of range", { charge_due_date: "0000-01-01" }, ["charge_due_date"]],
     ["everything missing", { charge_link: null, charge_due_date: null, charge_amount_cents: null }, [
       "charge_link",
       "charge_due_date",
@@ -805,7 +810,26 @@ describe("charge notice (Mirae ADR-052 addendum 2026-11-18)", () => {
     expect(isAsaasInvoiceLink("https://sandbox.asaas.com/i/abc")).toBe(true);
     expect(isAsaasInvoiceLink("https://asaas.com/i/abc")).toBe(true);
     expect(isAsaasInvoiceLink("https://www.asaas.com:8443/i/abc")).toBe(false);
+    expect(isAsaasInvoiceLink("https://WWW.ASAAS.COM/i/abc")).toBe(true);
     expect(chargeNoticeOf({ kind: "evaluation", charge_link: "http://x" })).toEqual({ ok: true, charge: null });
+  });
+
+  it("stores the parsed link, and ignores an appointment time sent along", async () => {
+    const { db, jobs } = fakeDb({ settings: AUTO, contacts: [STUDENT], conversations: [CONVERSATION] });
+    await run(db, {
+      ...CHARGE_BODY,
+      charge_link: "https://WWW.ASAAS.COM/i/k7f2x9q1ab3c",
+      appointment_start_at: "2026-11-17T12:30:00.000Z",
+    });
+    expect(lembreteDoMirae(jobs[0]!.payload)).toMatchObject({
+      appointment_start_at: null,
+      charge: { link: "https://www.asaas.com/i/k7f2x9q1ab3c" },
+    });
+  });
+
+  it("a kind named like an inherited property is manual, never a function", () => {
+    expect(reminderKindOf("toString")).toBe("manual");
+    expect(reminderKindOf("constructor")).toBe("manual");
   });
 
   it("the SQL leaves charge notices out of the live-return check", async () => {

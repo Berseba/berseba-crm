@@ -21,6 +21,8 @@ import {
   lembreteDoMirae,
   quandoLegivel,
   runMiraeReminderTurn,
+  sentChargeMessages,
+  trazValorEVencimento,
   valorLegivel,
   vencimentoLegivel,
   type MiraeReminderPayload,
@@ -65,6 +67,7 @@ function ports(over: Record<string, unknown> = {}) {
     fuso: vi.fn(async () => "America/Sao_Paulo"),
     checkAppointment: vi.fn(async (): Promise<"confirmed" | "gone" | "unknown" | "unavailable"> => "confirmed"),
     avisar: vi.fn(async () => undefined),
+    sentCharge: vi.fn(async (): Promise<string[]> => []),
     ...over,
   };
 }
@@ -309,6 +312,11 @@ describe("wiring (source contract)", () => {
     expect(iLembrete).toBeGreaterThan(iCanal);
     expect(iLembrete).toBeGreaterThan(iBoundary);
     expect(iTemplate).toBeGreaterThan(iLembrete);
+    // A Mirae payload this worker cannot read stops before the generic return turn.
+    const iIlegivel = fonte.indexOf("if (job.payload?.source === MIRAE_REMINDER_SOURCE) {");
+    expect(iIlegivel).toBeGreaterThan(iLembrete);
+    expect(iTemplate).toBeGreaterThan(iIlegivel);
+    expect(fonte.slice(iIlegivel, iIlegivel + 200)).toContain("await avisarLembreteIlegivel(");
   });
 
   it("an automatic reminder is a turn that talks to the person: the send window defers it", () => {
@@ -374,8 +382,10 @@ describe("charge notice", () => {
     expect(b).not.toContain("\u00a0");
   });
 
+  const SENT_OK = `Oi, Ana! A parcela de R$ 299,00 vence em 25/11. Link: ${LINK}`;
+
   it("auto: the agent's normal turn with the charge briefing, and Mirae's agenda is not read", async () => {
-    const p = ports();
+    const p = ports({ sentCharge: vi.fn(async () => [SENT_OK]) });
     await runCharge(p);
     expect(p.checkAppointment).not.toHaveBeenCalled();
     expect(p.generateReplyDraft).not.toHaveBeenCalled();
@@ -392,14 +402,89 @@ describe("charge notice", () => {
     expect(opening).toContain("R$ 299,00");
     expect(opening).toContain("25/11");
     expect(input.aberturaDoRascunho).toContain(LINK);
+    expect(p.sentCharge).toHaveBeenCalledWith({}, { tenantId: "org", conversationId: "conv", link: LINK });
+    expect(p.avisar).not.toHaveBeenCalled();
+  });
+
+  it("auto: a turn that sent nothing with the link (veto, opt-out, handoff, assisted) tells the team, with the charge", async () => {
+    const p = ports({ sentCharge: vi.fn(async () => []) });
+    await runCharge(p);
+    expect(p.avisar).toHaveBeenCalledTimes(1);
+    const aviso = (p.avisar.mock.calls[0] as unknown as [unknown, { reminder: MiraeReminderPayload; motivo: string }])[1];
+    expect(aviso.reminder.charge?.link).toBe(LINK);
+    expect(aviso.motivo).toContain("não enviou a cobrança");
+  });
+
+  it("auto: sent with the link but another amount or date tells the team", async () => {
+    const p = ports({ sentCharge: vi.fn(async () => [`Oi! A parcela de R$ 290,00 vence em 25/11. ${LINK}`]) });
+    await runCharge(p);
+    expect(p.avisar).toHaveBeenCalledTimes(1);
+    expect(
+      (p.avisar.mock.calls[0] as unknown as [unknown, { motivo: string }])[1].motivo,
+    ).toContain("sem o valor ou o vencimento exatos");
+  });
+
+  it("a turn deferred to the send window (it throws) does not tell the team yet", async () => {
+    const p = ports({ runAgentTurn: vi.fn(async () => { throw new Error("job_settled"); }) });
+    await expect(runCharge(p)).rejects.toThrow("job_settled");
+    expect(p.sentCharge).not.toHaveBeenCalled();
+    expect(p.avisar).not.toHaveBeenCalled();
+  });
+
+  it("trazValorEVencimento ignores spacing but not digits", () => {
+    const charge = CHARGE.charge!;
+    expect(trazValorEVencimento("R$299,00 até 25/11", charge)).toBe(true);
+    expect(trazValorEVencimento("R$ 299,00 até 25/11", charge)).toBe(true);
+    expect(trazValorEVencimento("R$ 299 até 25/11", charge)).toBe(false);
+    expect(trazValorEVencimento("R$ 299,00 até 26/11", charge)).toBe(false);
+  });
+
+  it("sentChargeMessages reads outbound messages of the conversation that carry the link, by organization", async () => {
+    const query = vi.fn(async () => ({ rows: [{ body: SENT_OK }] }));
+    expect(await sentChargeMessages({ query } as never, { tenantId: "org", conversationId: "conv", link: LINK })).toEqual([
+      SENT_OK,
+    ]);
+    const [sql, params] = query.mock.calls[0] as unknown as [string, unknown[]];
+    expect(sql).toContain("organization_id = $1 and conversation_id = $2 and direction = 'outbound'");
+    expect(sql).toContain("strpos(coalesce(body, ''), $3) > 0");
+    expect(params).toEqual(["org", "conv", LINK]);
   });
 
   it("draft: an agent draft with the charge briefing", async () => {
-    const p = ports();
+    const p = ports({
+      generateReplyDraft: vi.fn(async () => ({ id: "d", status: "pending", original_body: SENT_OK })),
+    });
     await runCharge(p, { ...CHARGE, delivery: "draft" });
     expect(p.runAgentTurn).not.toHaveBeenCalled();
     const input = (p.generateReplyDraft.mock.calls[0] as unknown as [unknown, unknown, Record<string, unknown>])[2];
     expect(input.aberturaExtra).toContain(LINK);
+    expect(p.avisar).not.toHaveBeenCalled();
+  });
+
+  it("draft: a draft already pending without the link (one draft per revision) tells the team", async () => {
+    const p = ports({
+      generateReplyDraft: vi.fn(async () => ({ id: "older", status: "pending", original_body: "Confirma a aula de amanhã?" })),
+    });
+    await runCharge(p, { ...CHARGE, delivery: "draft" });
+    expect(p.avisar).toHaveBeenCalledTimes(1);
+    expect((p.avisar.mock.calls[0] as unknown as [unknown, { motivo: string }])[1].motivo).toContain(
+      "não traz o link da cobrança",
+    );
+  });
+
+  it("the team's notice of a charge carries the link, the amount and the due date", async () => {
+    const query = vi.fn(async () => ({ rows: [{ id: "n" }] }));
+    await avisarLembreteQueNaoSaiu({ query } as never, {
+      tenantId: "org",
+      conversationId: "conv",
+      reminder: CHARGE,
+      motivo: "Motivo.",
+    });
+    const params = (query.mock.calls[0] as unknown as [string, unknown[]])[1];
+    const body = params.find((v) => typeof v === "string" && v.startsWith("Motivo.")) as string;
+    expect(body).toContain(LINK);
+    expect(body).toContain("R$ 299,00");
+    expect(body).toContain("25/11");
   });
 
   it("a charge notice that lost its charge data is never sent as a generic message", async () => {
