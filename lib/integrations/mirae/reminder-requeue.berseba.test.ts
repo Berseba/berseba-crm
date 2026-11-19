@@ -90,7 +90,7 @@ describe("requeueStaleMiraeReminder", () => {
     expect(iLive).toBeGreaterThan(iLock);
     expect(iInsert).toBeGreaterThan(iLive);
     // The horizon is the appointment.
-    expect(calls[iLive]!.params).toEqual(["org", "contact", new Date("2026-11-18T12:00:00.000Z")]);
+    expect(calls[iLive]!.params).toEqual(["org", "contact", new Date("2026-11-18T12:00:00.000Z"), "charge_notice"]);
     expect(client.release).toHaveBeenCalled();
   });
 

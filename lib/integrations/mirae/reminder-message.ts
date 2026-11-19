@@ -18,6 +18,11 @@
  *    human", internal contact, silenced conversation), still becomes a draft;
  *  - `off`: refused with 422, Mirae shows the failure.
  *
+ * A charge notice (`kind: "charge"`, Mirae ADR-052 addendum 2026-11-18) carries the Asaas invoice
+ * link, the due date and the amount of an enrollment installment, the one place financial values
+ * reach the CRM from Mirae. On `auto` it is sent with no appointment time; a missing or invalid
+ * charge field is a 422 (`invalid_charge`), final for Mirae's queue.
+ *
  * Either way the endpoint only QUEUES: a one-shot `followup_turn` (`cron_jobs` kind `at`, due
  * now) carrying the briefing under `payload.mirae_reminder`. The worker runs it
  * (`lib/agent-engine/agent/mirae-reminder-turn.berseba.ts`); outside the channel's send window
@@ -31,7 +36,9 @@
  *  3. `contacts.is_blocked` → `contact_blocked`;
  *  4. under a second lock on (organization, contact), a live scheduled return for this contact
  *     (`cron_jobs`) or a return turn already queued or running (`job_queue`, e.g. one deferred to
- *     the next send window) → `already_handled`, so the person never gets two messages;
+ *     the next send window) → `already_handled`, so the person never gets two messages. Not for a
+ *     charge notice: the payment link must reach the person whatever else is on its way; and a
+ *     queued charge notice does not swallow a confirmation either;
  *  5. queue the turn → `drafted` or `scheduled`.
  *
  * Logs carry ids and outcomes only, never the phone or the briefing.
@@ -43,6 +50,7 @@ import { parseServiceBoundary, type ServiceBoundary } from "@/lib/atendimento/fr
 import { escolherContatoCanonico } from "@/lib/channels/contato-por-telefone";
 import { normalizePhoneBR, phoneLookupVariants } from "@/lib/channels/phone-variants";
 import {
+  CHARGE_NOTICE_KIND,
   CONFIRMATION_KINDS,
   MIRAE_REMINDER_KINDS,
   MIRAE_REMINDER_SOURCE,
@@ -78,6 +86,10 @@ export const miraeReminderMessageSchema = z
     kind: z.string().trim().max(60).optional(),
     appointment_start_at: isoDateTime.nullish(),
     professional_first_name: z.string().trim().max(80).nullish(),
+    /** `kind: "charge"` only. Their meaning is checked by `chargeNoticeOf` (422, not 400). */
+    charge_link: z.string().trim().max(2000).nullish(),
+    charge_due_date: z.string().trim().max(40).nullish(),
+    charge_amount_cents: z.number().nullish(),
   })
   .passthrough();
 export type MiraeReminderMessageInput = z.infer<typeof miraeReminderMessageSchema>;
@@ -96,7 +108,9 @@ export type ReminderOutcome =
   /** The contact opted out (`contacts.is_blocked`). */
   | "contact_blocked"
   /** The organization turned reminder messages off: 422. */
-  | "disabled";
+  | "disabled"
+  /** A charge notice whose link, due date or amount is missing or invalid: 422. */
+  | "invalid_charge";
 
 export interface ReminderResult {
   outcome: ReminderOutcome;
@@ -105,6 +119,8 @@ export interface ReminderResult {
   delivery?: "draft" | "auto";
   /** `scheduled` answered again for a key already scheduled: nothing new was created. */
   replayed?: boolean;
+  /** `invalid_charge` only: which fields failed. */
+  invalidFields?: string[];
 }
 
 /** Pure: the organization's setting, with anything unknown falling back to the default. */
@@ -115,7 +131,6 @@ export function reminderDeliveryOf(settings: unknown): MiraeReminderDelivery {
     : DEFAULT_REMINDER_DELIVERY;
 }
 
-/** Pure: Mirae's kind, or `manual` for anything this CRM does not know. */
 /**
  * Mirae's own spelling (`connector.ts`, ADR-084: `evaluation` | `first_class`) and the long one
  * this CRM names its kinds by. Both are accepted.
@@ -123,8 +138,60 @@ export function reminderDeliveryOf(settings: unknown): MiraeReminderDelivery {
 const KIND_ALIASES: Record<string, MiraeReminderKind> = {
   evaluation: "evaluation_confirmation",
   first_class: "first_class_confirmation",
+  charge: "charge_notice",
 };
 
+export type ChargeNotice = NonNullable<MiraeReminderPayload["charge"]>;
+
+/** Pure: an `https` URL on `asaas.com` (or a subdomain: `www.`, `sandbox.`), with nothing hidden in it. */
+export function isAsaasInvoiceLink(raw: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return false;
+  }
+  const host = url.hostname.toLowerCase();
+  return (
+    url.protocol === "https:" &&
+    url.username === "" &&
+    url.password === "" &&
+    url.port === "" &&
+    (host === "asaas.com" || host.endsWith(".asaas.com")) &&
+    // The agent copies it character by character: no whitespace for it to break the link on.
+    !/\s/.test(raw)
+  );
+}
+
+/** Pure: a real calendar day written `YYYY-MM-DD`. */
+function isCalendarDate(raw: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return false;
+  const at = new Date(`${raw}T00:00:00.000Z`);
+  return !Number.isNaN(at.getTime()) && at.toISOString().slice(0, 10) === raw;
+}
+
+/**
+ * Pure: the charge a `charge` reminder carries, or the fields that are missing or invalid. Every
+ * other kind has no charge (`null`), whatever charge fields came along.
+ */
+export function chargeNoticeOf(
+  input: Pick<MiraeReminderMessageInput, "kind" | "charge_link" | "charge_due_date" | "charge_amount_cents">,
+): { ok: true; charge: ChargeNotice | null } | { ok: false; invalidFields: string[] } {
+  if (reminderKindOf(input.kind) !== CHARGE_NOTICE_KIND) return { ok: true, charge: null };
+  const invalidFields: string[] = [];
+  const link = input.charge_link ?? "";
+  if (!isAsaasInvoiceLink(link)) invalidFields.push("charge_link");
+  const dueDate = input.charge_due_date ?? "";
+  if (!isCalendarDate(dueDate)) invalidFields.push("charge_due_date");
+  const amount = input.charge_amount_cents;
+  if (typeof amount !== "number" || !Number.isSafeInteger(amount) || amount <= 0) {
+    invalidFields.push("charge_amount_cents");
+  }
+  if (invalidFields.length > 0) return { ok: false, invalidFields };
+  return { ok: true, charge: { link, due_date: dueDate, amount_cents: amount as number } };
+}
+
+/** Pure: Mirae's kind, or `manual` for anything this CRM does not know. */
 export function reminderKindOf(raw: string | undefined): MiraeReminderKind {
   if (raw && raw in KIND_ALIASES) return KIND_ALIASES[raw]!;
   return (MIRAE_REMINDER_KINDS as readonly string[]).includes(raw ?? "")
@@ -158,7 +225,8 @@ export async function lockReminderContact(
 
 /**
  * Another return due before `before`: live in `cron_jobs`, or a return turn queued (`run_after`
- * before it, e.g. deferred to the send window) or running in `job_queue`.
+ * before it, e.g. deferred to the send window) or running in `job_queue`. A charge notice does not
+ * count: it talks about a payment, not about the appointment the reminder is for.
  */
 export async function hasLiveReturnBefore(
   db: Pick<pg.PoolClient, "query">,
@@ -171,15 +239,26 @@ export async function hasLiveReturnBefore(
        exists (select 1 from cron_jobs
                 where organization_id = $1 and contact_id = $2
                   and kind = 'at' and job_kind = 'followup_turn' and enabled = true
-                  and next_run_at < $3)
+                  and next_run_at < $3
+                  and (payload->'mirae_reminder'->>'kind') is distinct from $4)
        or exists (select 1 from job_queue
                    where organization_id = $1 and contact_id = $2
                      and kind = 'followup_turn'
-                     and (status = 'running' or (status = 'pending' and run_after < $3)))
+                     and (status = 'running' or (status = 'pending' and run_after < $3))
+                     and (payload->'mirae_reminder'->>'kind') is distinct from $4)
      ) as live`,
-    [orgId, contactId, before],
+    [orgId, contactId, before, CHARGE_NOTICE_KIND],
   );
   return rows[0]?.live === true;
+}
+
+/**
+ * Pure: may this kind go out without a person, on `auto`? A confirmation only with its appointment
+ * time (it is checked in Mirae before sending); a charge notice always (Mirae re-checks the charge
+ * before calling).
+ */
+export function mayAutoSend(kind: MiraeReminderKind, hasAppointmentTime: boolean): boolean {
+  return kind === CHARGE_NOTICE_KIND || (CONFIRMATION_KINDS.has(kind) && hasAppointmentTime);
 }
 
 /** Pure: draft or automatic send for this reminder. */
@@ -190,9 +269,7 @@ export function deliveryFor(
   /** The appointment time is known: without it nothing can be checked in Mirae before sending. */
   hasAppointmentTime: boolean,
 ): "draft" | "auto" {
-  return setting === "auto" && CONFIRMATION_KINDS.has(kind) && hasAppointmentTime && !humanInCharge
-    ? "auto"
-    : "draft";
+  return setting === "auto" && mayAutoSend(kind, hasAppointmentTime) && !humanInCharge ? "auto" : "draft";
 }
 
 export function deliveryKeyOf(input: Pick<MiraeReminderMessageInput, "delivery_key" | "reminder_id">): string {
@@ -250,6 +327,9 @@ export async function queueMiraeReminderMessage(
   input: MiraeReminderMessageInput,
 ): Promise<ReminderResult> {
   const key = deliveryKeyOf(input);
+  // A charge without a valid link, due date and amount is refused before anything is read.
+  const charge = chargeNoticeOf(input);
+  if (!charge.ok) return { outcome: "invalid_charge", invalidFields: charge.invalidFields };
   return db.withKeyLock(ctx.organizationId, key, async (tx) => {
     const setting = reminderDeliveryOf(await tx.readSettings(ctx.organizationId));
     if (setting === "off") return { outcome: "disabled" };
@@ -279,19 +359,22 @@ export async function queueMiraeReminderMessage(
 
     // 4. The agent already promised to come back, or another reminder is on its way: one
     // message, not two. The contact lock makes two reminders with different keys see each other.
+    // A charge notice still goes: the payment link must reach the person.
     await tx.lockContact(ctx.organizationId, contact.id);
-    const horizon = liveReturnHorizon(input.appointment_start_at, ctx.now);
-    if (await tx.hasLiveReturn(ctx.organizationId, contact.id, horizon)) {
-      return { outcome: "already_handled", conversationId: conversation.id };
+    const kind = reminderKindOf(input.kind);
+    if (kind !== CHARGE_NOTICE_KIND) {
+      const horizon = liveReturnHorizon(input.appointment_start_at, ctx.now);
+      if (await tx.hasLiveReturn(ctx.organizationId, contact.id, horizon)) {
+        return { outcome: "already_handled", conversationId: conversation.id };
+      }
     }
 
     // 5. Queue the turn.
-    const kind = reminderKindOf(input.kind);
     const hasTime = Boolean(input.appointment_start_at);
     const delivery = deliveryFor(
       setting,
       kind,
-      setting === "auto" && CONFIRMATION_KINDS.has(kind) && hasTime
+      setting === "auto" && mayAutoSend(kind, hasTime)
         ? await tx.humanInCharge(ctx.organizationId, contact.id)
         : false,
       hasTime,
@@ -310,6 +393,7 @@ export async function queueMiraeReminderMessage(
       mirae_phone: input.phone.replace(/\D/g, "") || null,
       appointment_start_at: input.appointment_start_at ?? null,
       professional_first_name: input.professional_first_name ?? null,
+      ...(charge.charge ? { charge: charge.charge } : {}),
     };
     const cronJobId = await tx.insertTurn(ctx.organizationId, {
       contactId: contact.id,

@@ -1,8 +1,8 @@
 // @vitest-environment node
 /**
  * Berseba: the HTTP answers of `POST /api/v1/mirae/reminder-messages` tell Mirae's queue whether
- * a retry helps. Business outcomes are 200 with `data.outcome`; a malformed body (400) and
- * reminder messages turned off (422) are final; a database that is not configured is 503.
+ * a retry helps. Business outcomes are 200 with `data.outcome`; a malformed body (400), reminder
+ * messages turned off and an invalid charge (422) are final; a database that is not configured is 503.
  */
 import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -106,6 +106,58 @@ describe("POST /api/v1/mirae/reminder-messages", () => {
     const res = await call(BODY);
     expect(res.status).toBe(422);
     expect((await res.json()).error.code).toBe("reminder_messages_disabled");
+  });
+
+  describe("charge notice (kind: charge)", () => {
+    const CHARGE = {
+      ...BODY,
+      reminder_id: "charge_1",
+      delivery_key: "charge_1:2026-11-25",
+      title: "Cobrança da parcela 3/12",
+      kind: "charge",
+      charge_link: "https://www.asaas.com/i/k7f2x9q1ab3c",
+      charge_due_date: "2026-11-25",
+      charge_amount_cents: 29900,
+    };
+    // The real rule: an invalid charge is refused before the database is touched.
+    const realRule = async () => {
+      const actual = await vi.importActual<typeof import("@/lib/integrations/mirae/reminder-message")>(
+        "@/lib/integrations/mirae/reminder-message",
+      );
+      queue.mockImplementationOnce(actual.queueMiraeReminderMessage);
+    };
+
+    it("the charge fields reach the rule as Mirae sent them", async () => {
+      queue.mockResolvedValueOnce({ outcome: "scheduled", delivery: "auto", cronJobId: "j", conversationId: "c" });
+      const res = await call(CHARGE);
+      expect(res.status).toBe(200);
+      expect((await res.json()).data.outcome).toBe("scheduled");
+      expect(queue.mock.calls[0]![2]).toMatchObject({
+        kind: "charge",
+        charge_link: "https://www.asaas.com/i/k7f2x9q1ab3c",
+        charge_due_date: "2026-11-25",
+        charge_amount_cents: 29900,
+      });
+    });
+
+    it.each([
+      [{ charge_link: "https://evil.example/i/abc" }, ["charge_link"]],
+      [{ charge_link: "http://www.asaas.com/i/abc" }, ["charge_link"]],
+      [{ charge_due_date: "25/11" }, ["charge_due_date"]],
+      [{ charge_amount_cents: -1 }, ["charge_amount_cents"]],
+      [{ charge_link: undefined, charge_amount_cents: undefined }, ["charge_link", "charge_amount_cents"]],
+    ])("%o → 422 invalid_charge, final, not audited", async (patch, fields) => {
+      await realRule();
+      const res = await call({ ...CHARGE, ...patch });
+      expect(res.status).toBe(422);
+      expect((await res.json()).error).toMatchObject({ code: "invalid_charge", details: { fields } });
+      expect(auditFn).not.toHaveBeenCalled();
+    });
+
+    it("an amount that is not a number is a malformed body (400)", async () => {
+      expect((await call({ ...CHARGE, charge_amount_cents: "299,00" })).status).toBe(400);
+      expect(queue).not.toHaveBeenCalled();
+    });
   });
 
   it("refuses a body that is not a reminder", async () => {

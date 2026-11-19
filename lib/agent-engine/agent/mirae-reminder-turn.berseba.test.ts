@@ -9,6 +9,9 @@ import { join } from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { SPINNING_DEFAULTS } from "../spinning/defaults";
+import { decideSpinning, hashNormalized, normalizeCopy } from "../spinning/engine";
+
 import {
   avisarLembreteQueNaoSaiu,
   briefingDoLembrete,
@@ -18,6 +21,8 @@ import {
   lembreteDoMirae,
   quandoLegivel,
   runMiraeReminderTurn,
+  valorLegivel,
+  vencimentoLegivel,
   type MiraeReminderPayload,
 } from "./mirae-reminder-turn.berseba";
 
@@ -323,5 +328,149 @@ describe("wiring (source contract)", () => {
     expect(ler("reply-drafts.ts")).toContain(
       "...(input.aberturaExtra ? { aberturaExtra: input.aberturaExtra } : {}),",
     );
+  });
+});
+
+describe("charge notice", () => {
+  const LINK = "https://www.asaas.com/i/k7f2x9q1ab3c";
+  const CHARGE: MiraeReminderPayload = {
+    delivery_key: "charge_1:2026-11-25",
+    reminder_id: "charge_1",
+    delivery: "auto",
+    kind: "charge_notice",
+    title: "Cobrança da parcela 3/12",
+    note: null,
+    student_name: "Ana",
+    appointment_start_at: null,
+    professional_first_name: null,
+    mirae_phone: "14996598955",
+    charge: { link: LINK, due_date: "2026-11-25", amount_cents: 29900 },
+  };
+  const runCharge = (p: ReturnType<typeof ports>, r: MiraeReminderPayload = CHARGE) =>
+    runMiraeReminderTurn(deps, job, {} as never, { workerId: "w" }, () => NOW, TARGET, r, p as never);
+
+  it("formats the amount in BRL with a plain space and the due date as dd/mm", () => {
+    expect(valorLegivel(29900)).toBe("R$ 299,00");
+    expect(valorLegivel(1234567)).toBe("R$ 12.345,67");
+    expect(vencimentoLegivel("2026-11-25")).toBe("25/11");
+    expect(vencimentoLegivel("2027-01-05")).toBe("05/01");
+  });
+
+  it("the briefing carries the exact link, amount and due date, and forbids changing them", () => {
+    const b = briefingDoLembrete(CHARGE, "America/Sao_Paulo");
+    expect(b).toContain("## Cobrança do estúdio (Mirae)");
+    expect(b).toContain(`- Link de pagamento: ${LINK}`);
+    expect(b).toContain("- Valor: R$ 299,00");
+    expect(b).toContain("- Vencimento: 25/11");
+    expect(b).toContain("- Pessoa: Ana (primeiro nome)");
+    expect(b).toContain("EXATAMENTE como estão acima");
+    expect(b).toContain("não invente outro link");
+    expect(b).toContain("nenhum dado clínico");
+    expect(b).toContain("pediu para não");
+    // Not a confirmation: no agenda read, no confirmation request.
+    expect(b).not.toContain("mirae_my_appointments");
+    expect(b).not.toContain("confirmar a presença");
+    // No no-break space anywhere the model has to copy from.
+    expect(b).not.toContain("\u00a0");
+  });
+
+  it("auto: the agent's normal turn with the charge briefing, and Mirae's agenda is not read", async () => {
+    const p = ports();
+    await runCharge(p);
+    expect(p.checkAppointment).not.toHaveBeenCalled();
+    expect(p.generateReplyDraft).not.toHaveBeenCalled();
+    expect(p.runAgentTurn).toHaveBeenCalledTimes(1);
+    const input = (p.runAgentTurn.mock.calls[0] as unknown as [unknown, unknown, unknown, unknown, Record<string, unknown>])[4];
+    const opening = (input.buildOpening as (r: unknown) => string)({
+      previous: null,
+      leadState: null,
+      context: { contact: { name: "Ana", email: null }, messages: [] },
+      notesIndexBlock: "sem notas",
+      projeta: false,
+    });
+    expect(opening).toContain(LINK);
+    expect(opening).toContain("R$ 299,00");
+    expect(opening).toContain("25/11");
+    expect(input.aberturaDoRascunho).toContain(LINK);
+  });
+
+  it("draft: an agent draft with the charge briefing", async () => {
+    const p = ports();
+    await runCharge(p, { ...CHARGE, delivery: "draft" });
+    expect(p.runAgentTurn).not.toHaveBeenCalled();
+    const input = (p.generateReplyDraft.mock.calls[0] as unknown as [unknown, unknown, Record<string, unknown>])[2];
+    expect(input.aberturaExtra).toContain(LINK);
+  });
+
+  it("a charge notice that lost its charge data is never sent as a generic message", async () => {
+    const p = ports();
+    await runCharge(p, { ...CHARGE, charge: null });
+    expect(p.runAgentTurn).not.toHaveBeenCalled();
+    expect(p.generateReplyDraft).not.toHaveBeenCalled();
+    expect(p.avisar).toHaveBeenCalledTimes(1);
+  });
+
+  it("the payload round-trips through the worker's reader", () => {
+    expect(lembreteDoMirae({ source: "mirae_reminder", mirae_reminder: CHARGE })).toEqual(CHARGE);
+    expect(
+      lembreteDoMirae({ source: "mirae_reminder", mirae_reminder: { ...CHARGE, charge: { ...CHARGE.charge, amount_cents: 0 } } }),
+    ).toBeNull();
+  });
+
+  describe("spinning guard (default knobs)", () => {
+    // Same plan, same due date: what the agent writes to each student differs only in the name
+    // and the link, so the copies are near-identical across the studio's number.
+    const message = (name: string, link: string) =>
+      `Oi, ${name}! Tudo bem? Aqui é do estúdio. A cobrança da próxima parcela do seu plano já está ` +
+      `disponível: R$ 299,00, com vencimento em 25/11. Para pagar é só acessar o link: ${link} ` +
+      "Qualquer dúvida, estamos por aqui!";
+    const windowOf = (texts: string[]) =>
+      texts.map((t) => {
+        const normalizedText = normalizeCopy(t);
+        return { normalizedText, normalizedHash: hashNormalized(normalizedText) };
+      });
+    const sent = windowOf([
+      message("Ana", "https://www.asaas.com/i/aaaa1111"),
+      message("Bia", "https://www.asaas.com/i/bbbb2222"),
+      message("Carla", "https://www.asaas.com/i/cccc3333"),
+    ]);
+
+    it("does not veto a charge notice with the Asaas link", () => {
+      expect(
+        decideSpinning({
+          candidate: message("Dani", "https://www.asaas.com/i/dddd4444"),
+          window: sent,
+          knobs: SPINNING_DEFAULTS,
+        }),
+      ).toEqual({ allow: true });
+      expect(
+        decideSpinning({
+          candidate: message("Dani", "https://sandbox.asaas.com/i/dddd4444"),
+          window: sent,
+          knobs: SPINNING_DEFAULTS,
+        }).allow,
+      ).toBe(true);
+    });
+
+    it("control: the same copy with a link on another host is vetoed (the exemption is the Asaas host)", () => {
+      const other = windowOf([
+        message("Ana", "https://example.com/i/aaaa1111"),
+        message("Bia", "https://example.com/i/bbbb2222"),
+      ]);
+      expect(
+        decideSpinning({
+          candidate: message("Dani", "https://example.com/i/dddd4444"),
+          window: other,
+          knobs: SPINNING_DEFAULTS,
+        }).allow,
+      ).toBe(false);
+      expect(
+        decideSpinning({
+          candidate: message("Dani", "https://www.asaas.com.evil.example/i/dddd4444"),
+          window: other,
+          knobs: SPINNING_DEFAULTS,
+        }).allow,
+      ).toBe(false);
+    });
   });
 });

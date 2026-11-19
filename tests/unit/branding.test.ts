@@ -1108,6 +1108,11 @@ const HOSTS_DECLARADOS: Record<string, EntradaDeHost> = {
       "placeholder do campo de client id do Google: exibe o FORMATO do identificador (e o host que ele carrega) para quem vai criar a credencial no console.",
   },
   // ── entrada conferida e identificador de fio ─────────────────────────────
+  "asaas.com": {
+    categoria: "PLATAFORMA",
+    motivo:
+      "Berseba: host aceito na validação do link de fatura que o Mirae manda num aviso de cobrança (`isAsaasInvoiceLink`, `lib/integrations/mirae/reminder-message.ts`): é entrada que o CRM CONFERE antes de a assistente copiar o link para a aluna, nunca endereço que ele busca. Sem a linha, qualquer host passaria por link de pagamento.",
+  },
   "meet.google.com": {
     categoria: "PLATAFORMA",
     motivo:
@@ -1360,6 +1365,9 @@ describe("catraca de host de terceiro no código que embarca", () => {
       // Decisão escrita: painel de chaves da Requesty, o mesmo caso dos outros
       // CONSOLE (o link "Onde pegar a chave" da tela de Credenciais).
       "app.requesty.ai",
+      // Decisão escrita (Berseba, Matheus, 2026-11-19): o link da fatura do Asaas
+      // que o Mirae manda no aviso de cobrança é conferido por host — nunca chamado.
+      "asaas.com",
       // Decisão escrita (spec 24, auditoria de site): assinatura de construtor
       // detectada na amostra real da VPS — nunca chamada, nunca exibida.
       "automatizo.dev.br",

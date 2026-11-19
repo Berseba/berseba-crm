@@ -20,6 +20,7 @@ import type pg from "pg";
 
 import {
   avisarLembreteQueNaoSaiu,
+  CHARGE_NOTICE_KIND,
   chegaTardeDemais,
   lembreteDoMirae,
   MIRAE_REMINDER_SOURCE,
@@ -100,10 +101,12 @@ async function requeueInTx(
     return "exhausted";
   }
 
-  // Same rule as the endpoint: one message, not two.
+  // Same rule as the endpoint: one message, not two. A charge notice still goes: the payment link
+  // must reach the person.
   await lockReminderContact(pool, orgId, contactId);
   if (
-    await hasLiveReturnBefore(pool, orgId, contactId, liveReturnHorizon(reminder.appointment_start_at, now))
+    reminder.kind !== CHARGE_NOTICE_KIND &&
+    (await hasLiveReturnBefore(pool, orgId, contactId, liveReturnHorizon(reminder.appointment_start_at, now)))
   ) {
     await avisar(pool, {
       tenantId: orgId,

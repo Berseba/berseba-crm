@@ -31,5 +31,10 @@ export const SPINNING_DEFAULTS: SpinningKnobs = {
   // Links de pagamento/checkout/agenda são repetidos legitimamente (o mesmo link
   // vai a vários leads) — isentos por default. Normalizado é lowercase; 'cobranc'
   // cobre 'cobrança'/'cobranca' antes do 'ç'. É ponto de partida: o operador ajusta.
-  allowlistPatterns: ['https?://\\S*(pay|pag|checkout|pix|boleto|cobranc)'],
+  // Berseba: an Asaas invoice (`https://www.asaas.com/i/<id>`) matches none of the words
+  // above, and each student gets their own (Mirae charge notice, `mirae-reminder-turn.berseba.ts`).
+  allowlistPatterns: [
+    'https?://\\S*(pay|pag|checkout|pix|boleto|cobranc)',
+    'https://([a-z0-9-]+\\.)*asaas\\.com/',
+  ],
 };
