@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Berseba (migration 9005): update.sh takes the analytics contract views down
+# Berseba (migrations 9005, 9009): update.sh takes the analytics contract views down
 # before the baseline and brings them back after it, and neither step can fail
 # the update.
 #
@@ -76,6 +76,29 @@ check "update.sh calls each step once" \
   test "$(grep -c '^ *analytics_views_drop  #' "$U")" = 1 -a "$(grep -c '^ *analytics_views_recreate  #' "$U")" = 1
 check "a kit without _analytics.sh still updates (no-op fallbacks)" \
   grep -q 'analytics_views_drop() { :; }' "$U"
+
+echo "4. fn_recreate_views (migration 9009): one text in the chain and the baseline, every view commented and granted"
+MIG="$(ls "$ROOT"/supabase/migrations/*_9009_analytics_bi_panel_views.sql 2>/dev/null | head -1)"
+# The function body as written: from its `create or replace` to the `$fn$;` that closes it.
+fn_body() { awk '/^create or replace function analytics\.fn_recreate_views\(\)/{p=1} p{print} p&&/^\$fn\$;$/{exit}'; }
+fn_body < "${MIG:-/dev/null}" > "$WORK/mig_fn"
+# The baseline's LAST definition is the one in force: the 9009 block.
+awk '/^-- ---- analytics BI panel views \(migration 9009\) ----$/{p=1} p{print}' "$ROOT/supabase/baseline.sql" | fn_body > "$WORK/base_fn"
+check "the 9009 migration exists" test -n "$MIG"
+check "the function was found in both" test -s "$WORK/mig_fn" -a -s "$WORK/base_fn"
+check "the baseline block carries the migration's function, byte for byte" cmp -s "$WORK/mig_fn" "$WORK/base_fn"
+check "the 9009 block comes right after the 9005 block, before 9007" test "$(grep -o -E '^-- ---- [A-Za-z0-9 ]+ \(migration 900[579]\) ----$' "$ROOT/supabase/baseline.sql" | grep -o '900[579]' | tr -d '\n')" = 900590099007
+check "the migration builds the views (last statement)" grep -q '^select analytics.fn_recreate_views();$' "${MIG:-/dev/null}"
+VIEWS="$(grep -o -E '^  create view analytics\.v[0-9]+_[a-z_0-9]+' "$WORK/mig_fn" | sed 's/.*analytics\.//' | sort -u)"
+check "it builds the six contract views" test "$(echo "$VIEWS" | tr '\n' ' ')" = "v1_atendimentos_dia v1_contagem_dia v1_conversas_abertas v1_leads_dia v1_reunioes_dia v1_tempo_resposta_dia "
+for v in $VIEWS; do
+  check "$v: security barrier, comment, revoke from the API roles, grant to analytics_reader" \
+    bash -c "grep -A1 -q '^  create view analytics\.$v\$' '$WORK/mig_fn' \
+      && grep -A1 '^  create view analytics\.$v\$' '$WORK/mig_fn' | grep -q 'with (security_barrier = true)' \
+      && grep -q '^  comment on view analytics\.$v is\$' '$WORK/mig_fn' \
+      && grep -q '^  revoke all on analytics\.$v from public, anon, authenticated, service_role;\$' '$WORK/mig_fn' \
+      && grep -q '^  grant select on analytics\.$v to analytics_reader;\$' '$WORK/mig_fn'"
+done
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "✓ analytics views around the baseline: all checks passed"; exit 0; fi

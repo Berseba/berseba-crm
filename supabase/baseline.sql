@@ -22867,6 +22867,8 @@ grant execute on function public.fn_reply_record_receipt(uuid,uuid,text,timestam
 -- a view created here would pin the type of the columns it reads, and any later
 -- upstream block altering one of them would fail. update.sh drops the views
 -- before the baseline and calls analytics.fn_recreate_views() after it.
+-- The 9009 block right below redefines analytics.fn_recreate_views(): the
+-- function here is only the first definition.
 -- 1. The schema. It is NOT in PostgREST's exposed schemas (Supabase: Settings ›
 --    API › Exposed schemas; local: supabase/config.toml [api].schemas), and the
 --    API roles get nothing on it, so even listing it there would answer 403.
@@ -23052,6 +23054,298 @@ end;
 $fn$;
 
 revoke all on function analytics.fn_drop_views() from public, anon, authenticated, service_role;
+revoke all on function analytics.fn_recreate_views() from public, anon, authenticated, service_role;
+
+-- ---- analytics BI panel views (migration 9009) ----
+-- Berseba. Right after our 9005 block, not at the end of the file (upstream
+-- appends there). It redefines analytics.fn_recreate_views() with the 9005 view
+-- unchanged plus five views for the Metabase BI panel; edit the views HERE, not
+-- in the 9005 block above. Like 9005, the baseline only defines the function and
+-- does NOT build the views: update.sh calls analytics.fn_recreate_views() after
+-- the whole baseline.
+create or replace function analytics.fn_recreate_views()
+returns void
+language plpgsql
+set search_path = ''
+as $fn$
+begin
+  -- v1_contagem_dia: migration 9005, unchanged. See that migration for the
+  -- definitions of contas_novas, toques and reunioes.
+  drop view if exists analytics.v1_contagem_dia;
+  create view analytics.v1_contagem_dia
+    with (security_barrier = true)
+  as
+  with enterprise_leads as (
+    select l.id, l.contact_id, l.created_at
+    from public.crm_leads l
+    where l.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+      and 'plano-enterprise' = any (l.tags)
+  ),
+  tag_added as (
+    select a.lead_id, a.performed_at as tagged_at
+    from public.crm_lead_activities a
+    join enterprise_leads el on el.id = a.lead_id
+    where a.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+      and a.type = 'lead_edited'
+      and a.payload -> 'added_tags' ? 'plano-enterprise'
+    union all
+    select e.entity_id, e.created_at
+    from public.event_log e
+    join enterprise_leads el on el.id = e.entity_id
+    where e.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+      and e.event_type = 'lead.tag_added'
+      and e.payload -> 'added_tags' ? 'plano-enterprise'
+  ),
+  new_accounts as (
+    select el.id, coalesce(min(t.tagged_at), el.created_at) as tagged_at
+    from enterprise_leads el
+    left join tag_added t on t.lead_id = el.id
+    group by el.id, el.created_at
+  ),
+  touches as (
+    select a.lead_id,
+           (a.performed_at at time zone 'America/Sao_Paulo')::date as dia,
+           a.payload ->> 'channel' as channel
+    from public.crm_lead_activities a
+    join enterprise_leads el on el.id = a.lead_id
+    where a.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+      and a.type = 'touch'
+    union
+    select el.id,
+           (coalesce(m.sent_at, m.created_at) at time zone 'America/Sao_Paulo')::date,
+           'whatsapp'
+    from public.messages m
+    join public.conversations c on c.id = m.conversation_id
+    join enterprise_leads el on el.contact_id = c.contact_id
+    where m.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+      and c.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+      and m.direction = 'outbound'
+      and m.status is distinct from 'failed'
+      and c.channel = 'whatsapp'
+      and not c.is_group
+  ),
+  meetings as (
+    select (a.performed_at at time zone 'America/Sao_Paulo')::date as dia
+    from public.crm_lead_activities a
+    join enterprise_leads el on el.id = a.lead_id
+    where a.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+      and a.type = 'appointment_scheduled'
+  ),
+  per_day as (
+    select (tagged_at at time zone 'America/Sao_Paulo')::date as dia,
+           1 as contas_novas, 0 as toques, 0 as reunioes
+    from new_accounts
+    union all
+    select dia, 0, 1, 0 from touches
+    union all
+    select dia, 0, 0, 1 from meetings
+  )
+  select dia,
+         sum(contas_novas)::int as contas_novas,
+         sum(toques)::int as toques,
+         sum(reunioes)::int as reunioes
+  from per_day
+  group by dia;
+
+  comment on view analytics.v1_contagem_dia is
+    'Owner: Samuel (comercial). Contract v1, read by the platform ops collector (vendor crm): per Brasilia day, new plano-enterprise accounts, touches and meetings of Berseba''s own organization. Columns never change in place; a change ships as v2. Bypasses RLS on purpose (Supabase linter 0010): the view is the organization filter. Migration 9005, BERSEBA.md.';
+
+  revoke all on analytics.v1_contagem_dia from public, anon, authenticated, service_role;
+  grant select on analytics.v1_contagem_dia to analytics_reader;
+
+  -- v1_leads_dia: new leads per Brasilia day (crm_leads.created_at), split by
+  -- origin (crm_leads.source, a code vocabulary: manual, prospecting, ...) and
+  -- plan ('plano-enterprise' when the lead carries that tag today, else
+  -- 'outro'). One row per (dia, origem, plano) with at least one lead.
+  drop view if exists analytics.v1_leads_dia;
+  create view analytics.v1_leads_dia
+    with (security_barrier = true)
+  as
+  select (l.created_at at time zone 'America/Sao_Paulo')::date as dia,
+         l.source as origem,
+         case when 'plano-enterprise' = any (l.tags) then 'plano-enterprise' else 'outro' end as plano,
+         count(*)::int as leads_novos
+  from public.crm_leads l
+  where l.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+  group by 1, 2, 3;
+
+  comment on view analytics.v1_leads_dia is
+    'Owner: Berseba BI panel (Metabase). Contract v1: per Brasilia day (crm_leads.created_at) of Berseba''s own organization, new leads by origem (crm_leads.source) and plano (plano-enterprise when the lead carries that tag now, else outro). Counts only. Columns never change in place; a change ships as v2. Bypasses RLS on purpose (Supabase linter 0010): the view is the organization filter. Migration 9009, BERSEBA.md.';
+
+  revoke all on analytics.v1_leads_dia from public, anon, authenticated, service_role;
+  grant select on analytics.v1_leads_dia to analytics_reader;
+
+  -- v1_atendimentos_dia: per Brasilia day, WhatsApp conversations where the
+  -- client wrote (conversas), the ones whose first client message ever is that
+  -- day (conversas_novas), the ones that got a reply from us after the day's
+  -- first client message, the same day (respondidas), and the ones where at
+  -- least one of those replies came from the AI (respondidas_pela_ia).
+  drop view if exists analytics.v1_atendimentos_dia;
+  create view analytics.v1_atendimentos_dia
+    with (security_barrier = true)
+  as
+  with msgs as (
+    select m.conversation_id,
+           m.direction,
+           m.sent_via,
+           m.sent_at,
+           (m.sent_at at time zone 'America/Sao_Paulo')::date as dia
+    from public.messages m
+    join public.conversations c on c.id = m.conversation_id
+    where m.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+      and c.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+      and c.channel = 'whatsapp'
+      and not c.is_group
+      and m.type not in ('reaction', 'system')
+      and (
+        m.direction = 'inbound'
+        or (m.status is distinct from 'failed' and m.sent_via in ('crm', 'user', 'external_device', 'ai'))
+      )
+  ),
+  per_conversation_day as (
+    select conversation_id,
+           dia,
+           min(sent_at) filter (where direction = 'inbound') as primeira_do_cliente,
+           max(sent_at) filter (where direction = 'outbound') as ultima_nossa,
+           max(sent_at) filter (where direction = 'outbound' and sent_via = 'ai') as ultima_da_ia
+    from msgs
+    group by conversation_id, dia
+  ),
+  client_days as (
+    select p.*,
+           min(p.primeira_do_cliente) over (partition by p.conversation_id) as primeira_de_todas
+    from per_conversation_day p
+    where p.primeira_do_cliente is not null
+  )
+  select dia,
+         count(*)::int as conversas,
+         count(*) filter (where primeira_do_cliente = primeira_de_todas)::int as conversas_novas,
+         count(*) filter (where ultima_nossa >= primeira_do_cliente)::int as respondidas,
+         count(*) filter (where ultima_da_ia >= primeira_do_cliente)::int as respondidas_pela_ia
+  from client_days
+  group by dia;
+
+  comment on view analytics.v1_atendimentos_dia is
+    'Owner: Berseba BI panel (Metabase). Contract v1: per Brasilia day, Berseba''s own WhatsApp conversations (no groups) where the client wrote (conversas), first client message ever that day (conversas_novas), replied by a person or the AI after the day''s first client message, same day (respondidas), and with at least one AI reply (respondidas_pela_ia). Automations are not replies. Counts only. Columns never change in place; a change ships as v2. Bypasses RLS on purpose (Supabase linter 0010). Migration 9009, BERSEBA.md.';
+
+  revoke all on analytics.v1_atendimentos_dia from public, anon, authenticated, service_role;
+  grant select on analytics.v1_atendimentos_dia to analytics_reader;
+
+  -- v1_reunioes_dia: per Brasilia day the event was recorded on a lead's
+  -- timeline (crm_lead_activities.performed_at), every lead of the
+  -- organization (not only plano-enterprise): appointments scheduled,
+  -- completed (held), no-show and cancelled. The day is when it was recorded,
+  -- not the day of the meeting.
+  drop view if exists analytics.v1_reunioes_dia;
+  create view analytics.v1_reunioes_dia
+    with (security_barrier = true)
+  as
+  select (a.performed_at at time zone 'America/Sao_Paulo')::date as dia,
+         count(*) filter (where a.type = 'appointment_scheduled')::int as marcadas,
+         count(*) filter (where a.type = 'appointment_completed')::int as realizadas,
+         count(*) filter (where a.type = 'appointment_no_show')::int as faltas,
+         count(*) filter (where a.type = 'appointment_cancelled')::int as canceladas
+  from public.crm_lead_activities a
+  where a.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+    and a.type in ('appointment_scheduled', 'appointment_completed', 'appointment_no_show', 'appointment_cancelled')
+  group by 1;
+
+  comment on view analytics.v1_reunioes_dia is
+    'Owner: Berseba BI panel (Metabase). Contract v1: per Brasilia day the event was recorded on the lead timeline, appointments scheduled (marcadas), held (realizadas), no-show (faltas) and cancelled (canceladas) on every lead of Berseba''s own organization. Counts only. Columns never change in place; a change ships as v2. Bypasses RLS on purpose (Supabase linter 0010). Migration 9009, BERSEBA.md.';
+
+  revoke all on analytics.v1_reunioes_dia from public, anon, authenticated, service_role;
+  grant select on analytics.v1_reunioes_dia to analytics_reader;
+
+  -- v1_conversas_abertas: always one row, measured at query time. A WhatsApp
+  -- conversation (no groups) awaits us when it is not closed, archived or
+  -- resolved, and the client's last message is after our last outbound and
+  -- after the end of the last service (the Inbox queue's columns: any
+  -- outbound, automations included, answers). The wait starts at
+  -- conversations.awaiting_since (the oldest unanswered client message), or
+  -- last_inbound_at when it is empty.
+  drop view if exists analytics.v1_conversas_abertas;
+  create view analytics.v1_conversas_abertas
+    with (security_barrier = true)
+  as
+  with waiting as (
+    select coalesce(c.awaiting_since, c.last_inbound_at) as desde
+    from public.conversations c
+    where c.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+      and c.channel = 'whatsapp'
+      and not c.is_group
+      and c.status not in ('closed', 'archived', 'resolved')
+      and c.last_inbound_at is not null
+      and c.last_inbound_at > coalesce(c.last_outbound_at, '-infinity'::timestamptz)
+      and c.last_inbound_at > coalesce(c.service_closed_at, '-infinity'::timestamptz)
+  )
+  select now() as medido_em,
+         count(*)::int as aguardando,
+         floor(extract(epoch from now() - min(desde)) / 60)::int as espera_mais_antiga_min,
+         count(*) filter (where desde < now() - interval '1 hour')::int as aguardando_mais_de_1h
+  from waiting;
+
+  comment on view analytics.v1_conversas_abertas is
+    'Owner: Berseba BI panel (Metabase). Contract v1, one row measured now: Berseba''s own open WhatsApp conversations (no groups) whose last message is the client''s (aguardando), the oldest wait in whole minutes from conversations.awaiting_since (espera_mais_antiga_min, null when none) and how many wait more than 1 hour (aguardando_mais_de_1h). Counts only. Columns never change in place; a change ships as v2. Bypasses RLS on purpose (Supabase linter 0010). Migration 9009, BERSEBA.md.';
+
+  revoke all on analytics.v1_conversas_abertas from public, anon, authenticated, service_role;
+  grant select on analytics.v1_conversas_abertas to analytics_reader;
+
+  -- v1_tempo_resposta_dia: per Brasilia day a wait started. A wait starts at
+  -- a client message that is the conversation's first message or comes right
+  -- after a reply from us (later client messages before our reply belong to
+  -- the same wait). Its time is until our first reply after it, in minutes,
+  -- calendar time (no business hours). respostas_medidas counts the waits
+  -- that got a reply, sem_resposta the ones that did not (yet).
+  drop view if exists analytics.v1_tempo_resposta_dia;
+  create view analytics.v1_tempo_resposta_dia
+    with (security_barrier = true)
+  as
+  with msgs as (
+    select m.conversation_id, m.direction, m.sent_at
+    from public.messages m
+    join public.conversations c on c.id = m.conversation_id
+    where m.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+      and c.organization_id = '4212479e-2b5a-4949-807e-706b2fce16fe'::uuid
+      and c.channel = 'whatsapp'
+      and not c.is_group
+      and m.type not in ('reaction', 'system')
+      and (
+        m.direction = 'inbound'
+        or (m.status is distinct from 'failed' and m.sent_via in ('crm', 'user', 'external_device', 'ai'))
+      )
+  ),
+  sequenced as (
+    select direction,
+           sent_at,
+           lag(direction) over w as anterior,
+           min(sent_at) filter (where direction = 'outbound')
+             over (w rows between 1 following and unbounded following) as resposta
+    from msgs
+    window w as (partition by conversation_id order by sent_at, direction)
+  ),
+  waits as (
+    select (sent_at at time zone 'America/Sao_Paulo')::date as dia,
+           extract(epoch from resposta - sent_at)::double precision / 60 as minutos
+    from sequenced
+    where direction = 'inbound'
+      and anterior is distinct from 'inbound'
+  )
+  select dia,
+         count(minutos)::int as respostas_medidas,
+         (count(*) - count(minutos))::int as sem_resposta,
+         round((percentile_cont(0.5) within group (order by minutos))::numeric, 1) as mediana_min,
+         round((percentile_cont(0.9) within group (order by minutos))::numeric, 1) as p90_min
+  from waits
+  group by dia;
+
+  comment on view analytics.v1_tempo_resposta_dia is
+    'Owner: Berseba BI panel (Metabase). Contract v1: per Brasilia day a client wait started on Berseba''s own WhatsApp conversations (no groups), minutes to our first reply by a person or the AI: median (mediana_min) and p90 (p90_min), calendar time, over the waits that got a reply (respostas_medidas); sem_resposta counts the ones still unanswered. Automations are not replies. Aggregates only. Columns never change in place; a change ships as v2. Bypasses RLS on purpose (Supabase linter 0010). Migration 9009, BERSEBA.md.';
+
+  revoke all on analytics.v1_tempo_resposta_dia from public, anon, authenticated, service_role;
+  grant select on analytics.v1_tempo_resposta_dia to analytics_reader;
+end;
+$fn$;
+
 revoke all on function analytics.fn_recreate_views() from public, anon, authenticated, service_role;
 
 -- ---- avec waitlist (migration 9007) ----
