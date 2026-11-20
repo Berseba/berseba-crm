@@ -83,22 +83,32 @@ MIG="$(ls "$ROOT"/supabase/migrations/*_9009_analytics_bi_panel_views.sql 2>/dev
 fn_body() { awk '/^create or replace function analytics\.fn_recreate_views\(\)/{p=1} p{print} p&&/^\$fn\$;$/{exit}'; }
 fn_body < "${MIG:-/dev/null}" > "$WORK/mig_fn"
 # The baseline's LAST definition is the one in force: the 9009 block.
-awk '/^-- ---- analytics BI panel views \(migration 9009\) ----$/{p=1} p{print}' "$ROOT/supabase/baseline.sql" | fn_body > "$WORK/base_fn"
+awk '/^-- ---- analytics BI panel views \(migration 9009\) ----$/{p=1} p{print}' "$ROOT/supabase/baseline.sql" > "$WORK/base_block"
+fn_body < "$WORK/base_block" > "$WORK/base_fn"
 check "the 9009 migration exists" test -n "$MIG"
 check "the function was found in both" test -s "$WORK/mig_fn" -a -s "$WORK/base_fn"
 check "the baseline block carries the migration's function, byte for byte" cmp -s "$WORK/mig_fn" "$WORK/base_fn"
 check "the 9009 block comes right after the 9005 block, before 9007" test "$(grep -o -E '^-- ---- [A-Za-z0-9 ]+ \(migration 900[579]\) ----$' "$ROOT/supabase/baseline.sql" | grep -o '900[579]' | tr -d '\n')" = 900590099007
 check "the migration builds the views (last statement)" grep -q '^select analytics.fn_recreate_views();$' "${MIG:-/dev/null}"
-VIEWS="$(grep -o -E '^  create view analytics\.v[0-9]+_[a-z_0-9]+' "$WORK/mig_fn" | sed 's/.*analytics\.//' | sort -u)"
+check "the reader gets 6 connections, in the migration and after the 9005 block" \
+  bash -c "grep -q '^alter role analytics_reader connection limit 6;\$' '${MIG:-/dev/null}' \
+    && grep -q '^alter role analytics_reader connection limit 6;\$' '$WORK/base_block'"
+VIEWS="$(grep -o -E '^ *create view analytics\.v[0-9]+_[a-z_0-9]+' "$WORK/mig_fn" | sed 's/.*analytics\.//' | sort -u)"
 check "it builds the six contract views" test "$(echo "$VIEWS" | tr '\n' ' ')" = "v1_atendimentos_dia v1_contagem_dia v1_conversas_abertas v1_leads_dia v1_reunioes_dia v1_tempo_resposta_dia "
 for v in $VIEWS; do
   check "$v: security barrier, comment, revoke from the API roles, grant to analytics_reader" \
-    bash -c "grep -A1 -q '^  create view analytics\.$v\$' '$WORK/mig_fn' \
-      && grep -A1 '^  create view analytics\.$v\$' '$WORK/mig_fn' | grep -q 'with (security_barrier = true)' \
-      && grep -q '^  comment on view analytics\.$v is\$' '$WORK/mig_fn' \
-      && grep -q '^  revoke all on analytics\.$v from public, anon, authenticated, service_role;\$' '$WORK/mig_fn' \
-      && grep -q '^  grant select on analytics\.$v to analytics_reader;\$' '$WORK/mig_fn'"
+    bash -c "grep -A1 '^ *create view analytics\.$v\$' '$WORK/mig_fn' | grep -q 'with (security_barrier = true)' \
+      && grep -q '^ *comment on view analytics\.$v is\$' '$WORK/mig_fn' \
+      && grep -q '^ *revoke all on analytics\.$v from public, anon, authenticated, service_role;\$' '$WORK/mig_fn' \
+      && grep -q '^ *grant select on analytics\.$v to analytics_reader;\$' '$WORK/mig_fn'"
 done
+# v1_contagem_dia is built at the function's top level; every other view sits
+# in its own begin ... exception block, so its failure only warns.
+check "v1_contagem_dia is built outside any exception block" grep -q '^  create view analytics\.v1_contagem_dia$' "$WORK/mig_fn"
+check "each of the five new views has its own exception block that warns" \
+  test "$(grep -c '^    create view analytics\.' "$WORK/mig_fn")" = 5 \
+    -a "$(grep -c '^  exception when others then$' "$WORK/mig_fn")" = 5 \
+    -a "$(grep -c "^    raise warning 'analytics\.v1_[a-z_]* was not rebuilt" "$WORK/mig_fn")" = 5
 
 echo
 if [ "$FAILS" -eq 0 ]; then echo "✓ analytics views around the baseline: all checks passed"; exit 0; fi

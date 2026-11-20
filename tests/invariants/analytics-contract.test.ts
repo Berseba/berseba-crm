@@ -44,6 +44,12 @@ const LEAD_C = "a9a9a9a9-3333-4000-8000-00000000000c";
 const LEAD_D = "a9a9a9a9-3333-4000-8000-00000000000d";
 const CONTACT = (l: string) => l.replace("3333", "4444");
 const CONVERSATION = (l: string) => l.replace("3333", "5555");
+/** Days relative to today (UTC), for the 9009 views that show the last 400 days. */
+const DAY = (offset: number) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10);
+const D0 = DAY(-10);
+const D1 = DAY(-9);
+const D2 = DAY(-8);
+const OLD = DAY(-415);
 
 async function q(text: string, values: unknown[] = []) {
   return pool.query(text, values);
@@ -182,32 +188,43 @@ beforeAll(async () => {
   }
 
   // ---- Migration 9009: the BI panel views. ----
-  // Messages go to LEAD_C's conversation (Berseba, untagged), so the counts of
-  // v1_contagem_dia above do not move.
+  // The views over messages show the last 400 days, so these messages are
+  // dated from today (D0 = 10 days ago, in UTC; at 12:00-23:30 UTC the São
+  // Paulo day is the same). They go to LEAD_C's conversation (Berseba,
+  // untagged) and inbound only to LEAD_B's, so v1_contagem_dia does not move.
   await q(`update public.crm_leads set source = 'prospecting' where id = $1`, [LEAD_C]);
-  // The 12th (São Paulo). Wait 1: two client messages, the AI replies 30 min
-  // after the first. Wait 2: an automation (not a reply) at 1 min, a person at
-  // 60 min. Wait 3: a reply from the phone at 10 min.
-  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", "2026-11-12T12:00:00Z");
-  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", "2026-11-12T12:10:00Z");
-  await message(LEAD_C, BERSEBA, SESSION, "outbound", "sent", "2026-11-12T12:30:00Z", "ai");
-  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", "2026-11-12T13:00:00Z");
-  await message(LEAD_C, BERSEBA, SESSION, "outbound", "sent", "2026-11-12T13:01:00Z", "automation");
-  await message(LEAD_C, BERSEBA, SESSION, "outbound", "sent", "2026-11-12T14:00:00Z", "crm");
-  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", "2026-11-12T15:00:00Z");
-  await message(LEAD_C, BERSEBA, SESSION, "outbound", "sent", "2026-11-12T15:10:00Z", "external_device");
-  // Wait 4 starts at 20:30 on the 12th in São Paulo (23:30 UTC); the client
-  // writes again on the 13th (same wait), a failed send is not a reply, and a
-  // person answers at 13:00 UTC on the 13th: 810 min.
-  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", "2026-11-12T23:30:00Z");
-  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", "2026-11-13T12:00:00Z");
-  await message(LEAD_C, BERSEBA, SESSION, "outbound", "failed", "2026-11-13T12:30:00Z", "crm");
-  await message(LEAD_C, BERSEBA, SESSION, "outbound", "sent", "2026-11-13T13:00:00Z", "crm");
-  // The 14th: a client message nobody answered yet.
-  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", "2026-11-14T12:00:00Z");
+  // Free text in crm_leads.source never leaves the view: it becomes 'outro'.
+  await q(`update public.crm_leads set source = 'Indicação do Fulano' where id = $1`, [LEAD_B]);
+  // 415 days ago, inside the 430 days read but outside the 400 shown: C's
+  // first client message, answered. So C is not new on D0.
+  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", `${OLD}T12:00:00Z`);
+  await message(LEAD_C, BERSEBA, SESSION, "outbound", "read", `${OLD}T13:00:00Z`, "crm");
+  // D0. Wait 1: two client messages, the AI replies 30 min after the first.
+  // Wait 2: an automation (not a reply) at 1 min, a person at 60 min. Wait 3:
+  // a queued send (not a reply) at 5 min, a reply from the phone at 10 min.
+  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", `${D0}T12:00:00Z`);
+  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", `${D0}T12:10:00Z`);
+  await message(LEAD_C, BERSEBA, SESSION, "outbound", "sent", `${D0}T12:30:00Z`, "ai");
+  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", `${D0}T13:00:00Z`);
+  await message(LEAD_C, BERSEBA, SESSION, "outbound", "sent", `${D0}T13:01:00Z`, "automation");
+  await message(LEAD_C, BERSEBA, SESSION, "outbound", "delivered", `${D0}T14:00:00Z`, "crm");
+  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", `${D0}T15:00:00Z`);
+  await message(LEAD_C, BERSEBA, SESSION, "outbound", "queued", `${D0}T15:05:00Z`, "crm");
+  await message(LEAD_C, BERSEBA, SESSION, "outbound", "sent", `${D0}T15:10:00Z`, "external_device");
+  // Wait 4 starts at 20:30 on D0 in São Paulo (23:30 UTC); the client writes
+  // again on D1 (same wait), a failed send is not a reply, and a person
+  // answers at 13:00 UTC on D1: 810 min.
+  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", `${D0}T23:30:00Z`);
+  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", `${D1}T12:00:00Z`);
+  await message(LEAD_C, BERSEBA, SESSION, "outbound", "failed", `${D1}T12:30:00Z`, "crm");
+  await message(LEAD_C, BERSEBA, SESSION, "outbound", "sent", `${D1}T13:00:00Z`, "crm");
+  // D2: a client message nobody answered yet.
+  await message(LEAD_C, BERSEBA, SESSION, "inbound", "received", `${D2}T12:00:00Z`);
+  // LEAD_B's client writes for the first time on D0 and gets no reply.
+  await message(LEAD_B, BERSEBA, SESSION, "inbound", "received", `${D0}T16:00:00Z`);
   // The other organization, same day: nothing of it counts.
-  await message(LEAD_D, OTHER, OTHER_SESSION, "inbound", "received", "2026-11-12T12:00:00Z");
-  await message(LEAD_D, OTHER, OTHER_SESSION, "outbound", "sent", "2026-11-12T12:05:00Z", "ai");
+  await message(LEAD_D, OTHER, OTHER_SESSION, "inbound", "received", `${D0}T12:00:00Z`);
+  await message(LEAD_D, OTHER, OTHER_SESSION, "outbound", "sent", `${D0}T12:05:00Z`, "ai");
 
   // Appointments on every lead of the organization, tagged or not.
   await activity(LEAD_C, BERSEBA, "appointment_cancelled", "2026-11-04T16:00:00Z");
@@ -284,12 +301,12 @@ describe("analytics.v1_contagem_dia — the counts", () => {
 });
 
 describe("migration 9009 — the BI panel views", () => {
-  it("v1_leads_dia: new leads per Brasília day, by origin and plan, Berseba only", async () => {
+  it("v1_leads_dia: new leads per Brasília day, by known origin (free text is outro) and plan, Berseba only", async () => {
     const { rows } = await q(
       `select dia::text, origem, plano, leads_novos from analytics.v1_leads_dia order by dia, origem, plano`,
     );
     expect(rows).toEqual([
-      { dia: "2026-10-01", origem: "manual", plano: "plano-enterprise", leads_novos: 1 },
+      { dia: "2026-10-01", origem: "outro", plano: "plano-enterprise", leads_novos: 1 },
       { dia: "2026-11-03", origem: "manual", plano: "plano-enterprise", leads_novos: 1 },
       { dia: "2026-11-03", origem: "prospecting", plano: "outro", leads_novos: 1 },
     ]);
@@ -298,14 +315,25 @@ describe("migration 9009 — the BI panel views", () => {
   it("v1_atendimentos_dia: conversations where the client wrote, new ones, replied by a person or the AI", async () => {
     const { rows } = await q(
       `select dia::text, conversas, conversas_novas, respondidas, respondidas_pela_ia
-         from analytics.v1_atendimentos_dia order by dia`,
+         from analytics.v1_atendimentos_dia where dia >= $1::date order by dia`,
+      [D0],
     );
     expect(rows).toEqual([
-      { dia: "2026-11-07", conversas: 1, conversas_novas: 1, respondidas: 0, respondidas_pela_ia: 0 },
-      { dia: "2026-11-12", conversas: 1, conversas_novas: 1, respondidas: 1, respondidas_pela_ia: 1 },
-      { dia: "2026-11-13", conversas: 1, conversas_novas: 0, respondidas: 1, respondidas_pela_ia: 0 },
-      { dia: "2026-11-14", conversas: 1, conversas_novas: 0, respondidas: 0, respondidas_pela_ia: 0 },
+      // C (not new: it wrote 415 days ago, inside the 430 read) and B (new).
+      { dia: D0, conversas: 2, conversas_novas: 1, respondidas: 1, respondidas_pela_ia: 1 },
+      { dia: D1, conversas: 1, conversas_novas: 0, respondidas: 1, respondidas_pela_ia: 0 },
+      { dia: D2, conversas: 1, conversas_novas: 0, respondidas: 0, respondidas_pela_ia: 0 },
     ]);
+  });
+
+  it("the message views show only the last 400 days", async () => {
+    for (const view of ["v1_atendimentos_dia", "v1_tempo_resposta_dia"]) {
+      const { rows } = await q(
+        `select min(dia)::text as oldest from analytics.${view}
+          where dia < (now() at time zone 'America/Sao_Paulo')::date - 400`,
+      );
+      expect(rows[0].oldest, view).toBeNull();
+    }
   });
 
   it("v1_reunioes_dia: scheduled, held, no-show and cancelled on every lead of the organization", async () => {
@@ -332,14 +360,13 @@ describe("migration 9009 — the BI panel views", () => {
   it("v1_tempo_resposta_dia: median and p90 minutes to our first reply, per day the wait started", async () => {
     const { rows } = await q(
       `select dia::text, respostas_medidas, sem_resposta, mediana_min::text, p90_min::text
-         from analytics.v1_tempo_resposta_dia order by dia`,
+         from analytics.v1_tempo_resposta_dia where dia >= $1::date order by dia`,
+      [D0],
     );
     expect(rows).toEqual([
-      // LEAD_A's client message on the 7th: answered by nothing that counts.
-      { dia: "2026-11-07", respostas_medidas: 0, sem_resposta: 1, mediana_min: null, p90_min: null },
-      // 10, 30, 60 and 810 minutes.
-      { dia: "2026-11-12", respostas_medidas: 4, sem_resposta: 0, mediana_min: "45.0", p90_min: "585.0" },
-      { dia: "2026-11-14", respostas_medidas: 0, sem_resposta: 1, mediana_min: null, p90_min: null },
+      // C: 10, 30, 60 and 810 minutes; B: no reply.
+      { dia: D0, respostas_medidas: 4, sem_resposta: 1, mediana_min: "45.0", p90_min: "585.0" },
+      { dia: D2, respostas_medidas: 0, sem_resposta: 1, mediana_min: null, p90_min: null },
     ]);
   });
 
@@ -423,14 +450,14 @@ describe("analytics_reader — reads the view and nothing else", () => {
     await expect(asReader("select analytics.fn_drop_views()")).rejects.toMatchObject({ code: "42501" });
   });
 
-  it("logs in with 2 connections and 15 s, and has no password in the schema", async () => {
+  it("logs in with 6 connections (9009) and 15 s, and has no password in the schema", async () => {
     const { rows } = await q(
       `select r.rolcanlogin, r.rolconnlimit, r.rolsuper, r.rolbypassrls, r.rolcreaterole, a.rolpassword, r.rolconfig
          from pg_roles r join pg_authid a on a.oid = r.oid where r.rolname = 'analytics_reader'`,
     );
     expect(rows[0]).toMatchObject({
       rolcanlogin: true,
-      rolconnlimit: 2,
+      rolconnlimit: 6,
       rolsuper: false,
       rolbypassrls: false,
       rolcreaterole: false,
@@ -473,6 +500,31 @@ describe("the deploy can rebuild the view around the baseline", () => {
       await client.query("set local role analytics_reader");
       const { rows } = await client.query("select count(*)::int as n from analytics.v1_contagem_dia");
       expect(rows[0].n).toBe(5);
+    } finally {
+      await client.query("rollback");
+      client.release();
+    }
+  });
+
+  it("a new view that fails only warns, and v1_contagem_dia is still built (9009)", async () => {
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      await client.query("select analytics.fn_drop_views()");
+      // An upstream rename breaks v1_conversas_abertas, and only it.
+      await client.query("alter table public.conversations rename column awaiting_since to awaiting_since_renamed");
+      await client.query("select analytics.fn_recreate_views()");
+      const { rows } = await client.query(
+        `select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+          where n.nspname = 'analytics' and c.relkind = 'v' order by c.relname`,
+      );
+      expect(rows.map((r) => r.relname)).toEqual([
+        "v1_atendimentos_dia",
+        "v1_contagem_dia",
+        "v1_leads_dia",
+        "v1_reunioes_dia",
+        "v1_tempo_resposta_dia",
+      ]);
     } finally {
       await client.query("rollback");
       client.release();
