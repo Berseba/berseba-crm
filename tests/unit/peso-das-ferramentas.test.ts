@@ -76,6 +76,10 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   atos_book_class: { tokens: 375, motivo: BERSEBA_ATOS },
   atos_book_trial: { tokens: 302, motivo: BERSEBA_ATOS },
   atos_create_recurring_plan: { tokens: 496, motivo: BERSEBA_ATOS },
+  crm_list_lead_events: {
+    tokens: 426,
+    motivo: "Berseba 2026-11-19 (Berseba/berseba#270): new read for the Prospector; most of it is the uuid pattern of lead_ids",
+  },
   "crm_list_event_types": { tokens: 204, motivo: BASE },
   "crm_find_free_slots": { tokens: 859, motivo: BASE },
   "crm_list_appointments": { tokens: 1478, motivo: BASE },
@@ -90,7 +94,8 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
       "#4077: a descrição passou a dizer que cada mensagem traz o AUTOR (sent_by_user_id e sent_by_user_name) — sem isso a integração não sabia que o campo existia e atribuía a fala ao 'sistema'",
   },
   "crm_get_queue_status": { tokens: 83, motivo: BASE },
-  "crm_list_leads": { tokens: 500, motivo: BASE },
+  // Berseba 2026-11-19 (Berseba/berseba#270): +21 for the `tag` filter.
+  "crm_list_leads": { tokens: 521, motivo: BASE },
   "crm_get_lead": { tokens: 202, motivo: BASE },
   "crm_count_leads": { tokens: 317, motivo: "ferramenta nova: conta negócios sem listá-los, para o agente não paginar crm_list_leads só para responder 'quantos?'; 3 filtros (funil, etapa, status), sem responsável, de propósito, para pesar menos" },
   "crm_list_lead_attachments": {
@@ -248,8 +253,9 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
 // +149 no `crm_update_lead` (#4666), que passou a dizer que `tags` substitui a
 // lista inteira e ganhou `tags_adicionar`/`tags_remover`. MEDIDO no merge com a
 // main pós-#4886 e #4684: 40675 (2026-11-18).
-// Berseba: upstream 40675 + 5724 of our agenda tools (avec, Mirae, Atos).
-const TETO_TOTAL = 46919;
+// Berseba: upstream 40675 + 5724 of our agenda tools (avec, Mirae, Atos)
+// + 447 for Berseba/berseba#270 (426 crm_list_lead_events, 21 the tag of crm_list_leads).
+const TETO_TOTAL = 47366;
 
 const VARIANTE = "schedule_followup (com negócio)";
 

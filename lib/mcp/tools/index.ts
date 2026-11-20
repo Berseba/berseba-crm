@@ -41,6 +41,8 @@ import {
   atosMyClasses,
   atosRescheduleClass,
 } from "./atos";
+// Berseba: lead events for the platform's Prospector (Berseba/berseba#270)
+import { crmListLeadEvents } from "./lead-events";
 import { amigoTools } from "./amigo";
 import { TOOL_CATALOG, VALID_TOOL_IDS } from "./catalog";
 import { crmSearchContacts, crmGetContact, crmProposeContactField } from "./contacts";
@@ -165,6 +167,8 @@ export const allTools: ReadonlyArray<McpToolDefinition> = [
   atosBookClass,
   atosBookTrial,
   atosCreateRecurringPlan,
+  // Berseba: lead events (read)
+  crmListLeadEvents,
   // módulo opcional `amigo` — fora do catálogo quando desligado (`deModuloDesligado`)
   ...amigoTools,
   // read

@@ -244,6 +244,8 @@ const listInputShape = {
    * `pipeline_id`: sem escopo de funil a lista é a união dos funis da org.
    */
   lost_reason_category: z.string().min(1).max(40).optional(),
+  /** Berseba (Berseba/berseba#270): exact match on one of the lead's tags. */
+  tag: z.string().min(1).max(80).optional(),
   limit: z.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
 };
@@ -251,7 +253,7 @@ const listInputShape = {
 export const crmListLeads: McpToolDefinition<typeof listInputShape> = {
   name: "crm_list_leads",
   description:
-    "Lista leads do CRM filtrando por pipeline, stage, status e owner. Cursor base64 para paginação. " +
+    "Lista leads do CRM filtrando por pipeline, stage, status, owner e tag (exata). Cursor base64 para paginação. " +
     "Governança por lead: owner_user_id + owner_user_name (só o nome do dono, sem email/telefone), stage ({ id, name } legível além do stage_id) e tags[]." +
     " Em conversa de atendimento, lista apenas os negócios do contato desta conversa.",
   inputSchema: listInputShape,
@@ -276,6 +278,7 @@ export const crmListLeads: McpToolDefinition<typeof listInputShape> = {
         // Escopo do turno NA CONSULTA, antes do limite: filtrar a página depois
         // esconderia negócios do próprio cliente que caíssem fora dela.
         contact_id: ctx.contatoDoTurno,
+        tag: input.tag, // Berseba (Berseba/berseba#270)
         limit: input.limit,
         cursor: input.cursor,
       },

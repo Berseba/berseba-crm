@@ -353,6 +353,8 @@ export interface ListLeadsQuery {
   lost_reason_category?: string;
   /** Só os negócios deste contato — o escopo do turno do agente, no WHERE, antes do limite. */
   contact_id?: string;
+  /** Berseba (Berseba/berseba#270): exact match on one entry of `tags`, before the limit. */
+  tag?: string;
   limit?: number;
   cursor?: string | null;
 }
@@ -407,6 +409,8 @@ export async function listLeadsHandler(
   if (q.status) query = query.eq("status", q.status);
   if (q.owner_user_id) query = query.eq("owner_user_id", q.owner_user_id);
   if (q.contact_id) query = query.eq("contact_id", q.contact_id);
+  // Berseba (Berseba/berseba#270): `tags @> {tag}`, exact, before the limit and the cursor.
+  if (q.tag) query = query.contains("tags", [q.tag]);
   // Negócio de pessoal não é listado (spec 21, etapa 12 — leitura exclui):
   // a MESMA primitiva de ids da lista do inbox (`conversations/_handler.ts`),
   // antes do limite, para cursor e `has_more` descreverem o conjunto visível.
