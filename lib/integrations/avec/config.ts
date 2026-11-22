@@ -11,6 +11,7 @@
  * Fails closed: no URL, no key, or no organization listed = off for everyone. Never throws.
  */
 import { env } from "@/lib/env";
+import type { CapacidadeDaOrganizacao } from "@/lib/organizacao/capacidades";
 
 export const AVEC_TOOL_PREFIX = "avec_";
 
@@ -54,6 +55,15 @@ export function avecConfig(): AvecConfig | null {
 export function avecConfigFor(organizationId: string): AvecConfig | null {
   const config = avecConfig();
   return config?.orgIds.has(organizationId.toLowerCase()) ? config : null;
+}
+
+/**
+ * The organization capabilities that come from avec: the salon waitlist's door. Every place that
+ * shows doors by capability adds it (the app layout for the menu, the CRM hub page), so the door
+ * cannot show in one and hide in the other.
+ */
+export function capacidadesDoAvec(organizationId: string): CapacidadeDaOrganizacao[] {
+  return avecConfigFor(organizationId) ? ["lista_de_espera_avec"] : [];
 }
 
 /**
