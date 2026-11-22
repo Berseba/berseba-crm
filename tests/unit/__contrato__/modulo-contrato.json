@@ -218,6 +218,7 @@
       "GET /api/v1/attendants/sectors",
       "GET /api/v1/settings/atendimento",
       "GET /api/v1/settings/campanhas",
+      "GET /api/v1/settings/nicho",
       "GET /api/v1/settings/proposal-templates",
       "GET /api/v1/settings/proposal-templates/[id]",
       "GET /api/v1/settings/proposals",
@@ -232,6 +233,7 @@
       "PATCH /api/v1/settings/atendimento",
       "PATCH /api/v1/settings/campanhas",
       "PATCH /api/v1/settings/catalogo",
+      "PATCH /api/v1/settings/nicho",
       "PATCH /api/v1/settings/proposal-templates/[id]",
       "PATCH /api/v1/settings/proposals",
       "PATCH /api/v1/settings/prospeccao",
@@ -393,6 +395,7 @@
       "POST /api/v1/leads/[id]/next-action",
       "POST /api/v1/leads/[id]/reactivation",
       "POST /api/v1/leads/[id]/retomar",
+      "POST /api/v1/leads/[id]/touches",
       "POST /api/v1/leads/[id]/win",
       "POST /api/v1/leads/bulk",
       "POST /api/v1/leads/import",
@@ -1290,6 +1293,16 @@
       ],
       "resposta": []
     },
+    "/api/v1/leads/[id]/touches": {
+      "corpo": [
+        {
+          "nome": "touchSchema",
+          "origem": "@/lib/leads/touch",
+          "hash": "a781fd2a90b347ed"
+        }
+      ],
+      "resposta": []
+    },
     "/api/v1/leads/at-risk": {
       "corpo": [
         {
@@ -1730,6 +1743,16 @@
       ],
       "resposta": []
     },
+    "/api/v1/settings/nicho": {
+      "corpo": [
+        {
+          "nome": "nichoPatchSchema",
+          "origem": "local",
+          "hash": "1c18089b9d75e0c3"
+        }
+      ],
+      "resposta": []
+    },
     "/api/v1/settings/proposal-templates": {
       "corpo": [
         {
@@ -1775,7 +1798,7 @@
         {
           "nome": "routingConfigSchema",
           "origem": "@/lib/schemas",
-          "hash": "4dba7560f048f69a"
+          "hash": "ae48a38ac866d871"
         }
       ],
       "resposta": []
