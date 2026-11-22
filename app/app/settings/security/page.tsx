@@ -10,6 +10,8 @@ import { empresaExigeMfa, politicaDaEmpresa, type PapelMinimoDeMfa } from "@/lib
 import { NICHO_SAUDE, nichoSchema, type Nicho } from "@/lib/organizacoes/nicho";
 import { CLINICAL_CLAIM_LAYER } from "@/lib/organizacoes/save-niche";
 import { listarDispositivosConfiaveis } from "@/lib/auth/dispositivo-confiavel";
+import { bloqueioDeChamadasLigado } from "@/lib/organizacao/bloqueio-de-chamadas";
+import { BloqueioDeChamadas } from "./_bloqueioDeChamadas";
 import { SecurityClient } from "./_client";
 import { traduzir } from "@/lib/i18n/dicionario";
 
@@ -55,6 +57,7 @@ export default async function SecurityPage() {
   // Berseba: whether the clinical-claim layer is on, so the niche picker can warn on
   // load — not only right after a save (BERSEBA.md, "Organization niche").
   let clinicalClaimLayerOn = false;
+  let chamadasBloqueadas = false;
   if (org) {
     const { data } = await createAdminClient()
       .from("organizations")
@@ -79,6 +82,7 @@ export default async function SecurityPage() {
         .maybeSingle();
       clinicalClaimLayerOn = layer?.enabled === true;
     }
+    chamadasBloqueadas = bloqueioDeChamadasLigado(data?.settings);
   }
 
   // A mesma função que o layout usa para decidir o bloqueio — a tela não pode
@@ -115,6 +119,8 @@ export default async function SecurityPage() {
         dispositivos={dispositivos}
         semCodigos={semCodigos}
       />
+
+      {org?.role === "admin" && <BloqueioDeChamadas ligado={chamadasBloqueadas} />}
     </div>
   );
 }
