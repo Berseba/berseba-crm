@@ -18,6 +18,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
 import { fail } from "@/lib/api/wrappers";
 import { McpAuthError, ensureRole, ensureScope, validateBearerToken } from "@/lib/mcp/auth";
+import { MENSAGEM_DA_RECUSA_DO_MODULO, MODULO_NAO_ENTRA_AQUI } from "@/lib/auth/modulo-autorizado";
 import {
   JANELA_SEGUNDOS,
   TETO_DE_ESCRITA,
@@ -98,6 +99,14 @@ export async function authorizeServerBearer(
       return { ok: false, response: fail(code, err.message, err.httpStatus, { requestId }) };
     }
     throw err;
+  }
+  // A module token (`mcp:read`) never reads through a Berseba server route: only the consented
+  // area of `lib/api/auth-dual.ts` lets it in (upstream fence token-de-modulo-so-entra-pelo-portao).
+  if (auth.actor.type === "module") {
+    return {
+      ok: false,
+      response: fail(MODULO_NAO_ENTRA_AQUI, MENSAGEM_DA_RECUSA_DO_MODULO[MODULO_NAO_ENTRA_AQUI], 403, { requestId }),
+    };
   }
 
   // Sequential on purpose: `checkRateLimit` increments when asked, and a call already refused by

@@ -21,10 +21,10 @@ import { recusaDaChamada, rotuloDaRecusa } from "./desfecho-da-chamada";
 import { verificarTetoMcp } from "./rate-limit";
 import { tamanhoDoResultado } from "./resultado-bytes";
 import { allTools } from "./tools";
-import { deCapacidadeDesligada, deModuloDesligado } from "./tools/catalog";
 import { isAvecToolHiddenFor } from "@/lib/integrations/avec/config"; // Berseba
 import { isMiraeToolHiddenFor } from "@/lib/integrations/mirae/config"; // Berseba
 import { isAtosToolHiddenFor } from "@/lib/integrations/atos/config"; // Berseba
+import { catalogEntry, deCapacidadeDesligada, deModuloDesligado } from "./tools/catalog";
 import { higienizarUuidsDeAterro } from "./uuid-de-aterro";
 import type { McpContext } from "./types";
 
@@ -46,6 +46,27 @@ function summarizeResult(result: unknown): string | undefined {
  * módulo desligado nem é registrada — o cliente externo não a vê na lista.
  * Ausente vale como nenhum, pela mesma razão de `pickToolsFromMcp`.
  */
+/**
+ * As DICAS de risco que o protocolo MCP leva ao cliente (`annotations`). É por
+ * elas que um cliente como o ChatGPT decide pedir confirmação antes de chamar:
+ * `readOnlyHint` para o que só consulta, `destructiveHint` para o que o
+ * catálogo marca `critico` (publicar ou reverter um assistente, desligar uma
+ * entrada de contatos…). A fonte é o MESMO risco que a tela mostra a quem
+ * configura (`lib/mcp/tools/catalogo`), não uma segunda lista.
+ */
+export function dicasDaFerramenta(
+  nome: string,
+  categoria: string,
+): { readOnlyHint: boolean; destructiveHint: boolean; openWorldHint: boolean } {
+  const entrada = catalogEntry(nome);
+  const somenteLeitura = categoria === "read";
+  return {
+    readOnlyHint: somenteLeitura,
+    destructiveHint: !somenteLeitura && entrada?.risco === "critico",
+    openWorldHint: false,
+  };
+}
+
 export function createMcpServer(
   auth: McpAuthResult,
   requestId: string,
@@ -71,6 +92,7 @@ export function createMcpServer(
       {
         description: tool.description,
         inputSchema: tool.inputSchema,
+        annotations: dicasDaFerramenta(tool.name, tool.category),
       },
       async (rawArgs) => {
         const startedAt = Date.now();

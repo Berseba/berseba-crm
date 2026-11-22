@@ -30,6 +30,7 @@ import { createClient } from "@/lib/supabase/server";
 import { modulosLigados } from "@/lib/instalacao/modulos";
 import { avecConfigFor } from "@/lib/integrations/avec/config";
 import { capacidadesLigadas } from "@/lib/organizacao/capacidades";
+import { modulosNaTela } from "@/lib/extensions/modulos-na-tela";
 import { telefoniaEmUso } from "@/lib/telefonia/em-uso";
 import { ehOperante } from "@/lib/organizacao/operante";
 import {
@@ -147,7 +148,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
      *    aplica. Vigiado por
      *    `tests/unit/faixa-respeita-os-canais-do-atendente.test.tsx`.
      */
-    const [orgRes, conexoes, isEnrolled, mfaRequired, modulos, telefonia] = await Promise.all([
+    const [orgRes, conexoes, isEnrolled, mfaRequired, modulos, telefonia, conectados] = await Promise.all([
       admin
         .from("organizations")
         .select("onboarded_at, status, settings, timezone")
@@ -168,6 +169,12 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       // leia — o que se mede é o tronco SIP que esta empresa salvou. Entra no
       // mesmo `Promise.all`, então custa a consulta mais lenta, não uma espera.
       telefoniaEmUso(admin, activeOrg.orgId),
+      // Módulos CONECTADOS desta organização (Spec 33, F4): alimenta o grupo "Módulos" do menu e
+      // o ⌘K. Uma vez por requisição, no mesmo `Promise.all`. Lado seguro: erro vira lista vazia
+      // e o CRM segue inteiro.
+      modulosNaTela(activeOrg.orgId, user.idioma ? { locale: user.idioma } : {}).catch(
+        (): Awaited<ReturnType<typeof modulosNaTela>> => [],
+      ),
     ]);
 
     const orgRow = orgRes.data;
@@ -204,6 +211,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         // Berseba: the avec salon's waitlist door, for organizations that use avec.
         ...(avecConfigFor(activeOrg.orgId) ? (["lista_de_espera_avec"] as const) : []),
       ],
+      // Só slug e título descem ao navegador; o endereço do serviço fica no servidor.
+      modulos_conectados: conectados.map((m) => ({ slug: m.slug, titulo: m.titulo })),
     };
 
     // A faixa do teste grátis (spec da cobrança §9): uma consulta a mais SÓ com
