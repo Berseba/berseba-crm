@@ -8,6 +8,37 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.23.0] — 2026-11-22
+
+### ⚠️ Requer atenção
+
+- **Sincronização com o DeskcommCRM v1.123.0 (vinha da v1.118.0)** O fornecedor pediu ação do operador nestas versões — leia antes de atualizar:
+
+  **v1.123.0**
+
+  - **SENTRY_DSN vazio deixa de ligar o Sentry do projeto; o aceite passa a ser o token comunidade** Quem já havia aceitado a telemetria tem `SENTRY_DSN=""` no `.env`, e vazio agora desliga. Rodar o `update.sh` (uma vez, como de costume) converte a chave para `SENTRY_DSN=comunidade` e o envio continua; quem não roda nada simplesmente para de enviar. Não descomente a linha da telemetria no `.env.hostgator.example`: chave vazia deixou de ser consentimento.
+  - **Na véspera e no dia do feriado nacional, o agente volta a marcar nos horários livres da Agenda** Desde a v1.100.0, o agente recusava marcar compromisso na véspera e no dia do feriado
+    nacional. A partir desta versão, com a opção "Não atender em feriado nacional" desligada
+    (o padrão), ele passa a oferecer os horários que aparecem livres na Agenda nesse dia. Se
+    a sua empresa fecha em feriado nacional, antes de atualizar ligue essa opção no agente,
+    junto de "Só atender em horário de funcionamento", ou bloqueie o dia na Agenda.
+
+  **v1.121.0**
+
+  - **API de serviços devolve código, e não frase, no motivo da recusa** Se a sua integração compara as frases de `error.details` ao cadastrar ou alterar serviços,
+    passe a comparar os códigos. Quem usa só a tela do CRM não precisa fazer nada.
+
+### Alterado
+
+- **Sincronização com o DeskcommCRM v1.123.0 (vinha da v1.118.0)** O produto passa a incluir tudo o que o fornecedor lançou entre a v1.118.0 e a v1.123.0. As notas de cada versão estão nas releases dele:
+
+  - [v1.123.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.123.0)
+  - [v1.122.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.122.0)
+  - [v1.121.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.121.0)
+  - [v1.120.1](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.120.1)
+  - [v1.120.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.120.0)
+  - [v1.119.0](https://github.com/melgarafael/DeskcommCRM/releases/tag/v1.119.0)
+
 ## [2.22.0] — 2026-11-20
 
 ### Adicionado
@@ -9781,7 +9812,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.22.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.23.0...HEAD
+[2.23.0]: https://github.com/berseba/berseba-crm/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/berseba/berseba-crm/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/berseba/berseba-crm/compare/v2.20.0...v2.21.0
 [2.20.0]: https://github.com/berseba/berseba-crm/compare/v2.19.0...v2.20.0
