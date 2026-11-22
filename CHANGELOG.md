@@ -8,6 +8,12 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.23.1] — 2026-11-22
+
+### Corrigido
+
+- **A publicação da imagem volta a sair para a organização Berseba** A conferência do BUILD_ID, que chegou com a sincronização da v1.123.0, montava o nome da imagem com "Berseba" em maiúscula, e o Docker recusa maiúscula. A 2.23.0 não chegou a ser publicada por isso; esta versão traz o mesmo conteúdo, já publicado.
+
 ## [2.23.0] — 2026-11-22
 
 ### ⚠️ Requer atenção
@@ -9812,7 +9818,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.23.0...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.23.1...HEAD
+[2.23.1]: https://github.com/berseba/berseba-crm/compare/v2.23.0...v2.23.1
 [2.23.0]: https://github.com/berseba/berseba-crm/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/berseba/berseba-crm/compare/v2.21.0...v2.22.0
 [2.21.0]: https://github.com/berseba/berseba-crm/compare/v2.20.0...v2.21.0
