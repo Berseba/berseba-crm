@@ -329,8 +329,11 @@ jobs:
           set -euo pipefail
           # Pelo DIGEST: é exatamente o byte que este job empurrou, não uma tag que
           # outro run pode ter movido entretanto.
+          # Berseba: Docker refuses uppercase in a reference, and our owner is
+          # "Berseba" (metadata-action lowercases the tags by itself; this line did not).
+          dono=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
           bash scripts/verifica-build-id.sh \
-            "${{ env.REGISTRY }}/${{ github.repository_owner }}/${{ matrix.name }}@${{ steps.build.outputs.digest }}"
+            "${{ env.REGISTRY }}/${dono}/${{ matrix.name }}@${{ steps.build.outputs.digest }}"
 
   juntar-manifestos:
     needs: [build-and-push]
