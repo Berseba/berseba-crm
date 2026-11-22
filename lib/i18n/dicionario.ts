@@ -2117,7 +2117,6 @@ export const DICIONARIO: Traducoes = {
   "E-commerce": { es: "E-commerce" },
   Imobiliária: { es: "Inmobiliaria" },
   Infoproduto: { es: "Infoproducto" },
-  Serviços: { es: "Servicios" },
   "Escolher Saúde faz a urgência médica relatada pelo contato ir para uma pessoa na hora, com orientação de emergência, e, se ninguém tiver escolhido antes, liga a conferência “Não fazer afirmação clínica”: a IA não afirma diagnóstico, não indica remédio nem promete cura. Essa conferência fica no painel de segurança do agente, onde pode ser ligada ou desligada.":
     {
       es: "Elegir Salud hace que una urgencia médica relatada por el contacto pase a una persona de inmediato, con orientación de emergencia, y, si nadie lo eligió antes, activa la verificación “No hacer afirmaciones clínicas”: la IA no afirma diagnósticos, no indica medicamentos ni promete cura. Esa verificación está en el panel de seguridad del agente, donde se puede activar o desactivar.",

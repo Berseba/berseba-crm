@@ -18,6 +18,9 @@ import { describe, expect, it } from "vitest";
 const RAIZ = process.cwd();
 
 const PERMITIDOS = [
+  // Berseba: the bearer check of our server-to-server routes (Mirae, Voz); it refuses the
+  // `module` actor right after validating, like the MCP route.
+  "lib/integrations/mirae/read-auth.ts",
   "lib/mcp/auth.ts", // onde as funções moram
   "lib/api/auth-dual.ts",
   "app/api/mcp/route.ts",
