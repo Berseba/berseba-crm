@@ -156,7 +156,7 @@ describe("catálogo de modelos", () => {
       "claude-opus-5-5",
       "gpt-5.6-sol",
       "gpt-5.6-terra",
-      "gpt-5.6-luna",
+      // gpt-5.6-luna saiu daqui em 26 Nov 2026: aposentado por custo (9447), fica depreciado.
       "gpt-6-luna",
       "gpt-6.1-sol",
       "gpt-6.1-terra",
