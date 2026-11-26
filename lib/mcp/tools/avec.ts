@@ -68,11 +68,11 @@ import {
   salaoDa,
   servicosAvulsos,
   validarOpcao,
-  visitaDoDia,
+  recognizeVisit,
   type Comprimento,
   type Opcao,
   type Salao,
-  type VisitaReconhecida,
+  type RecognizedVisit,
 } from "@/lib/integrations/avec/ofertas";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -351,13 +351,13 @@ const myAppointmentsShape = {
 };
 
 /** How far `avec_my_appointments` looks: clients ask about bookings 3 to 5 weeks out. */
-export const DIAS_DOS_AGENDAMENTOS = 60;
+export const APPOINTMENTS_DAYS_AHEAD = 60;
 
 export const avecMyAppointments: McpToolDefinition<typeof myAppointmentsShape> = {
   name: "avec_my_appointments",
   description:
     "Lista os agendamentos da cliente DESTA conversa na agenda do salão (avec), pelo telefone " +
-    `dela — você não informa telefone. Sem datas, traz de hoje até ${DIAS_DOS_AGENDAMENTOS} dias à frente. ` +
+    `dela — você não informa telefone. Sem datas, traz de hoje até ${APPOINTMENTS_DAYS_AHEAD} dias à frente. ` +
     "Use sempre antes de remarcar ou cancelar, para pegar o appointment_id. Os do mesmo dia são " +
     "uma visita só (ex.: lavagem, corte e secagem): use o appointment_id de qualquer um. Visitas " +
     "em dias diferentes: pergunte qual antes de agir. Só os de can_change: true podem ser " +
@@ -369,9 +369,12 @@ export const avecMyAppointments: McpToolDefinition<typeof myAppointmentsShape> =
   handler: async (input, ctx) => {
     const ready = await prepare(ctx);
     if ("ok" in ready) return ready;
-    const from = input.from ?? hojeEmBrasilia();
-    const limite = addDays(from, DIAS_DOS_AGENDAMENTOS - 1);
-    const to = input.to && input.to < limite ? input.to : limite;
+    const today = hojeEmBrasilia();
+    // Only an end date in the past ("what did I book last week?"): the two weeks before it.
+    const from =
+      input.from ?? (input.to && input.to < today ? addDays(input.to, -13) : today);
+    const limit = addDays(from, APPOINTMENTS_DAYS_AHEAD - 1);
+    const to = input.to && input.to < limit ? input.to : limit;
     if (to < from) {
       return { ok: false, handoff: false, mensagem: "a data final é antes da inicial: confira as datas." };
     }
@@ -530,12 +533,12 @@ const freeSlotsShape = {
 };
 
 /** A visit the agent may change alone, with every booking that belongs to it. */
-interface Visita {
+interface Visit {
   appointment: AvecAppointment;
   /** Every booking of the visit, in the recipe's order: one for a one-service visit. */
-  etapas: AvecAppointment[];
+  bookings: AvecAppointment[];
   /** The salon's recipe, for a visit of several bookings; `null` for a one-service visit. */
-  receita: VisitaReconhecida<AvecAppointment> | null;
+  recipe: RecognizedVisit<AvecAppointment> | null;
 }
 
 /**
@@ -544,13 +547,13 @@ interface Visita {
  * recipe of the salon (corte + lavagem + secagem): then the visit moves or is cancelled as a
  * whole. Every booking must still be Agendado/Confirmado.
  */
-async function visitaDaCliente(
+async function visitOf(
   ctx: McpContext,
   config: AvecConfig,
   phone: string,
   salao: Salao,
   appointmentId: string,
-): Promise<Visita | Refusal> {
+): Promise<Visit | Refusal> {
   const appointment = await getAppointment(config, { id: appointmentId, phone });
   const listed = await listAppointments(config, {
     phone,
@@ -559,19 +562,19 @@ async function visitaDaCliente(
   });
   const sameDay = listed.some((a) => a.id === appointment.id) ? listed : [appointment, ...listed];
   const changeable = (a: AvecAppointment) => a.status !== null && CHANGEABLE_STATUS.has(a.status);
-  const receita = sameDay.length > 1 ? visitaDoDia(salao, sameDay) : null;
+  const recipe = sameDay.length > 1 ? recognizeVisit(salao, sameDay) : null;
   const motivo = !changeable(appointment)
     ? "not_allowed"
     : sameDay.length > 1
-      ? !receita
+      ? !recipe
         ? "visita_com_varios_servicos"
-        : receita.etapas.every(changeable)
+        : recipe.bookings.every(changeable)
           ? null
           : "not_allowed"
       : !servicosAvulsos(salao).has(appointment.service_id)
         ? "servico_com_a_equipe"
         : null;
-  if (!motivo) return { appointment, etapas: receita ? receita.etapas : [appointment], receita };
+  if (!motivo) return { appointment, bookings: recipe ? recipe.bookings : [appointment], recipe };
   logger.info("avec: change kept for the team", { motivo, org: ctx.organizationId });
   return {
     ...refusal(motivo, true, HANDOFF_INSTRUCTION),
@@ -585,18 +588,18 @@ async function visitaDaCliente(
 }
 
 /** `Corte Feminino 27/10 14:00 (Mayara Morales)`: a booking as the team reads it in a todo. */
-const descrever = (a: AvecAppointment) =>
+const describeBooking = (a: AvecAppointment) =>
   `${a.service ?? "serviço"} ${dataBr(a.date)} ${a.start_time}${a.professional ? ` (${a.professional})` : ""}`;
 
 /**
  * Moving a visit of several bookings to another time the same day books each service again on
  * a day the client already has it, which avec-api refuses (`already_booked`): the team does it.
  */
-function mesmoDiaComAEquipe(receita: VisitaReconhecida<AvecAppointment>): Refusal {
-  const first = receita.etapas[0]!;
+function sameDayForTeam(recipe: RecognizedVisit<AvecAppointment>): Refusal {
+  const first = recipe.bookings[0]!;
   return {
     ...refusal("mesmo_dia_com_a_equipe", true, HANDOFF_INSTRUCTION),
-    todo: `A cliente quer mudar o horário da visita de ${receita.oferta.rotulo} de ${dataBr(first.date)} às ${first.start_time} para outro horário no mesmo dia: mudar no avec.`,
+    todo: `A cliente quer mudar o horário da visita de ${recipe.oferta.rotulo} de ${dataBr(first.date)} às ${first.start_time} para outro horário no mesmo dia: mudar no avec.`,
   };
 }
 
@@ -658,26 +661,44 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
       depois_de: input.depois_de,
       ate: input.ate,
     };
+    // The helper the client asked for (lavagem/secagem), for a new visit and for a moved one.
+    let auxiliares = salao.auxiliares;
+    if (input.auxiliar) {
+      const alvo = fold(input.auxiliar);
+      auxiliares = salao.auxiliares.filter((id) => {
+        const nome = fold(salao.profissionais[id]?.nome ?? "");
+        return nome === alvo || nome.split(" ")[0] === alvo;
+      });
+      if (!auxiliares.length) {
+        return {
+          ok: false,
+          handoff: false,
+          mensagem: `quem faz lavagem e secagem aqui: ${salao.auxiliares
+            .map((id) => nomeDe(salao, id))
+            .join(", ")}. Pergunte à cliente.`,
+        };
+      }
+    }
     try {
       let opcoes: Opcao[];
       let pedido = "o serviço que a cliente pediu";
       if (input.remarcar_appointment_id) {
-        const visita = await visitaDaCliente(
+        const visit = await visitOf(
           ctx,
           ready.config,
           ready.phone,
           salao,
           input.remarcar_appointment_id,
         );
-        if ("ok" in visita) return visita;
-        const a = visita.appointment;
+        if ("ok" in visit) return visit;
+        const a = visit.appointment;
         pedido = `remarcar ${a.service ?? "o serviço"} de ${dataBr(a.date)} às ${a.start_time}`;
-        if (visita.receita) {
+        if (visit.recipe) {
           // The whole visit, by the booking recipe: same principal, same length, any helper.
-          const { oferta, comprimento, principal, etapas } = visita.receita;
-          const dia = etapas[0]!.date;
-          pedido = `remarcar a visita de ${oferta.rotulo} de ${dataBr(dia)} às ${etapas[0]!.start_time}`;
-          if (input.data === dia) return mesmoDiaComAEquipe(visita.receita);
+          const { oferta, comprimento, principal, bookings } = visit.recipe;
+          const day = bookings[0]!.date;
+          pedido = `remarcar a visita de ${oferta.rotulo} de ${dataBr(day)} às ${bookings[0]!.start_time}`;
+          if (input.data === day) return sameDayForTeam(visit.recipe);
           opcoes = (
             (await opcoesDoPedido(
               ready.config,
@@ -685,8 +706,9 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
               { servico: oferta.id, comprimento, profissional: principal },
               from,
               to,
+              auxiliares,
             )) ?? []
-          ).filter((o) => o.data !== dia);
+          ).filter((o) => o.data !== day);
         } else {
           const slots = await listAvailability(ready.config, {
             service_id: a.service_id,
@@ -761,23 +783,6 @@ export const avecFreeSlots: McpToolDefinition<typeof freeSlotsShape> = {
             ...refusal("comprimento_com_a_equipe", true, HANDOFF_INSTRUCTION),
             todo: `Marcar ${oferta.rotulo} (cabelo ${comprimento}) no avec.`,
           };
-        }
-        let auxiliares = salao.auxiliares;
-        if (input.auxiliar) {
-          const alvo = fold(input.auxiliar);
-          auxiliares = salao.auxiliares.filter((id) => {
-            const nome = fold(salao.profissionais[id]?.nome ?? "");
-            return nome === alvo || nome.split(" ")[0] === alvo;
-          });
-          if (!auxiliares.length) {
-            return {
-              ok: false,
-              handoff: false,
-              mensagem: `quem faz lavagem e secagem aqui: ${salao.auxiliares
-                .map((id) => nomeDe(salao, id))
-                .join(", ")}. Pergunte à cliente.`,
-            };
-          }
         }
         const consultas = consultasPara(salao, oferta, principais, comprimento, auxiliares);
         const slots = (
@@ -889,9 +894,9 @@ export const avecCancel: McpToolDefinition<typeof cancelShape> = {
     if (!salao) return SEM_OFERTAS;
     const key = avecIdempotencyKey(ctx, "avec_cancel", input);
     if (!key) return NO_JOB;
-    let visita: Visita;
+    let visit: Visit;
     try {
-      const found = await visitaDaCliente(
+      const found = await visitOf(
         ctx,
         ready.config,
         ready.phone,
@@ -899,11 +904,11 @@ export const avecCancel: McpToolDefinition<typeof cancelShape> = {
         input.appointment_id,
       );
       if ("ok" in found) return found;
-      visita = found;
+      visit = found;
     } catch (err) {
       return failure(err);
     }
-    if (visita.receita) return cancelarVisita(ctx, ready, visita.etapas, input);
+    if (visit.recipe) return cancelVisit(ctx, ready, visit.bookings, input);
     return write(ctx, async () => {
       const result = await cancelAppointment(ready.config, {
         appointmentId: input.appointment_id,
@@ -923,62 +928,71 @@ type Ready = { config: AvecConfig; phone: string; name: string | null };
 /**
  * Cancels each booking, one `/cancel` per booking, each with its own `Idempotency-Key`. A failed
  * one does not stop the others: the client asked for all of them, and the answer says exactly
- * which ones are still in avec.
+ * which ones are still in avec. A `not_found` counts as cancelled: the booking was listed for
+ * this phone moments ago, so it has left avec already (someone cancelled it there).
  */
-async function cancelarMarcacoes(
+async function cancelBookings(
   ctx: McpContext,
   ready: Ready,
-  marcacoes: AvecAppointment[],
-  opts: { tool: string; chave: (a: AvecAppointment) => unknown; reason?: string },
-): Promise<{ canceladas: AvecAppointment[]; falhas: Array<{ a: AvecAppointment; err: unknown }> }> {
-  const canceladas: AvecAppointment[] = [];
-  const falhas: Array<{ a: AvecAppointment; err: unknown }> = [];
-  for (const a of marcacoes) {
+  bookings: AvecAppointment[],
+  opts: { tool: string; keyFor: (a: AvecAppointment) => unknown; reason?: string },
+): Promise<{ cancelled: AvecAppointment[]; failed: Array<{ a: AvecAppointment; err: unknown }> }> {
+  const cancelled: AvecAppointment[] = [];
+  const failed: Array<{ a: AvecAppointment; err: unknown }> = [];
+  for (const a of bookings) {
     try {
       await cancelAppointment(ready.config, {
         appointmentId: a.id,
         phone: ready.phone,
         reason: opts.reason,
-        idempotencyKey: avecIdempotencyKey(ctx, opts.tool, opts.chave(a))!,
+        idempotencyKey: avecIdempotencyKey(ctx, opts.tool, opts.keyFor(a))!,
       });
-      canceladas.push(a);
+      cancelled.push(a);
     } catch (err) {
+      if (err instanceof AvecApiError && err.code === "not_found") {
+        cancelled.push(a);
+        continue;
+      }
       logger.warn("avec: booking of a visit not cancelled", {
         code: err instanceof AvecApiError ? err.code : "unexpected",
       });
-      falhas.push({ a, err });
+      failed.push({ a, err });
     }
   }
   // The freed slots may be someone's on the waitlist.
-  if (canceladas.length) dispararBuscaDaEspera(ctx.organizationId);
-  return { canceladas, falhas };
+  if (cancelled.length) dispararBuscaDaEspera(ctx.organizationId);
+  return { cancelled, failed };
 }
 
 /** No HTTP answer, or avec-api could not read its write back: avec may have done it. */
-const talvezGravado = (err: unknown) =>
+const mayHaveWritten = (err: unknown) =>
   err instanceof AvecApiError && (err.code === "avec_write_unconfirmed" || err.status === 0);
 
 /** `avec_cancel` of a visit of several bookings: every booking of it. */
-async function cancelarVisita(
+async function cancelVisit(
   ctx: McpContext,
   ready: Ready,
-  etapas: AvecAppointment[],
+  bookings: AvecAppointment[],
   input: { appointment_id: string; reason?: string },
 ) {
-  const { canceladas, falhas } = await cancelarMarcacoes(ctx, ready, etapas, {
+  const { cancelled, failed } = await cancelBookings(ctx, ready, bookings, {
     tool: "avec_cancel",
-    chave: (a) => ({ ...input, etapa: a.id }),
+    keyFor: (a) => ({ ...input, etapa: a.id }),
     reason: input.reason,
   });
-  if (!falhas.length) {
+  if (!failed.length) {
     return {
       ok: true,
-      visita_cancelada: canceladas.map((a) => ({ ...appointmentView(a), data_br: dataBr(a.date) })),
-      total: canceladas.length,
+      visita_cancelada: cancelled.map((a) => ({ ...appointmentView(a), data_br: dataBr(a.date) })),
+      total: cancelled.length,
     };
   }
-  // Nothing changed: the same answer as a one-service cancel.
-  if (!canceladas.length) return failure(falhas[0]!.err, { isWrite: true });
+  // Nothing cancelled for sure: the same answer as a one-service cancel, but a cancel that may
+  // have gone through outranks the others, so the team is told to check avec.
+  if (!cancelled.length) {
+    const worst = failed.find((f) => mayHaveWritten(f.err)) ?? failed[0]!;
+    return failure(worst.err, { isWrite: true });
+  }
   return {
     ok: false,
     code: "cancelamento_parcial",
@@ -989,9 +1003,9 @@ async function cancelarVisita(
       "equipe de atendimento finaliza o cancelamento e já responde por aqui. " +
       HANDOFF_INSTRUCTION,
     todo:
-      `Cancelado no avec: ${canceladas.map(descrever).join("; ")}. ` +
-      `Falta cancelar: ${falhas.map((f) => descrever(f.a)).join("; ")}` +
-      (falhas.some((f) => talvezGravado(f.err)) ? " (pode já ter sido cancelado: conferir no avec)" : "") +
+      `Cancelado no avec: ${cancelled.map(describeBooking).join("; ")}. ` +
+      `Falta cancelar: ${failed.map((f) => describeBooking(f.a)).join("; ")}` +
+      (failed.some((f) => mayHaveWritten(f.err)) ? " (pode já ter sido cancelado: conferir no avec)" : "") +
       ". A cliente pediu para cancelar a visita inteira.",
   };
 }
@@ -1036,7 +1050,7 @@ export const avecConfirm: McpToolDefinition<typeof confirmShape> = {
   },
 };
 
-const OUTRA_OPCAO = {
+const OTHER_OPTION = {
   ok: false,
   handoff: false,
   mensagem:
@@ -1088,9 +1102,9 @@ export const avecReschedule: McpToolDefinition<typeof rescheduleShape> = {
     }
     const key = avecIdempotencyKey(ctx, "avec_reschedule", input);
     if (!key) return NO_JOB;
-    let visita: Visita;
+    let visit: Visit;
     try {
-      const found = await visitaDaCliente(
+      const found = await visitOf(
         ctx,
         ready.config,
         ready.phone,
@@ -1098,17 +1112,17 @@ export const avecReschedule: McpToolDefinition<typeof rescheduleShape> = {
         input.appointment_id,
       );
       if ("ok" in found) return found;
-      visita = found;
+      visit = found;
     } catch (err) {
       return failure(err);
     }
-    if (visita.receita) {
-      if (!opcao) return OUTRA_OPCAO;
-      return remarcarVisita(ctx, ready, salao, visita.receita, opcao, input);
+    if (visit.recipe) {
+      if (!opcao) return OTHER_OPTION;
+      return moveVisit(ctx, ready, salao, visit.recipe, opcao, input);
     }
-    const a = visita.appointment;
+    const a = visit.appointment;
     if (!slot || a.service_id !== slot.servico || a.professional_id !== slot.profissional) {
-      return OUTRA_OPCAO;
+      return OTHER_OPTION;
     }
     return write(ctx, async () => {
       const moved = await rescheduleAppointment(ready.config, {
@@ -1205,22 +1219,22 @@ export const avecBook: McpToolDefinition<typeof bookShape> = {
 };
 
 type FalhaDaMarcacao = { ok: false; code: string } & Record<string, unknown>;
-type OpcaoMarcavel = NonNullable<ReturnType<typeof validarOpcao>>;
+type BookableOption = NonNullable<ReturnType<typeof validarOpcao>>;
 
 /**
  * Creates every step of a visit option in avec, in the recipe's order, and stops at the first
  * failure. Each step has its own `Idempotency-Key`, from `chave(i)`.
  */
-async function criarEtapas(
+async function createSteps(
   ctx: McpContext,
   ready: Ready,
-  opcao: OpcaoMarcavel,
-  opts: { tool: string; chave: (i: number) => unknown; note?: string; nomeCompleto?: string },
-): Promise<{ feitos: AvecAppointment[]; erro?: { etapa: number; err: unknown } }> {
-  const feitos: AvecAppointment[] = [];
+  opcao: BookableOption,
+  opts: { tool: string; keyFor: (i: number) => unknown; note?: string; nomeCompleto?: string },
+): Promise<{ made: AvecAppointment[]; error?: { step: number; err: unknown } }> {
+  const made: AvecAppointment[] = [];
   for (const [i, slot] of opcao.slots.entries()) {
     try {
-      feitos.push(
+      made.push(
         await createAppointment(ready.config, {
           phone: ready.phone,
           // Who the client said will be served must match the record; the WhatsApp name only
@@ -1229,18 +1243,18 @@ async function criarEtapas(
           nameMustMatch: Boolean(opts.nomeCompleto),
           slotId: slot.slotId,
           note: i === 0 ? opts.note : undefined,
-          idempotencyKey: avecIdempotencyKey(ctx, opts.tool, opts.chave(i))!,
+          idempotencyKey: avecIdempotencyKey(ctx, opts.tool, opts.keyFor(i))!,
         }),
       );
     } catch (err) {
-      return { feitos, erro: { etapa: i, err } };
+      return { made, error: { step: i, err } };
     }
   }
-  return { feitos };
+  return { made };
 }
 
 /** `14:30`. */
-const hhmmDe = (minutes: number) =>
+const formatHhmm = (minutes: number) =>
   `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
 
 /**
@@ -1251,18 +1265,18 @@ async function marcarVisita(
   ctx: McpContext,
   ready: Ready,
   salao: Salao,
-  opcao: OpcaoMarcavel,
+  opcao: BookableOption,
   opts: { tool: string; opcaoId: string; note?: string; nomeCompleto?: string; repetir: string },
 ): Promise<{ ok: true; feitos: AvecAppointment[] } | { ok: false; falha: FalhaDaMarcacao }> {
-  const { feitos, erro } = await criarEtapas(ctx, ready, opcao, {
+  const { made, error } = await createSteps(ctx, ready, opcao, {
     tool: opts.tool,
     // The name is in the key: after "which of the two records?", the retry is another write.
-    chave: (i) => ({ opcao_id: opts.opcaoId, etapa: i, nome: opts.nomeCompleto ?? null }),
+    keyFor: (i) => ({ opcao_id: opts.opcaoId, etapa: i, nome: opts.nomeCompleto ?? null }),
     note: opts.note,
     nomeCompleto: opts.nomeCompleto,
   });
-  if (erro) {
-    const { etapa: i, err } = erro;
+  if (error) {
+    const { step: i, err } = error;
     const slot = opcao.slots[i]!;
     if (i === 0) {
       if (err instanceof AvecApiError && err.code === "ambiguous_client" && !opts.nomeCompleto) {
@@ -1300,12 +1314,12 @@ async function marcarVisita(
           "nossa equipe de atendimento finaliza o agendamento e já responde por aqui. " +
           HANDOFF_INSTRUCTION,
         todo:
-          `Ficou marcado no avec: ${feitos.map((f) => `${f.service ?? "serviço"} ${dataBr(f.date)} ${f.start_time} (${f.professional ?? ""})`).join("; ")}. ` +
-          `Falta marcar a etapa ${i + 1} de ${opcao.oferta.rotulo} às ${hhmmDe(slot.inicio)} (${nomeDe(salao, slot.profissional) ?? "auxiliar"}): conferir e completar no avec, depois confirmar com a cliente.`,
+          `Ficou marcado no avec: ${made.map((f) => `${f.service ?? "serviço"} ${dataBr(f.date)} ${f.start_time} (${f.professional ?? ""})`).join("; ")}. ` +
+          `Falta marcar a etapa ${i + 1} de ${opcao.oferta.rotulo} às ${formatHhmm(slot.inicio)} (${nomeDe(salao, slot.profissional) ?? "auxiliar"}): conferir e completar no avec, depois confirmar com a cliente.`,
       },
     };
   }
-  return { ok: true, feitos };
+  return { ok: true, feitos: made };
 }
 
 /**
@@ -1314,23 +1328,23 @@ async function marcarVisita(
  * first, and cancel the old bookings only after all of them exist. At no point is the client
  * left with neither visit; when something fails halfway the answer says exactly what is in avec.
  */
-async function remarcarVisita(
+async function moveVisit(
   ctx: McpContext,
   ready: Ready,
   salao: Salao,
-  receita: VisitaReconhecida<AvecAppointment>,
-  opcao: OpcaoMarcavel,
+  recipe: RecognizedVisit<AvecAppointment>,
+  opcao: BookableOption,
   input: { appointment_id: string; opcao_id: string },
 ) {
   if (
-    opcao.oferta.id !== receita.oferta.id ||
-    opcao.comprimento !== receita.comprimento ||
-    opcao.principal !== receita.principal
+    opcao.oferta.id !== recipe.oferta.id ||
+    opcao.comprimento !== recipe.comprimento ||
+    opcao.principal !== recipe.principal
   ) {
-    return OUTRA_OPCAO;
+    return OTHER_OPTION;
   }
-  const antiga = receita.etapas;
-  if (opcao.slots[0]!.data === antiga[0]!.date) return mesmoDiaComAEquipe(receita);
+  const oldBookings = recipe.bookings;
+  if (opcao.slots[0]!.data === oldBookings[0]!.date) return sameDayForTeam(recipe);
   // A slot the waitlist is holding for another client is not hers to take.
   const seguradas = await seguradasPorOutras(ctx);
   const pontos = opcao.slots.map((s) => ({ profissional: s.profissional, data: s.data, inicio: s.inicio, fim: s.inicio + 1 }));
@@ -1345,16 +1359,28 @@ async function remarcarVisita(
     };
   }
 
-  const de = `${dataBr(antiga[0]!.date)} às ${antiga[0]!.start_time}`;
-  const { feitos, erro } = await criarEtapas(ctx, ready, opcao, {
+  const wasAt = `${dataBr(oldBookings[0]!.date)} às ${oldBookings[0]!.start_time}`;
+  const { made, error } = await createSteps(ctx, ready, opcao, {
     tool: "avec_reschedule",
-    chave: (i) => ({ ...input, etapa: i }),
-    note: `Remarcado pelo cliente via WhatsApp (a visita era ${de}).`,
+    keyFor: (i) => ({ ...input, etapa: i }),
+    note: `Remarcado pelo cliente via WhatsApp (a visita era ${wasAt}).`,
   });
-  if (erro) {
-    const { etapa: i, err } = erro;
+  if (error) {
+    const { step: i, err } = error;
     if (i === 0) {
-      // Nothing was booked: the old visit is untouched, the usual answers apply.
+      // Nothing was booked: the old visit is untouched, the usual answers apply, except the
+      // booking-flow advice for `already_booked` (she has this service on the NEW day already).
+      if (err instanceof AvecApiError && err.code === "already_booked") {
+        return {
+          ok: false,
+          code: err.code,
+          handoff: false,
+          visita_antiga_mantida: true,
+          mensagem:
+            "a cliente já tem um desses serviços marcado nesse dia, em outra visita. A visita dela " +
+            "continua como estava: ofereça outro dia (avec_free_slots com remarcar_appointment_id).",
+        };
+      }
       const twice =
         err instanceof AvecApiError && err.code === "slot_unavailable" && slotTakenBefore(ctx);
       return { ...failure(err, { slotTakenTwice: twice, isWrite: true }), visita_antiga_mantida: true };
@@ -1372,28 +1398,28 @@ async function remarcarVisita(
       visita_antiga_mantida: true,
       mensagem:
         "a visita nova ficou marcada só em parte, e a antiga continua marcada. Não confirme o novo " +
-        `horário: diga que, por enquanto, continua valendo o horário de ${de}, e que a nossa ` +
+        `horário: diga que, por enquanto, continua valendo o horário de ${wasAt}, e que a nossa ` +
         "equipe de atendimento finaliza a remarcação e já responde por aqui. " +
         HANDOFF_INSTRUCTION,
       todo:
-        `A visita antiga continua marcada no avec: ${antiga.map(descrever).join("; ")}. ` +
-        `Da visita nova ficou marcado: ${feitos.map(descrever).join("; ")}. ` +
-        `Falta marcar a etapa ${i + 1} de ${opcao.oferta.rotulo} às ${hhmmDe(slot.inicio)} ` +
+        `A visita antiga continua marcada no avec: ${oldBookings.map(describeBooking).join("; ")}. ` +
+        `Da visita nova ficou marcado: ${made.map(describeBooking).join("; ")}. ` +
+        `Falta marcar a etapa ${i + 1} de ${opcao.oferta.rotulo} às ${formatHhmm(slot.inicio)} ` +
         `(${nomeDe(salao, slot.profissional) ?? "auxiliar"})` +
-        (talvezGravado(err) ? ", que pode já ter entrado: conferir no avec" : "") +
+        (mayHaveWritten(err) ? ", que pode já ter entrado: conferir no avec" : "") +
         ". Combinar com a cliente: completar a nova e cancelar a antiga, ou cancelar o que foi marcado da nova.",
     };
   }
 
-  const { canceladas, falhas } = await cancelarMarcacoes(ctx, ready, antiga, {
+  const { cancelled, failed } = await cancelBookings(ctx, ready, oldBookings, {
     tool: "avec_reschedule",
-    chave: (a) => ({ ...input, cancelar: a.id }),
-    reason: `Visita remarcada pelo cliente via WhatsApp para ${dataBr(feitos[0]!.date)} às ${feitos[0]!.start_time}.`,
+    keyFor: (a) => ({ ...input, cancelar: a.id }),
+    reason: `Visita remarcada pelo cliente via WhatsApp para ${dataBr(made[0]!.date)} às ${made[0]!.start_time}.`,
   });
   return {
-    ...visitaMarcadaView(salao, opcao, feitos),
+    ...visitaMarcadaView(salao, opcao, made),
     aviso: "os appointment_id mudaram: use os deste resultado daqui em diante.",
-    ...(falhas.length
+    ...(failed.length
       ? {
           handoff: true,
           visita_antiga_cancelada_em_parte: true,
@@ -1402,10 +1428,10 @@ async function remarcarVisita(
             "de sistema. Depois chame crm_request_human_handoff com o todo: a visita antiga não " +
             "saiu toda do avec e a equipe cancela o que sobrou.",
           todo:
-            `A visita nova já está marcada no avec: ${feitos.map(descrever).join("; ")}. ` +
-            (canceladas.length ? `Da antiga, já cancelado: ${canceladas.map(descrever).join("; ")}. ` : "") +
-            `Cancelar no avec o que sobrou da antiga: ${falhas.map((f) => descrever(f.a)).join("; ")}` +
-            (falhas.some((f) => talvezGravado(f.err)) ? " (pode já ter sido cancelado: conferir)" : "") +
+            `A visita nova já está marcada no avec: ${made.map(describeBooking).join("; ")}. ` +
+            (cancelled.length ? `Da antiga, já cancelado: ${cancelled.map(describeBooking).join("; ")}. ` : "") +
+            `Cancelar no avec o que sobrou da antiga: ${failed.map((f) => describeBooking(f.a)).join("; ")}` +
+            (failed.some((f) => mayHaveWritten(f.err)) ? " (pode já ter sido cancelado: conferir)" : "") +
             ".",
         }
       : {}),

@@ -1115,3 +1115,68 @@ describe("a visit of several bookings", () => {
     expect(calls).toHaveLength(0);
   });
 });
+
+describe("review fixes (PR #169)", () => {
+  it("a whole-visit cancel where nothing is confirmed hands off when one cancel may have gone through", async () => {
+    visitDay();
+    problem(409, "idempotency_in_flight");
+    const timeout = new Error("aborted");
+    timeout.name = "TimeoutError";
+    answers.push(timeout);
+    problem(422, "not_allowed");
+    const r = await run(tools.avecCancel, { appointment_id: CORTE.id });
+    expect(r).toMatchObject({ ok: false, code: "timeout", handoff: true });
+    expect(String(r.todo)).toMatch(/Conferir no avec/);
+  });
+
+  it("a booking already gone from avec (not_found) counts as cancelled, not as left over", async () => {
+    visitDay();
+    answer(200, { id: CORTE.id, status: "cancelled" });
+    problem(404, "not_found");
+    answer(200, { id: SECAGEM.id, status: "cancelled" });
+    const r = await run(tools.avecCancel, { appointment_id: CORTE.id });
+    expect(r).toMatchObject({ ok: true, total: 3 });
+  });
+
+  it("a move refused with already_booked keeps the old visit and asks for another day", async () => {
+    visitDay();
+    problem(409, "already_booked");
+    const r = await run(tools.avecReschedule, { appointment_id: CORTE.id, opcao_id: NOVA });
+    expect(r).toMatchObject({ ok: false, code: "already_booked", handoff: false, visita_antiga_mantida: true });
+    expect(String(r.mensagem)).toMatch(/outro dia/);
+    expect(posts()).toHaveLength(1);
+  });
+
+  it("only an end date in the past reads the two weeks before it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-26T15:00:00Z"));
+    answer(200, { data: [] });
+    const r = await run(tools.avecMyAppointments, { to: "2026-11-20" });
+    expect(r).toMatchObject({ ok: true });
+    expect(calls.map((c) => [c.url.searchParams.get("from"), c.url.searchParams.get("to")])).toEqual([
+      ["2026-11-07", "2026-11-20"],
+    ]);
+  });
+
+  it("a whole-visit search honours the helper the client asked for", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-22T15:00:00Z"));
+    visitDay();
+    answer(200, { data: [slot("430008", "2128712", "2026-10-28", "15:00")] });
+    answer(200, { data: [slot("444099", "2128749", "2026-10-28", "15:00")] });
+    answer(200, { data: [slot("444099", "2129312", "2026-10-28", "15:30")] });
+    const r = await run(tools.avecFreeSlots, { remarcar_appointment_id: SECAGEM.id, auxiliar: "Simone" });
+    expect(calls.slice(2).map((c) => c.url.searchParams.get("professional_id"))).toEqual([
+      "430008",
+      "444099",
+      "444099",
+    ]);
+    expect(r.opcoes).toEqual([
+      expect.objectContaining({
+        opcao_id:
+          "corte_feminino_com_secagem:medio:430008-2128712-2026-10-28-1500+444099-2128749-2026-10-28-1500+444099-2129312-2026-10-28-1530",
+        tambem_com: "Simone",
+      }),
+    ]);
+  });
+});

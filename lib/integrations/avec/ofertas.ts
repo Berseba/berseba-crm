@@ -460,7 +460,7 @@ export function servicosAvulsos(salao: Salao): Set<string> {
 // ---------------------------------------------------------------------------
 
 /** What recognising a visit needs of one avec booking. */
-export interface Marcacao {
+export interface BookingLike {
   id: string;
   service_id: string;
   professional_id: string;
@@ -468,13 +468,13 @@ export interface Marcacao {
   start_time: string;
 }
 
-export interface VisitaReconhecida<T extends Marcacao> {
+export interface RecognizedVisit<T extends BookingLike> {
   oferta: Oferta;
   comprimento: Comprimento | null;
   principal: string;
   auxiliar?: string;
   /** Every booking of the visit, in the recipe's order. */
-  etapas: T[];
+  bookings: T[];
 }
 
 /**
@@ -483,47 +483,47 @@ export interface VisitaReconhecida<T extends Marcacao> {
  * one recipe (a second visit, a daughter on the same phone, a combo the team set up) is `null`,
  * and so is a day two recipes could explain: the team decides those.
  */
-export function visitaDoDia<T extends Marcacao>(
+export function recognizeVisit<T extends BookingLike>(
   salao: Salao,
-  dia: readonly T[],
-): VisitaReconhecida<T> | null {
-  if (!dia.length || dia.some((m) => m.date !== dia[0]!.date)) return null;
-  const achadas: VisitaReconhecida<T>[] = [];
+  day: readonly T[],
+): RecognizedVisit<T> | null {
+  if (!day.length || day.some((m) => m.date !== day[0]!.date)) return null;
+  const found: RecognizedVisit<T>[] = [];
   for (const oferta of salao.ofertas) {
     for (const { profissional: principal } of oferta.porProfissional) {
       for (const comprimento of oferta.comprimento ? COMPRIMENTOS : [null]) {
         const etapas = etapasDe(oferta, principal, comprimento);
-        if (!etapas || etapas.length !== dia.length) continue;
-        const encaixe = encaixar(salao, etapas, principal, dia);
-        if (encaixe) achadas.push({ oferta, comprimento, principal, ...encaixe });
+        if (!etapas || etapas.length !== day.length) continue;
+        const match = matchSteps(salao, etapas, principal, day);
+        if (match) found.push({ oferta, comprimento, principal, ...match });
       }
     }
   }
-  const leituras = new Set(achadas.map((v) => `${v.oferta.id}|${v.comprimento}|${v.principal}`));
-  return leituras.size === 1 ? achadas[0]! : null;
+  const readings = new Set(found.map((v) => `${v.oferta.id}|${v.comprimento}|${v.principal}`));
+  return readings.size === 1 ? found[0]! : null;
 }
 
 /** Each step of the recipe matched by exactly one booking; one helper for all helper steps. */
-function encaixar<T extends Marcacao>(
+function matchSteps<T extends BookingLike>(
   salao: Salao,
   etapas: EtapaResolvida[],
   principal: string,
-  dia: readonly T[],
-): { auxiliar?: string; etapas: T[] } | null {
-  const primeira = etapas[0]!;
-  if (primeira.papel !== "principal" || primeira.inicio !== 0) return null;
-  const inicios = dia.filter(
-    (m) => m.service_id === primeira.servico && m.professional_id === principal,
+  day: readonly T[],
+): { auxiliar?: string; bookings: T[] } | null {
+  const first = etapas[0]!;
+  if (first.papel !== "principal" || first.inicio !== 0) return null;
+  const starts = day.filter(
+    (m) => m.service_id === first.servico && m.professional_id === principal,
   );
-  if (inicios.length !== 1) return null;
-  const t0 = toMinutes(inicios[0]!.start_time);
-  const usadas = new Set<string>();
-  const out: T[] = [];
+  if (starts.length !== 1) return null;
+  const t0 = toMinutes(starts[0]!.start_time);
+  const used = new Set<string>();
+  const bookings: T[] = [];
   let auxiliar: string | undefined;
   for (const etapa of etapas) {
-    const candidatas = dia.filter(
+    const candidates = day.filter(
       (m) =>
-        !usadas.has(m.id) &&
+        !used.has(m.id) &&
         m.service_id === etapa.servico &&
         toMinutes(m.start_time) === t0 + etapa.inicio &&
         (etapa.papel === "principal"
@@ -531,13 +531,13 @@ function encaixar<T extends Marcacao>(
           : salao.auxiliares.includes(m.professional_id) &&
             (auxiliar === undefined || m.professional_id === auxiliar)),
     );
-    if (candidatas.length !== 1) return null;
-    const m = candidatas[0]!;
+    if (candidates.length !== 1) return null;
+    const m = candidates[0]!;
     if (etapa.papel === "auxiliar") auxiliar = m.professional_id;
-    usadas.add(m.id);
-    out.push(m);
+    used.add(m.id);
+    bookings.push(m);
   }
-  return { ...(auxiliar ? { auxiliar } : {}), etapas: out };
+  return { ...(auxiliar ? { auxiliar } : {}), bookings };
 }
 
 // ---------------------------------------------------------------------------

@@ -12,7 +12,7 @@ import {
   salaoDa,
   servicosAvulsos,
   validarOpcao,
-  visitaDoDia,
+  recognizeVisit,
   type Opcao,
 } from "./ofertas";
 
@@ -267,7 +267,7 @@ describe("depois_de and ate (Ruth's case: 'após as 17h' got 16h30)", () => {
   });
 });
 
-describe("visitaDoDia", () => {
+describe("recognizeVisit", () => {
   const m = (
     id: string,
     service_id: string,
@@ -287,20 +287,20 @@ describe("visitaDoDia", () => {
   const secagem = m("s", "2129312", "797917", "14:30");
 
   it("recognises the recipe all of a day's bookings make up, in the recipe's order", () => {
-    const v = visitaDoDia(salao, [secagem, lavagem, corte])!;
+    const v = recognizeVisit(salao, [secagem, lavagem, corte])!;
     expect(v.oferta.id).toBe("corte_feminino_com_secagem");
     expect(v.comprimento).toBe("medio");
     expect(v.principal).toBe("430008");
     expect(v.auxiliar).toBe("797917");
-    expect(v.etapas.map((e) => e.id)).toEqual(["c", "l", "s"]);
+    expect(v.bookings.map((e) => e.id)).toEqual(["c", "l", "s"]);
   });
 
   it("the shorter recipe when that is all there is (corte with its wash)", () => {
-    expect(visitaDoDia(salao, [corte, lavagem])?.oferta.id).toBe("corte_feminino");
+    expect(recognizeVisit(salao, [corte, lavagem])?.oferta.id).toBe("corte_feminino");
   });
 
   it("a principal who dries her own client (Eliton)", () => {
-    const v = visitaDoDia(salao, [
+    const v = recognizeVisit(salao, [
       m("c", "3238931", "447143", "09:00"),
       m("l", "2128749", "444091", "09:00"),
       m("s", "2129311", "447143", "09:30"),
@@ -310,21 +310,25 @@ describe("visitaDoDia", () => {
 
   it("is null when anything else is on the day, a step is missing or off its time, or two helpers split the steps", () => {
     const extra = m("x", "2129417", "447142", "17:00");
-    expect(visitaDoDia(salao, [corte, lavagem, secagem, extra])).toBeNull();
-    expect(visitaDoDia(salao, [corte, secagem])).toBeNull();
-    expect(visitaDoDia(salao, [corte, lavagem, { ...secagem, start_time: "15:00" }])).toBeNull();
+    expect(recognizeVisit(salao, [corte, lavagem, secagem, extra])).toBeNull();
+    expect(recognizeVisit(salao, [corte, secagem])).toBeNull();
+    expect(recognizeVisit(salao, [corte, lavagem, { ...secagem, start_time: "15:00" }])).toBeNull();
     expect(
-      visitaDoDia(salao, [corte, lavagem, { ...secagem, professional_id: "444091" }]),
+      recognizeVisit(salao, [corte, lavagem, { ...secagem, professional_id: "444091" }]),
     ).toBeNull();
-    expect(visitaDoDia(salao, [corte, lavagem, { ...secagem, date: "2026-10-28" }])).toBeNull();
-    expect(visitaDoDia(salao, [])).toBeNull();
+    expect(recognizeVisit(salao, [corte, lavagem, { ...secagem, date: "2026-10-28" }])).toBeNull();
+    expect(recognizeVisit(salao, [])).toBeNull();
   });
 
   it("is null when two bookings could be the same step (a daughter on the same phone)", () => {
-    expect(visitaDoDia(salao, [corte, lavagem, m("l2", "2128749", "444091", "14:00")])).toBeNull();
+    expect(
+      recognizeVisit(salao, [corte, lavagem, m("l2", "2128749", "444091", "14:00")]),
+    ).toBeNull();
   });
 
   it("a team-only combination (corte + tintura) is not a visit the agent knows", () => {
-    expect(visitaDoDia(salao, [corte, lavagem, m("t", "2181246", "430008", "14:30")])).toBeNull();
+    expect(
+      recognizeVisit(salao, [corte, lavagem, m("t", "2181246", "430008", "14:30")]),
+    ).toBeNull();
   });
 });

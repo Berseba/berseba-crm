@@ -67,11 +67,12 @@ export async function opcoesDoPedido(
   pedido: { servico: string; comprimento: Comprimento | null; profissional: string | null },
   from: string,
   to: string,
+  auxiliares: string[] = salao.auxiliares,
 ): Promise<Opcao[] | null> {
   const conferido = conferirPedido(salao, pedido);
   if (!conferido.ok) return null;
   const oferta = ofertaPorId(salao, pedido.servico)!;
-  const consultas = consultasPara(salao, oferta, conferido.principais, conferido.comprimento);
+  const consultas = consultasPara(salao, oferta, conferido.principais, conferido.comprimento, auxiliares);
   const slots = (
     await Promise.all(
       consultas.map((c) =>
@@ -79,7 +80,7 @@ export async function opcoesDoPedido(
       ),
     )
   ).flat();
-  return montarOpcoes(salao, oferta, conferido.principais, conferido.comprimento, slots).filter(
+  return montarOpcoes(salao, oferta, conferido.principais, conferido.comprimento, slots, auxiliares).filter(
     (o) => !oferta.semSabado || new Date(`${o.data}T12:00:00Z`).getUTCDay() !== 6,
   );
 }
