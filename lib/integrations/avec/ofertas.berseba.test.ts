@@ -12,6 +12,7 @@ import {
   salaoDa,
   servicosAvulsos,
   validarOpcao,
+  recognizeVisit,
   type Opcao,
 } from "./ofertas";
 
@@ -263,5 +264,71 @@ describe("depois_de and ate (Ruth's case: 'após as 17h' got 16h30)", () => {
   it("ate keeps only starts at or before the time", () => {
     const got = escolherOpcoes(base, { data: "2026-11-13", ate: "17:00" }, "2026-11-12");
     expect(got.map((o) => o.inicio).sort()).toEqual(["16:30", "17:00"]);
+  });
+});
+
+describe("recognizeVisit", () => {
+  const m = (
+    id: string,
+    service_id: string,
+    professional_id: string,
+    start_time: string,
+    date = "2026-10-27",
+  ) => ({
+    id,
+    service_id,
+    professional_id,
+    date,
+    start_time,
+  });
+  // Corte feminino com secagem, cabelo médio, with Mayara: Júlia washes at 14:00 and dries at 14:30.
+  const corte = m("c", "2128712", "430008", "14:00");
+  const lavagem = m("l", "2128749", "797917", "14:00");
+  const secagem = m("s", "2129312", "797917", "14:30");
+
+  it("recognises the recipe all of a day's bookings make up, in the recipe's order", () => {
+    const v = recognizeVisit(salao, [secagem, lavagem, corte])!;
+    expect(v.oferta.id).toBe("corte_feminino_com_secagem");
+    expect(v.comprimento).toBe("medio");
+    expect(v.principal).toBe("430008");
+    expect(v.auxiliar).toBe("797917");
+    expect(v.bookings.map((e) => e.id)).toEqual(["c", "l", "s"]);
+  });
+
+  it("the shorter recipe when that is all there is (corte with its wash)", () => {
+    expect(recognizeVisit(salao, [corte, lavagem])?.oferta.id).toBe("corte_feminino");
+  });
+
+  it("a principal who dries her own client (Eliton)", () => {
+    const v = recognizeVisit(salao, [
+      m("c", "3238931", "447143", "09:00"),
+      m("l", "2128749", "444091", "09:00"),
+      m("s", "2129311", "447143", "09:30"),
+    ]);
+    expect(v).toMatchObject({ principal: "447143", comprimento: "curto", auxiliar: "444091" });
+  });
+
+  it("is null when anything else is on the day, a step is missing or off its time, or two helpers split the steps", () => {
+    const extra = m("x", "2129417", "447142", "17:00");
+    expect(recognizeVisit(salao, [corte, lavagem, secagem, extra])).toBeNull();
+    expect(recognizeVisit(salao, [corte, secagem])).toBeNull();
+    expect(recognizeVisit(salao, [corte, lavagem, { ...secagem, start_time: "15:00" }])).toBeNull();
+    expect(
+      recognizeVisit(salao, [corte, lavagem, { ...secagem, professional_id: "444091" }]),
+    ).toBeNull();
+    expect(recognizeVisit(salao, [corte, lavagem, { ...secagem, date: "2026-10-28" }])).toBeNull();
+    expect(recognizeVisit(salao, [])).toBeNull();
+  });
+
+  it("is null when two bookings could be the same step (a daughter on the same phone)", () => {
+    expect(
+      recognizeVisit(salao, [corte, lavagem, m("l2", "2128749", "444091", "14:00")]),
+    ).toBeNull();
+  });
+
+  it("a team-only combination (corte + tintura) is not a visit the agent knows", () => {
+    expect(
+      recognizeVisit(salao, [corte, lavagem, m("t", "2181246", "430008", "14:30")]),
+    ).toBeNull();
   });
 });

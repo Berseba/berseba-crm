@@ -456,6 +456,91 @@ export function servicosAvulsos(salao: Salao): Set<string> {
 }
 
 // ---------------------------------------------------------------------------
+// a client's bookings of one day → the visit they make up
+// ---------------------------------------------------------------------------
+
+/** What recognising a visit needs of one avec booking. */
+export interface BookingLike {
+  id: string;
+  service_id: string;
+  professional_id: string;
+  date: string;
+  start_time: string;
+}
+
+export interface RecognizedVisit<T extends BookingLike> {
+  oferta: Oferta;
+  comprimento: Comprimento | null;
+  principal: string;
+  auxiliar?: string;
+  /** Every booking of the visit, in the recipe's order. */
+  bookings: T[];
+}
+
+/**
+ * The declared recipe that ALL of a client's bookings of one day make up (corte + lavagem +
+ * secagem), or `null`. The API hides who each booking is for, so a day with anything more than
+ * one recipe (a second visit, a daughter on the same phone, a combo the team set up) is `null`,
+ * and so is a day two recipes could explain: the team decides those.
+ */
+export function recognizeVisit<T extends BookingLike>(
+  salao: Salao,
+  day: readonly T[],
+): RecognizedVisit<T> | null {
+  if (!day.length || day.some((m) => m.date !== day[0]!.date)) return null;
+  const found: RecognizedVisit<T>[] = [];
+  for (const oferta of salao.ofertas) {
+    for (const { profissional: principal } of oferta.porProfissional) {
+      for (const comprimento of oferta.comprimento ? COMPRIMENTOS : [null]) {
+        const etapas = etapasDe(oferta, principal, comprimento);
+        if (!etapas || etapas.length !== day.length) continue;
+        const match = matchSteps(salao, etapas, principal, day);
+        if (match) found.push({ oferta, comprimento, principal, ...match });
+      }
+    }
+  }
+  const readings = new Set(found.map((v) => `${v.oferta.id}|${v.comprimento}|${v.principal}`));
+  return readings.size === 1 ? found[0]! : null;
+}
+
+/** Each step of the recipe matched by exactly one booking; one helper for all helper steps. */
+function matchSteps<T extends BookingLike>(
+  salao: Salao,
+  etapas: EtapaResolvida[],
+  principal: string,
+  day: readonly T[],
+): { auxiliar?: string; bookings: T[] } | null {
+  const first = etapas[0]!;
+  if (first.papel !== "principal" || first.inicio !== 0) return null;
+  const starts = day.filter(
+    (m) => m.service_id === first.servico && m.professional_id === principal,
+  );
+  if (starts.length !== 1) return null;
+  const t0 = toMinutes(starts[0]!.start_time);
+  const used = new Set<string>();
+  const bookings: T[] = [];
+  let auxiliar: string | undefined;
+  for (const etapa of etapas) {
+    const candidates = day.filter(
+      (m) =>
+        !used.has(m.id) &&
+        m.service_id === etapa.servico &&
+        toMinutes(m.start_time) === t0 + etapa.inicio &&
+        (etapa.papel === "principal"
+          ? m.professional_id === principal
+          : salao.auxiliares.includes(m.professional_id) &&
+            (auxiliar === undefined || m.professional_id === auxiliar)),
+    );
+    if (candidates.length !== 1) return null;
+    const m = candidates[0]!;
+    if (etapa.papel === "auxiliar") auxiliar = m.professional_id;
+    used.add(m.id);
+    bookings.push(m);
+  }
+  return { ...(auxiliar ? { auxiliar } : {}), bookings };
+}
+
+// ---------------------------------------------------------------------------
 // slots → visit options
 // ---------------------------------------------------------------------------
 

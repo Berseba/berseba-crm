@@ -97,6 +97,11 @@ function sameDay(...extra: Array<typeof APPOINTMENT>) {
   answer(200, { data: [APPOINTMENT, ...extra] });
 }
 
+/** `avec_my_appointments` reads 60 days in 14-day windows: answers the 4 windows after the first. */
+function restOfWindows() {
+  for (let i = 0; i < 4; i++) answer(200, { data: [] });
+}
+
 const SOBRANCELHA_OPCAO = "sobrancelha_design:-:447142-2129417-2026-10-27-1000";
 
 let calls: Call[] = [];
@@ -201,6 +206,7 @@ describe("gates", () => {
 
   it("takes the phone from the turn's contact, filtered by organization, never from the args", async () => {
     answer(200, { data: [] });
+    restOfWindows();
     const { ctx: c, filters } = ctx();
     await run(tools.avecMyAppointments, { phone: "+5511000000000" }, c);
     expect(filters).toEqual([
@@ -718,6 +724,7 @@ describe("status", () => {
         { ...APPOINTMENT, id: "x-2", status: "3", status_name: "Em Atendimento" },
       ],
     });
+    restOfWindows();
     const r = await run(tools.avecMyAppointments, {});
     expect(r.agendamentos).toMatchObject([
       { status: "Confirmado", can_change: true },
@@ -732,6 +739,7 @@ describe("weekday", () => {
     expect(tools.weekdayOf("2026-10-25")).toBe("domingo");
     expect(tools.weekdayOf("nope")).toBeNull();
     answer(200, { data: [APPOINTMENT] });
+    restOfWindows();
     const r = await run(tools.avecMyAppointments, {});
     expect((r.agendamentos as Array<{ weekday: string }>)[0]!.weekday).toBe("sexta-feira");
   });
@@ -815,5 +823,360 @@ describe("registration", () => {
     };
     expect(Object.keys(build(ORG)).sort()).toEqual([...names].sort());
     expect(Object.keys(build(OTHER_ORG))).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// avec_my_appointments: 60 days in 14-day windows
+// ---------------------------------------------------------------------------
+
+describe("avec_my_appointments window", () => {
+  it("reads 60 days ahead in consecutive windows of at most 14 days, one after the other", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-26T15:00:00Z"));
+    const later = { ...APPOINTMENT, id: "88123-2129417-447142-2026-12-30", date: "2026-12-30" };
+    const sooner = { ...APPOINTMENT, id: "88123-2129417-447142-2026-11-28", date: "2026-11-28" };
+    answer(200, { data: [sooner] });
+    answer(200, { data: [] });
+    answer(200, { data: [later] });
+    answer(200, { data: [] });
+    answer(200, { data: [] });
+    const r = await run(tools.avecMyAppointments, {});
+    expect(calls.map((c) => [c.url.searchParams.get("from"), c.url.searchParams.get("to")])).toEqual([
+      ["2026-11-26", "2026-12-09"],
+      ["2026-12-10", "2026-12-23"],
+      ["2026-12-24", "2027-01-06"],
+      ["2027-01-07", "2027-01-20"],
+      ["2027-01-21", "2027-01-24"],
+    ]);
+    expect(calls.every((c) => c.method === "GET" && c.url.searchParams.get("phone") === "+5514999990001")).toBe(true);
+    expect(r).toMatchObject({ ok: true, total: 2, periodo: { de: "26/11", ate: "24/01" } });
+    expect((r.agendamentos as Array<{ date: string }>).map((a) => a.date)).toEqual([
+      "2026-11-28",
+      "2026-12-30",
+    ]);
+  });
+
+  it("a range of the agent's is capped at 60 days, and a short one is one call", async () => {
+    for (let i = 0; i < 5; i++) answer(200, { data: [] });
+    await run(tools.avecMyAppointments, { from: "2026-12-01", to: "2027-06-01" });
+    expect(calls).toHaveLength(5);
+    expect(calls.at(-1)!.url.searchParams.get("to")).toBe("2027-01-29");
+  });
+
+  it("an inverted range is refused without calling avec", async () => {
+    const r = await run(tools.avecMyAppointments, { from: "2026-12-10", to: "2026-12-01" });
+    expect(r).toMatchObject({ ok: false, handoff: false });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("a window that fails hands off like any read", async () => {
+    answer(200, { data: [] });
+    problem(503, "avec_unavailable");
+    const r = await run(tools.avecMyAppointments, {});
+    expect(r).toMatchObject({ ok: false, code: "avec_unavailable", handoff: true });
+    expect(calls).toHaveLength(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// a visit of several bookings: corte feminino com secagem (cabelo médio) with Mayara
+// ---------------------------------------------------------------------------
+
+const CORTE = {
+  ...APPOINTMENT,
+  id: "88123-2128712-430008-2026-10-27",
+  service_id: "2128712",
+  service: "Corte Feminino",
+  professional_id: "430008",
+  professional: "Mayara Morales",
+  date: "2026-10-27",
+  start_time: "14:00",
+  end_time: "14:30",
+  starts_at: "2026-10-27T14:00:00-03:00",
+};
+const LAVAGEM = {
+  ...CORTE,
+  id: "88123-2128749-797917-2026-10-27",
+  service_id: "2128749",
+  service: "Lavagem Para Corte",
+  professional_id: "797917",
+  professional: "Júlia",
+};
+const SECAGEM = {
+  ...LAVAGEM,
+  id: "88123-2129312-797917-2026-10-27",
+  service_id: "2129312",
+  service: "Secagem Media",
+  start_time: "14:30",
+  end_time: "15:00",
+};
+const VISITA = [LAVAGEM, CORTE, SECAGEM]; // avec's order is not the recipe's
+
+/** The two reads every change starts with, for a booking of the three-step visit. */
+function visitDay(target: typeof CORTE = SECAGEM, day: Array<typeof CORTE> = VISITA) {
+  answer(200, target);
+  answer(200, { data: day });
+}
+
+const NOVA =
+  "corte_feminino_com_secagem:medio:430008-2128712-2026-10-28-1500+797917-2128749-2026-10-28-1500+797917-2129312-2026-10-28-1530";
+const NOVAS_SLOTS = NOVA.split(":")[2]!.split("+");
+
+/** avec-api's answer to `POST /v1/appointments` for one slot id. */
+function created(slotId: string) {
+  const [prof, service, y, m, d, hhmm] = slotId.split("-") as [string, string, string, string, string, string];
+  const date = `${y}-${m}-${d}`;
+  const start = `${hhmm.slice(0, 2)}:${hhmm.slice(2)}`;
+  return {
+    ...CORTE,
+    id: `88123-${service}-${prof}-${date}`,
+    service_id: service,
+    professional_id: prof,
+    date,
+    start_time: start,
+    end_time: start === "15:00" ? "15:30" : "16:00",
+  };
+}
+
+const posts = () => calls.filter((c) => c.method === "POST");
+
+describe("a visit of several bookings", () => {
+  it("avec_cancel cancels every booking of the visit, one /cancel and one key each", async () => {
+    visitDay();
+    for (const a of [CORTE, LAVAGEM, SECAGEM]) answer(200, { id: a.id, status: "cancelled" });
+    const r = await run(tools.avecCancel, { appointment_id: SECAGEM.id, reason: "Viagem" });
+    expect(posts().map((c) => c.url.pathname)).toEqual([
+      `/v1/appointments/${CORTE.id}/cancel`,
+      `/v1/appointments/${LAVAGEM.id}/cancel`,
+      `/v1/appointments/${SECAGEM.id}/cancel`,
+    ]);
+    expect(posts().every((c) => /^avec:job-1:avec_cancel:[0-9a-f]{16}$/.test(c.headers["Idempotency-Key"]!))).toBe(true);
+    expect(new Set(posts().map((c) => c.headers["Idempotency-Key"])).size).toBe(3);
+    expect(posts()[0]!.body).toEqual({ phone: "+5514999990001", reason: "Viagem" });
+    expect(r).toMatchObject({ ok: true, total: 3 });
+    expect(JSON.stringify(r)).not.toMatch(/Ana Teste|99999-0001|client_/);
+  });
+
+  it("avec_cancel that fails halfway still tries the rest and says exactly what is left", async () => {
+    visitDay();
+    answer(200, { id: CORTE.id, status: "cancelled" });
+    problem(502, "avec_error");
+    answer(200, { id: SECAGEM.id, status: "cancelled" });
+    const r = await run(tools.avecCancel, { appointment_id: CORTE.id });
+    expect(posts()).toHaveLength(3);
+    expect(r).toMatchObject({ ok: false, handoff: true, parcial: true });
+    expect(String(r.todo)).toMatch(/Cancelado no avec: Corte Feminino 27\/10 14:00 \(Mayara Morales\); Secagem Media 27\/10 14:30/);
+    expect(String(r.todo)).toMatch(/Falta cancelar: Lavagem Para Corte 27\/10 14:00 \(Júlia\)\./);
+  });
+
+  it("avec_cancel where nothing was cancelled answers like a one-service cancel", async () => {
+    visitDay();
+    for (let i = 0; i < 3; i++) problem(422, "not_allowed");
+    const r = await run(tools.avecCancel, { appointment_id: CORTE.id });
+    expect(r).toMatchObject({ ok: false, code: "not_allowed", handoff: true });
+    expect(r.parcial).toBeUndefined();
+  });
+
+  it("a day that is more than one recipe stays with the team", async () => {
+    const outra = { ...APPOINTMENT, id: "88123-2129417-447142-2026-10-27", date: "2026-10-27", start_time: "17:00" };
+    visitDay(CORTE, [...VISITA, outra]);
+    const r = await run(tools.avecCancel, { appointment_id: CORTE.id });
+    expect(r).toMatchObject({ ok: false, motivo: "visita_com_varios_servicos", handoff: true });
+    expect(String(r.todo)).toMatch(/4 serviços/);
+    expect(posts()).toHaveLength(0);
+  });
+
+  it("a visit with a booking already in progress cannot change", async () => {
+    visitDay(CORTE, [LAVAGEM, CORTE, { ...SECAGEM, status: "3" }]);
+    const r = await run(tools.avecCancel, { appointment_id: CORTE.id });
+    expect(r).toMatchObject({ ok: false, motivo: "not_allowed", handoff: true });
+    expect(posts()).toHaveLength(0);
+  });
+
+  it("avec_free_slots for a reschedule searches the whole visit by its recipe, never the same day", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-22T15:00:00Z"));
+    visitDay();
+    answer(200, {
+      data: [slot("430008", "2128712", "2026-10-28", "15:00"), slot("430008", "2128712", "2026-10-27", "16:00")],
+    });
+    answer(200, {
+      data: [slot("797917", "2128749", "2026-10-28", "15:00"), slot("797917", "2128749", "2026-10-27", "16:00")],
+    });
+    answer(200, {
+      data: [slot("797917", "2129312", "2026-10-28", "15:30"), slot("797917", "2129312", "2026-10-27", "16:30")],
+    });
+    const r = await run(tools.avecFreeSlots, { remarcar_appointment_id: SECAGEM.id });
+    const searched = calls.slice(2).map((c) => [c.url.searchParams.get("service_id"), c.url.searchParams.get("professional_id")]);
+    expect(searched).toEqual([
+      ["2128712", "430008"],
+      ["2128749", null],
+      ["2129312", null],
+    ]);
+    expect(r.opcoes).toEqual([
+      expect.objectContaining({ opcao_id: NOVA, data_br: "28/10", inicio: "15:00", profissional: "Mayara Morales" }),
+    ]);
+  });
+
+  it("avec_free_slots for the same day of a visit goes to the team", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-22T15:00:00Z"));
+    visitDay();
+    const r = await run(tools.avecFreeSlots, { remarcar_appointment_id: CORTE.id, data: "2026-10-27" });
+    expect(r).toMatchObject({ ok: false, motivo: "mesmo_dia_com_a_equipe", handoff: true });
+    expect(calls).toHaveLength(2);
+  });
+
+  it("avec_reschedule books the new visit first, then cancels the old bookings", async () => {
+    visitDay();
+    for (const s of NOVAS_SLOTS) answer(201, created(s));
+    for (const a of [CORTE, LAVAGEM, SECAGEM]) answer(200, { id: a.id, status: "cancelled" });
+    const r = await run(tools.avecReschedule, { appointment_id: SECAGEM.id, opcao_id: NOVA });
+    const writes = posts();
+    expect(writes.map((c) => c.url.pathname)).toEqual([
+      "/v1/appointments",
+      "/v1/appointments",
+      "/v1/appointments",
+      `/v1/appointments/${CORTE.id}/cancel`,
+      `/v1/appointments/${LAVAGEM.id}/cancel`,
+      `/v1/appointments/${SECAGEM.id}/cancel`,
+    ]);
+    expect(writes.slice(0, 3).map((c) => (c.body as { slot_id: string }).slot_id)).toEqual(NOVAS_SLOTS);
+    expect(writes.every((c) => /^avec:job-1:avec_reschedule:[0-9a-f]{16}$/.test(c.headers["Idempotency-Key"]!))).toBe(true);
+    expect(new Set(writes.map((c) => c.headers["Idempotency-Key"])).size).toBe(6);
+    expect((writes[0]!.body as { note?: string }).note).toMatch(/era 27\/10 às 14:00/);
+    expect(r).toMatchObject({
+      ok: true,
+      agendamento: { data_br: "28/10", inicio: "15:00", profissional: "Mayara Morales" },
+    });
+    expect(r.handoff).toBeUndefined();
+    expect(JSON.stringify(r)).not.toMatch(/Ana Teste|99999-0001|client_/);
+  });
+
+  it("avec_reschedule that cannot book the first step leaves the old visit untouched", async () => {
+    visitDay();
+    problem(409, "slot_unavailable");
+    const r = await run(tools.avecReschedule, { appointment_id: CORTE.id, opcao_id: NOVA });
+    expect(posts()).toHaveLength(1);
+    expect(r).toMatchObject({ ok: false, code: "slot_unavailable", handoff: false, visita_antiga_mantida: true });
+  });
+
+  it("avec_reschedule that books the new visit in part cancels nothing and hands off", async () => {
+    visitDay();
+    answer(201, created(NOVAS_SLOTS[0]!));
+    problem(502, "avec_write_unconfirmed");
+    const r = await run(tools.avecReschedule, { appointment_id: CORTE.id, opcao_id: NOVA });
+    expect(posts()).toHaveLength(2);
+    expect(posts().some((c) => c.url.pathname.endsWith("/cancel"))).toBe(false);
+    expect(r).toMatchObject({ ok: false, handoff: true, parcial: true, visita_antiga_mantida: true });
+    expect(String(r.mensagem)).toMatch(/continua valendo o horário de 27\/10 às 14:00/);
+    expect(String(r.todo)).toMatch(/A visita antiga continua marcada no avec: Corte Feminino 27\/10 14:00/);
+    expect(String(r.todo)).toMatch(/Da visita nova ficou marcado: Corte Feminino 28\/10 15:00/);
+    expect(String(r.todo)).toMatch(/Falta marcar a etapa 2 .* às 15:00 \(Júlia\), que pode já ter entrado/);
+  });
+
+  it("avec_reschedule whose old visit is cancelled in part confirms the new one and hands off the rest", async () => {
+    visitDay();
+    for (const s of NOVAS_SLOTS) answer(201, created(s));
+    answer(200, { id: CORTE.id, status: "cancelled" });
+    answer(200, { id: LAVAGEM.id, status: "cancelled" });
+    problem(502, "avec_error");
+    const r = await run(tools.avecReschedule, { appointment_id: CORTE.id, opcao_id: NOVA });
+    expect(r).toMatchObject({ ok: true, handoff: true, visita_antiga_cancelada_em_parte: true });
+    expect(String(r.mensagem)).toMatch(/confirme o novo horário/);
+    expect(String(r.todo)).toMatch(/Cancelar no avec o que sobrou da antiga: Secagem Media 27\/10 14:30 \(Júlia\)\./);
+  });
+
+  it("avec_reschedule refuses an option of another recipe, a one-service option, or the same day", async () => {
+    const eliton =
+      "corte_feminino_com_secagem:medio:447143-3238931-2026-10-28-1500+797917-2128749-2026-10-28-1500+447143-2129312-2026-10-28-1530";
+    const mesmoDia =
+      "corte_feminino_com_secagem:medio:430008-2128712-2026-10-27-1600+797917-2128749-2026-10-27-1600+797917-2129312-2026-10-27-1630";
+    for (const opcao_id of [eliton, "remarcar:-:430008-2128712-2026-10-28-1500"]) {
+      visitDay();
+      expect(await run(tools.avecReschedule, { appointment_id: CORTE.id, opcao_id }), opcao_id).toMatchObject({
+        ok: false,
+        handoff: false,
+      });
+    }
+    visitDay();
+    expect(await run(tools.avecReschedule, { appointment_id: CORTE.id, opcao_id: mesmoDia })).toMatchObject({
+      ok: false,
+      motivo: "mesmo_dia_com_a_equipe",
+      handoff: true,
+    });
+    expect(posts()).toHaveLength(0);
+  });
+
+  it("a malformed opcao_id is refused before any call", async () => {
+    const r = await run(tools.avecReschedule, { appointment_id: CORTE.id, opcao_id: "corte:medio:x" });
+    expect(r).toMatchObject({ ok: false, handoff: false });
+    expect(calls).toHaveLength(0);
+  });
+});
+
+describe("review fixes (PR #169)", () => {
+  it("a whole-visit cancel where nothing is confirmed hands off when one cancel may have gone through", async () => {
+    visitDay();
+    problem(409, "idempotency_in_flight");
+    const timeout = new Error("aborted");
+    timeout.name = "TimeoutError";
+    answers.push(timeout);
+    problem(422, "not_allowed");
+    const r = await run(tools.avecCancel, { appointment_id: CORTE.id });
+    expect(r).toMatchObject({ ok: false, code: "timeout", handoff: true });
+    expect(String(r.todo)).toMatch(/Conferir no avec/);
+  });
+
+  it("a booking already gone from avec (not_found) counts as cancelled, not as left over", async () => {
+    visitDay();
+    answer(200, { id: CORTE.id, status: "cancelled" });
+    problem(404, "not_found");
+    answer(200, { id: SECAGEM.id, status: "cancelled" });
+    const r = await run(tools.avecCancel, { appointment_id: CORTE.id });
+    expect(r).toMatchObject({ ok: true, total: 3 });
+  });
+
+  it("a move refused with already_booked keeps the old visit and asks for another day", async () => {
+    visitDay();
+    problem(409, "already_booked");
+    const r = await run(tools.avecReschedule, { appointment_id: CORTE.id, opcao_id: NOVA });
+    expect(r).toMatchObject({ ok: false, code: "already_booked", handoff: false, visita_antiga_mantida: true });
+    expect(String(r.mensagem)).toMatch(/outro dia/);
+    expect(posts()).toHaveLength(1);
+  });
+
+  it("only an end date in the past reads the two weeks before it", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-11-26T15:00:00Z"));
+    answer(200, { data: [] });
+    const r = await run(tools.avecMyAppointments, { to: "2026-11-20" });
+    expect(r).toMatchObject({ ok: true });
+    expect(calls.map((c) => [c.url.searchParams.get("from"), c.url.searchParams.get("to")])).toEqual([
+      ["2026-11-07", "2026-11-20"],
+    ]);
+  });
+
+  it("a whole-visit search honours the helper the client asked for", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-22T15:00:00Z"));
+    visitDay();
+    answer(200, { data: [slot("430008", "2128712", "2026-10-28", "15:00")] });
+    answer(200, { data: [slot("444099", "2128749", "2026-10-28", "15:00")] });
+    answer(200, { data: [slot("444099", "2129312", "2026-10-28", "15:30")] });
+    const r = await run(tools.avecFreeSlots, { remarcar_appointment_id: SECAGEM.id, auxiliar: "Simone" });
+    expect(calls.slice(2).map((c) => c.url.searchParams.get("professional_id"))).toEqual([
+      "430008",
+      "444099",
+      "444099",
+    ]);
+    expect(r.opcoes).toEqual([
+      expect.objectContaining({
+        opcao_id:
+          "corte_feminino_com_secagem:medio:430008-2128712-2026-10-28-1500+444099-2128749-2026-10-28-1500+444099-2129312-2026-10-28-1530",
+        tambem_com: "Simone",
+      }),
+    ]);
   });
 });
