@@ -1,3 +1,4 @@
+-- manifest: Berseba — berseba_trocar_modelo('old','new') moves org defaults, purpose bindings, published agents and credentials to the new model in one call and retires the old one
 -- 9448 — Berseba: trocar um modelo de IA por outro em tudo, numa chamada só.
 --
 -- Matheus, 26 Nov 2026: "o ideal é ir sempre para o modelo de menor custo e o que mais entrega, e

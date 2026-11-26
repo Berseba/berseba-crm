@@ -1,3 +1,4 @@
+-- manifest: Berseba — a model retired for cost (berseba_modelos_aposentados) and its variants keep deprecated_at even when the sync-model-catalog cron sees them at the source; first entry gpt-5.6-luna
 -- 9447 — Berseba: um modelo aposentado não volta pelo cron do catálogo.
 -- sync-model-catalog ressuscita (deprecated_at = null) todo modelo que reaparece na origem. Um
 -- modelo que a Berseba aposentou por custo (regra de 25 Nov 2026: sempre o modelo de menor custo que
