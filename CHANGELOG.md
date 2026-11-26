@@ -8,6 +8,12 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.23.3] — 2026-11-26
+
+### Corrigido
+
+- **A IA do salão remarca e cancela a visita inteira e vê 60 dias de agendamentos** Uma visita de várias etapas no avec (por exemplo, lavagem, corte e secagem no mesmo dia) ia sempre para a equipe quando a cliente pedia para remarcar ou cancelar. Agora a IA cancela todas as etapas da visita, e remarca a visita inteira: marca primeiro o novo horário e só depois cancela o antigo. Se algo falhar no meio, ela passa para a equipe dizendo exatamente o que ficou no avec. Mudar o horário dentro do mesmo dia continua com a equipe. A consulta dos agendamentos da cliente passou de 14 para 60 dias à frente.
+
 ## [2.23.2] — 2026-11-26
 
 ### Corrigido
@@ -9824,7 +9830,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.23.2...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.23.3...HEAD
+[2.23.3]: https://github.com/berseba/berseba-crm/compare/v2.23.2...v2.23.3
 [2.23.2]: https://github.com/berseba/berseba-crm/compare/v2.23.1...v2.23.2
 [2.23.1]: https://github.com/berseba/berseba-crm/compare/v2.23.0...v2.23.1
 [2.23.0]: https://github.com/berseba/berseba-crm/compare/v2.22.0...v2.23.0
