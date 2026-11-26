@@ -8,6 +8,12 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [2.23.2] — 2026-11-26
+
+### Corrigido
+
+- **Lista de espera do salão aparece na página do CRM** O cartão **Lista de espera do salão** não aparecia em **Ver tudo em CRM**: a tela só abria pelo endereço direto. Agora aparece ali para as organizações que usam o avec, como no menu.
+
 ## [2.23.1] — 2026-11-22
 
 ### Corrigido
@@ -9818,7 +9824,8 @@ Primeira versão marcada do DeskcommCRM. O projeto vinha sendo desenvolvido publ
 
 - **Node 22 é obrigatório para desenvolvimento.** A suíte de invariantes instancia o cliente do Supabase, que exige o `WebSocket` global — nativo apenas a partir do Node 22. Isso não afeta quem apenas hospeda: a VPS roda a imagem pronta.
 
-[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.23.1...HEAD
+[Não lançado]: https://github.com/berseba/berseba-crm/compare/v2.23.2...HEAD
+[2.23.2]: https://github.com/berseba/berseba-crm/compare/v2.23.1...v2.23.2
 [2.23.1]: https://github.com/berseba/berseba-crm/compare/v2.23.0...v2.23.1
 [2.23.0]: https://github.com/berseba/berseba-crm/compare/v2.22.0...v2.23.0
 [2.22.0]: https://github.com/berseba/berseba-crm/compare/v2.21.0...v2.22.0
