@@ -10,7 +10,7 @@ vi.mock("@/lib/env", () => ({
   },
 }));
 
-const { avecConfigFor, isAvecToolHiddenFor, parseAvecConfig } = await import("./config");
+const { avecConfigFor, capacidadesDoAvec, isAvecToolHiddenFor, parseAvecConfig } = await import("./config");
 
 describe("parseAvecConfig", () => {
   it("is off unless URL, key and at least one organization are set", () => {
@@ -35,6 +35,11 @@ describe("the install-level gate", () => {
   it("enables only the listed organization", () => {
     expect(avecConfigFor(ORG)?.baseUrl).toBe("http://mayara-avec-api:8000");
     expect(avecConfigFor("99999999-9999-4999-8999-999999999999")).toBeNull();
+  });
+
+  it("opens the salon waitlist door only for the listed organization", () => {
+    expect(capacidadesDoAvec(ORG)).toEqual(["lista_de_espera_avec"]);
+    expect(capacidadesDoAvec("99999999-9999-4999-8999-999999999999")).toEqual([]);
   });
 
   it("hides only avec tools, and only from other organizations", () => {
