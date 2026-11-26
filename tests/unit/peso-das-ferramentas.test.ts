@@ -43,6 +43,8 @@ const EDITAR_ASSISTENTES = "editar assistentes (só admin, por aplicativo conect
 
 // Berseba: baseline of our agenda tools, measured in the v1.102.0 sync (2026-11-05).
 const BERSEBA = "linha de base Berseba, medida no sync da v1.102.0 (2026-11-05)";
+const BERSEBA_VISITA =
+  "Berseba 2026-11-26: Maya remarca e cancela a visita inteira (lavagem, corte e secagem) e vê 60 dias de agendamentos";
 const BERSEBA_ATOS =
   "linha de base Berseba das ferramentas do Atos, com a gravação na agenda e o campo pregnant (2026-11-12)";
 
@@ -52,16 +54,16 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
   // tools (salon Mayara Morales), the Mirae tools (Fiore Pilates) and the Atos
   // tools (RBCOR) only reach the organization that has them configured, but the
   // catalog counts them all.
-  avec_my_appointments: { tokens: 206, motivo: BERSEBA },
+  avec_my_appointments: { tokens: 224, motivo: BERSEBA_VISITA },
   avec_find_services: { tokens: 142, motivo: BERSEBA },
   avec_free_slots: {
-    tokens: 601,
+    tokens: 602,
     motivo:
-      'Berseba 2026-11-13: filtros depois_de/ate ("depois das 17h" recebia 16h30); exemplo com nome de profissional saiu',
+      'Berseba 2026-11-13: filtros depois_de/ate ("depois das 17h" recebia 16h30); exemplo com nome de profissional saiu. 2026-11-26: +1, remarcar busca a visita inteira',
   },
   avec_book: { tokens: 252, motivo: BERSEBA },
-  avec_reschedule: { tokens: 170, motivo: BERSEBA },
-  avec_cancel: { tokens: 175, motivo: BERSEBA },
+  avec_reschedule: { tokens: 180, motivo: BERSEBA_VISITA },
+  avec_cancel: { tokens: 184, motivo: BERSEBA_VISITA },
   avec_confirm: { tokens: 136, motivo: BERSEBA },
   avec_waitlist: { tokens: 520, motivo: BERSEBA },
   mirae_my_appointments: { tokens: 320, motivo: BERSEBA },
@@ -285,7 +287,9 @@ const TETO: Readonly<Record<string, { tokens: number; motivo: string }>> = {
 // MEDIDO no merge com a main de 20/11: 45919 = 45880 + 39 (2026-11-20), não somado à mão.
 // Berseba: upstream 45919 + 6691 of ours (avec, Mirae, Atos agenda tools and
 // Berseba/berseba#270), carried over from the v1.118.0 sync (47366 - 40675).
-const TETO_TOTAL = 52610;
+// Berseba 2026-11-26: +38 from the avec tools moving and cancelling a whole visit and reading
+// 60 days of appointments. MEASURED: 52648 = 52610 + 38, not added by hand.
+const TETO_TOTAL = 52648;
 
 const VARIANTE = "schedule_followup (com negócio)";
 

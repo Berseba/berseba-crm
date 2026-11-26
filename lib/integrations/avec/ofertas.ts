@@ -456,6 +456,91 @@ export function servicosAvulsos(salao: Salao): Set<string> {
 }
 
 // ---------------------------------------------------------------------------
+// a client's bookings of one day → the visit they make up
+// ---------------------------------------------------------------------------
+
+/** What recognising a visit needs of one avec booking. */
+export interface Marcacao {
+  id: string;
+  service_id: string;
+  professional_id: string;
+  date: string;
+  start_time: string;
+}
+
+export interface VisitaReconhecida<T extends Marcacao> {
+  oferta: Oferta;
+  comprimento: Comprimento | null;
+  principal: string;
+  auxiliar?: string;
+  /** Every booking of the visit, in the recipe's order. */
+  etapas: T[];
+}
+
+/**
+ * The declared recipe that ALL of a client's bookings of one day make up (corte + lavagem +
+ * secagem), or `null`. The API hides who each booking is for, so a day with anything more than
+ * one recipe (a second visit, a daughter on the same phone, a combo the team set up) is `null`,
+ * and so is a day two recipes could explain: the team decides those.
+ */
+export function visitaDoDia<T extends Marcacao>(
+  salao: Salao,
+  dia: readonly T[],
+): VisitaReconhecida<T> | null {
+  if (!dia.length || dia.some((m) => m.date !== dia[0]!.date)) return null;
+  const achadas: VisitaReconhecida<T>[] = [];
+  for (const oferta of salao.ofertas) {
+    for (const { profissional: principal } of oferta.porProfissional) {
+      for (const comprimento of oferta.comprimento ? COMPRIMENTOS : [null]) {
+        const etapas = etapasDe(oferta, principal, comprimento);
+        if (!etapas || etapas.length !== dia.length) continue;
+        const encaixe = encaixar(salao, etapas, principal, dia);
+        if (encaixe) achadas.push({ oferta, comprimento, principal, ...encaixe });
+      }
+    }
+  }
+  const leituras = new Set(achadas.map((v) => `${v.oferta.id}|${v.comprimento}|${v.principal}`));
+  return leituras.size === 1 ? achadas[0]! : null;
+}
+
+/** Each step of the recipe matched by exactly one booking; one helper for all helper steps. */
+function encaixar<T extends Marcacao>(
+  salao: Salao,
+  etapas: EtapaResolvida[],
+  principal: string,
+  dia: readonly T[],
+): { auxiliar?: string; etapas: T[] } | null {
+  const primeira = etapas[0]!;
+  if (primeira.papel !== "principal" || primeira.inicio !== 0) return null;
+  const inicios = dia.filter(
+    (m) => m.service_id === primeira.servico && m.professional_id === principal,
+  );
+  if (inicios.length !== 1) return null;
+  const t0 = toMinutes(inicios[0]!.start_time);
+  const usadas = new Set<string>();
+  const out: T[] = [];
+  let auxiliar: string | undefined;
+  for (const etapa of etapas) {
+    const candidatas = dia.filter(
+      (m) =>
+        !usadas.has(m.id) &&
+        m.service_id === etapa.servico &&
+        toMinutes(m.start_time) === t0 + etapa.inicio &&
+        (etapa.papel === "principal"
+          ? m.professional_id === principal
+          : salao.auxiliares.includes(m.professional_id) &&
+            (auxiliar === undefined || m.professional_id === auxiliar)),
+    );
+    if (candidatas.length !== 1) return null;
+    const m = candidatas[0]!;
+    if (etapa.papel === "auxiliar") auxiliar = m.professional_id;
+    usadas.add(m.id);
+    out.push(m);
+  }
+  return { ...(auxiliar ? { auxiliar } : {}), etapas: out };
+}
+
+// ---------------------------------------------------------------------------
 // slots → visit options
 // ---------------------------------------------------------------------------
 

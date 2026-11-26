@@ -155,6 +155,36 @@ export async function listAppointments(
   ).data;
 }
 
+/** `GET /v1/appointments` refuses a longer range with a 422 (avec-api `max_range_days`). */
+export const AVEC_MAX_RANGE_DAYS = 14;
+
+const plusDays = (date: string, days: number) =>
+  new Date(Date.parse(`${date}T12:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * The client's appointments from `from` to `to` (inclusive, `YYYY-MM-DD`), any length: one call
+ * per 14-day window, one after the other. Each call already reads its days in parallel inside
+ * avec-api, so parallel windows would only multiply the load on avec.
+ */
+export async function listAppointmentsRange(
+  config: AvecConfig,
+  params: { phone: string; from: string; to: string },
+): Promise<AvecAppointment[]> {
+  const found = new Map<string, AvecAppointment>();
+  for (let start = params.from; start <= params.to; start = plusDays(start, AVEC_MAX_RANGE_DAYS)) {
+    const end = plusDays(start, AVEC_MAX_RANGE_DAYS - 1);
+    const window = await listAppointments(config, {
+      phone: params.phone,
+      from: start,
+      to: end < params.to ? end : params.to,
+    });
+    for (const a of window) found.set(a.id, a);
+  }
+  return [...found.values()].sort(
+    (a, b) => a.date.localeCompare(b.date) || a.start_time.localeCompare(b.start_time),
+  );
+}
+
 export async function getAppointment(
   config: AvecConfig,
   params: { id: string; phone: string },
