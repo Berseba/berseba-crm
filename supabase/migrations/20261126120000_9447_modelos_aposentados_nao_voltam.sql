@@ -48,3 +48,6 @@ create trigger trg_berseba_aposentado_nao_volta
 insert into public.berseba_modelos_aposentados (model_id, motivo)
 values ('gpt-5.6-luna', 'Matheus, 25 Nov 2026: custava o dobro do gpt-6-luna e era 84% do gasto de IA do CRM')
 on conflict (model_id) do nothing;
+
+update public.ai_models set deprecated_at = now()
+ where public.berseba_modelo_aposentado(model_id) and deprecated_at is null;
