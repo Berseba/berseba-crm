@@ -23807,6 +23807,18 @@ comment on table public.gmail_skipped_messages is
 comment on table public.gmail_messages is
   'Berseba (migration 9010): e-mails read from a connected Gmail, linked to the contact by the counterpart address. Server-only. Deleted when the contact is anonymized.';
 
+-- ---- e-mail to funnel (migration 9012) ----
+-- Berseba. Right after the 9010 table it alters, not at the end of the file.
+alter table public.gmail_messages
+  add column if not exists funil_em timestamptz;
+
+create index if not exists idx_gmail_messages_sem_funil
+  on public.gmail_messages (organization_id, sent_at)
+  where funil_em is null;
+
+comment on column public.gmail_messages.funil_em is
+  'Berseba (migration 9012): when this e-mail was taken to the contact and the deal timeline; null = not yet.';
+
 -- ---- meeting proposals (migration 9011) ----
 -- Berseba. Right after our 9010 block, not at the end of the file (upstream appends there); the
 -- support-lock sweep further down covers this table, as for 9007 and 9010.

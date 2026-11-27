@@ -66,6 +66,7 @@ export const DICIONARIO: Traducoes = {
   "Enviado de": { es: "Enviado desde" },
   "Abrir no Gmail": { es: "Abrir en Gmail" },
   "Lendo": { es: "Leyendo" },
+  "E-mail recebido": { es: "Correo recibido" },
   "Reunião criada na agenda. Ela vai para o seu Google Agenda em até 5 minutos.": { es: "Reunión creada en la agenda. Llega a tu Google Calendar en hasta 5 minutos." },
   "Proposta descartada.": { es: "Propuesta descartada." },
   "Essa proposta não tem horário: combine com o cliente e marque na Agenda.": { es: "Esta propuesta no tiene horario: acuérdalo con el cliente y agéndalo en la Agenda." },
