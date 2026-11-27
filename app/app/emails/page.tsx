@@ -4,6 +4,7 @@ import { notFound, redirect } from "next/navigation";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { tagDeIdioma } from "@/lib/i18n/datas";
+import { duracaoCurta, minutosDeEspera } from "@/lib/operacao/regras";
 import { traduzir } from "@/lib/i18n/dicionario";
 import { gmailIntakeConfigFor } from "@/lib/integrations/gmail/config";
 import { linkDoGmail } from "@/lib/integrations/gmail/message";
@@ -64,7 +65,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
   const params = await searchParams;
   const tag = tagDeIdioma(user.idioma);
 
-  const { caixas, conversas, nomes, negocios } = await lerTelaDeEmails(org.orgId, new Date());
+  const agora = new Date();
+  const { caixas, conversas, fila, nomes, negocios } = await lerTelaDeEmails(org.orgId, agora);
   const contaDaCaixa = new Map(caixas.map((c) => [c.id, c.account_email]));
   const minhas = caixas.filter((c) => c.user_id === user.id);
   const minha = minhas.find((c) => c.status === "healthy") ?? minhas[0];
@@ -89,6 +91,54 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
         </p>
       ) : null}
       {params.ok ? <p className="rounded-md border border-border bg-surface px-3 py-2 text-sm">{t("Gmail conectado. Os e-mails chegam em até 5 minutos.")}</p> : null}
+
+      <section className="min-w-0">
+        <h2 className="mb-1 text-sm font-semibold">
+          {t("Precisa responder")} <span className="text-text-muted">({fila.length})</span>
+        </h2>
+        <p className="mb-2 text-xs text-text-muted">
+          {t("E-mails em que o cliente escreveu por último e ninguém respondeu, e conversas de WhatsApp esperando uma pessoa. A mais antiga primeiro.")}
+        </p>
+        {fila.length === 0 ? <p className="text-sm text-text-muted">{t("Ninguém esperando resposta.")}</p> : null}
+        <ul className="divide-y divide-border rounded-lg border border-border">
+          {fila.map((item) => {
+            const nome = (item.contact_id && nomes.get(item.contact_id)) || item.nome;
+            const negocio = item.contact_id ? negocios.get(item.contact_id) : undefined;
+            const conta = item.canal === "email" ? (contaDaCaixa.get(item.mailbox_id) ?? "") : "";
+            return (
+              <li key={item.chave} className="space-y-1 p-3">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="min-w-0 truncate text-sm font-medium">{nome}</span>
+                  <span className="shrink-0 text-xs text-text-muted">
+                    {t("espera há")} {duracaoCurta(minutosDeEspera(item.desde, agora))}
+                  </span>
+                </div>
+                {item.canal === "email" ? <p className="truncate text-sm">{item.assunto}</p> : null}
+                {item.trecho ? <p className="line-clamp-2 text-xs text-text-muted">{item.trecho}</p> : null}
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs">
+                  <span className="rounded-full border border-border px-2 py-0.5 text-text-muted">
+                    {item.canal === "email" ? t("E-mail") : t("WhatsApp")}
+                  </span>
+                  {item.contact_id ? (
+                    <Link href={`/app/contacts/${item.contact_id}`} className="underline">{t("Contato")}</Link>
+                  ) : (
+                    <span className="text-text-muted">{t("Sem contato")}</span>
+                  )}
+                  {negocio ? <Link href={`/app/leads/${negocio}`} className="underline">{t("Negócio")}</Link> : null}
+                  {item.canal === "email" && conta ? (
+                    <a href={linkDoGmail(conta, item.gmail_thread_id)} target="_blank" rel="noreferrer" className="underline">
+                      {t("Responder no Gmail")}
+                    </a>
+                  ) : null}
+                  {item.canal === "whatsapp" ? (
+                    <Link href={`/app/inbox/${item.conversation_id}`} className="underline">{t("Abrir conversa")}</Link>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
+        </ul>
+      </section>
 
       <section className="space-y-2 rounded-lg border border-border p-4">
         <h2 className="text-sm font-semibold">{t("Caixas conectadas")}</h2>
