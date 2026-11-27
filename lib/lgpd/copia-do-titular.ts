@@ -67,6 +67,9 @@ export const SECOES_DA_EQUIPE = {
  * `CAMPOS_DA_EQUIPE` vai sem eles.
  */
 export const O_QUE_FICA = {
+  // Berseba (migration 9010).
+  gmail_messages:
+    "os e-mails trocados com ele que o CRM leu do Gmail dos sócios: remetente, destinatários, assunto, texto e data",
   // Berseba (migration 9007).
   avec_waitlist:
     "a inscrição dela na lista de espera do salão: o serviço e os dias que pediu, a vaga que recebeu, o que foi marcado e a observação da recepção que a anonimização apaga",

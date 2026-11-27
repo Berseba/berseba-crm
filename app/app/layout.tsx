@@ -29,6 +29,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { modulosLigados } from "@/lib/instalacao/modulos";
 import { capacidadesDoAvec } from "@/lib/integrations/avec/config";
+import { capacidadesDoGmail } from "@/lib/integrations/gmail/config";
 import { capacidadesLigadas } from "@/lib/organizacao/capacidades";
 import { modulosNaTela } from "@/lib/extensions/modulos-na-tela";
 import { telefoniaEmUso } from "@/lib/telefonia/em-uso";
@@ -210,6 +211,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         ...capacidadesLigadas(orgRow?.settings, modulos, telefonia),
         // Berseba: the avec salon's waitlist door, for organizations that use avec.
         ...capacidadesDoAvec(activeOrg.orgId),
+        // Berseba: the partners' e-mail screen, for organizations in GMAIL_INTAKE_ORG_IDS.
+        ...capacidadesDoGmail(activeOrg.orgId),
       ],
       // Só slug e título descem ao navegador; o endereço do serviço fica no servidor.
       modulos_conectados: conectados.map((m) => ({ slug: m.slug, titulo: m.titulo })),

@@ -200,6 +200,10 @@ CRONS="
 # a fila. Só organizações em AVEC_API_ORG_IDS com a lista ligada; as outras não
 # fazem consulta nenhuma. Até 120 s porque cada inscrição consulta o avec.
 */10 * * * *|120|api/v1/cron/avec-waitlist
+# Berseba: OS E-MAILS DOS SÓCIOS NO CRM (migration 9010). De 5 em 5 minutos lê,
+# só leitura, as caixas do Gmail conectadas. Só organizações em
+# GMAIL_INTAKE_ORG_IDS; sem a configuração a rota não consulta nada.
+*/5 * * * *|120|api/v1/cron/gmail-intake
 "
 
 # CRONTAB_PATH é ponto de injeção do teste (tests/shell/scheduler-entrypoint.test.sh).

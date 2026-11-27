@@ -152,6 +152,15 @@ const DECISOES: Record<string, Decisao> = {
     caminho: "cascata",
     razao: "Passo 1 da própria cascata: nome/rótulo, email, telefone, CPF, data de nascimento, consent, source_metadata e tags; is_anonymized/anonymized_at viram o que responde ao titular.",
   },
+  gmail_messages: {
+    decidida: "redigir",
+    caminho: "gatilho",
+    razao:
+      "Berseba (migration 9010): os e-mails lidos do Gmail dos sócios ligados ao contato (assunto, " +
+      "corpo, endereços) não têm versão anonimizada que ainda sirva. Quem apaga é " +
+      "`trg_gmail_messages_anonimizado`, em `contacts` AFTER UPDATE OF is_anonymized, a mesma porta " +
+      "de `avec_waitlist`; apaga também os ainda sem contato com o e-mail antigo da pessoa.",
+  },
   avec_waitlist: {
     decidida: "redigir",
     caminho: "gatilho",

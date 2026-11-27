@@ -442,6 +442,18 @@ const DO_SERVIDOR: RecursoOpcional[] = [
 
 const DA_EMPRESA: RecursoOpcional[] = [
   {
+    // Berseba (migration 9010): the partners' Gmail, read-only. The door shows for organizations
+    // in GMAIL_INTAKE_ORG_IDS; each partner connects their own mailbox on the screen.
+    id: "emails_do_gmail",
+    nome: "E-mails do Gmail",
+    oQueFaz: "Cada sócio conecta o próprio Gmail, só leitura, e os e-mails aparecem ligados ao contato e ao negócio.",
+    nivel: "organizacao",
+    padrao: "desligado",
+    quemDecide: "admin",
+    href: "/app/emails",
+    capacidade: "emails_gmail",
+  },
+  {
     // Berseba (migration 9007): the avec salon's waitlist. The menu door shows for organizations
     // that use avec (`AVEC_API_ORG_IDS`); this line says whether the company turned it on.
     id: "lista_de_espera_do_salao",

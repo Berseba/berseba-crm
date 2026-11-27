@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { NavHub } from "@/components/shell/NavHub";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { capacidadesDoAvec } from "@/lib/integrations/avec/config";
+import { capacidadesDoGmail } from "@/lib/integrations/gmail/config";
 import { loadCrmExtensions } from "@/lib/extensions/service";
 import { logger } from "@/lib/logger";
 import type { ExtensionGuideView } from "@/lib/extensions/view";
@@ -57,6 +58,8 @@ export default async function CrmHubPage() {
         ...(await capacidadesDaOrganizacao(createAdminClient(), activeOrg.orgId)),
         // Berseba: the avec salon's waitlist door, same rule as the app layout's menu.
         ...capacidadesDoAvec(activeOrg.orgId),
+        // Berseba: the partners' e-mail screen, same rule as the app layout's menu.
+        ...capacidadesDoGmail(activeOrg.orgId),
       ]
     : [];
 
