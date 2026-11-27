@@ -222,6 +222,20 @@ export const NAV_CATALOG = [
     sidebar: true,
   },
   {
+    // Berseba (migration 9010): the partners' e-mail, read from Gmail. Only for admins of
+    // organizations in GMAIL_INTAKE_ORG_IDS (`emails_gmail`, set by the layout and the CRM hub).
+    // Not in the sidebar: a gated sidebar door changes the menu of every other organization's
+    // snapshot (tests/unit/navegacao-modulos.test.ts); it lives in the CRM hub and in ⌘K.
+    href: "/app/emails",
+    label: "E-mails",
+    description: "Os e-mails dos sócios, ligados ao contato e ao negócio.",
+    icon: "Envelope",
+    group: "crm",
+    section: "O dia a dia da venda",
+    minRole: "admin",
+    capacidade: "emails_gmail",
+  },
+  {
     // Berseba (migration 9007): the avec salon's waitlist. Only for organizations that use avec
     // (`lista_de_espera_avec`, set by the layout from AVEC_API_ORG_IDS).
     href: "/app/lista-de-espera",

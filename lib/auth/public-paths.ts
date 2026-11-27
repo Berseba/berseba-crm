@@ -19,6 +19,11 @@ export const PUBLIC_PATHS: RegExp[] = [
   // Bearer `dsk_…` with `mcp:write`, checked inside the route (`lib/integrations/voz/auth.ts`).
   // "Ligar com a Bia" (`/api/v1/voz/calls`) is NOT here: it is the signed-in team's.
   /^\/api\/v1\/voz\/call-ended$/,
+  // Berseba: the way back from Google's consent for the Gmail intake (migration 9010). Same
+  // nature as the agenda callback further down: the session cookie is Strict and does not travel
+  // on a navigation from accounts.google.com; the identity is the signed state, the single-use
+  // nonce and the Lax binding cookie, checked inside the route. Anchored with `$`.
+  /^\/api\/v1\/gmail\/callback$/,
   // Link público persistido: org e destino são resolvidos exclusivamente no servidor.
   /^\/api\/v1\/rastreio\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
   /^\/$/,

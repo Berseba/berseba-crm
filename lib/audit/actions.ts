@@ -30,6 +30,13 @@
  */
 export const AUDIT_ACTIONS = [
   // ── Berseba ──────────────────────────────────────────────────────────────
+  // Gmail intake, read-only (`app/api/v1/gmail/`, migration 9010): a partner started the consent,
+  // connected their mailbox, a connection was refused (metadata: the reason, never a token),
+  // the partner disconnected it.
+  "gmail.conexao_iniciada",
+  "gmail.caixa_conectada",
+  "gmail.conexao_falhou",
+  "gmail.caixa_desconectada",
   // The avec salon's waitlist (`app/api/v1/avec/lista-de-espera/`, migration 9007): the
   // organization's settings, an entry added by the team, an entry removed by the team.
   "avec.lista_de_espera_configurada",

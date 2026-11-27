@@ -316,6 +316,18 @@ export interface WaitlistRow {
  * for, when she could come, the slot she was offered and what was booked. `created_by_user_id`
  * stays out: it is the team, not her.
  */
+/** Berseba (migration 9010): an e-mail read from a partner's Gmail, linked to the contact. */
+export interface GmailMessageRow {
+  direction: string;
+  from_email: string;
+  from_name: string | null;
+  to_emails: string[];
+  cc_emails: string[];
+  subject: string | null;
+  body_text: string | null;
+  sent_at: string;
+}
+
 export interface AvecWaitlistRow {
   pedido: Json;
   data_de: string;
@@ -844,6 +856,8 @@ export interface ExportPayload {
   calendar_waitlist?: WaitlistRow[];
   /** Berseba (migration 9007): present only when there is a row, like `calendar_waitlist`. */
   avec_waitlist?: AvecWaitlistRow[];
+  /** Berseba (migration 9010): present only when there is a row, like `avec_waitlist`. */
+  gmail_messages?: GmailMessageRow[];
   sales: SaleRow[];
   proposals: ProposalRow[];
   tasks: TaskRow[];
@@ -1935,6 +1949,28 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     }
   }
 
+  // Berseba (migration 9010): e-mails read from the partners' Gmail and linked to the contact.
+  // Anonymization deletes them (`trg_gmail_messages_anonimizado`), so access delivers them. An
+  // install without the table (42P01 / PGRST205) yields an empty block.
+  let gmail_messages: GmailMessageRow[] = [];
+  if (contactId) {
+    const { data, error } = await admin
+      .from("gmail_messages")
+      .select("direction, from_email, from_name, to_emails, cc_emails, subject, body_text, sent_at")
+      .eq("organization_id", organizationId)
+      .eq("contact_id", contactId)
+      .order("sent_at", { ascending: false })
+      .limit(500);
+    if (error) {
+      if (error.code !== "42P01" && error.code !== "PGRST205") {
+        throw new Error(`gmail_messages_load_failed: ${error.message}`);
+      }
+    } else if (data) {
+      conferirTeto("gmail_messages", data, 500);
+      gmail_messages = data as GmailMessageRow[];
+    }
+  }
+
   // Comandas — contact_id direto em sales (migrations 0350-0359).
   //
   // A 0359 acrescentou esta tabela à cascata de redação; este bloco é a outra
@@ -2791,6 +2827,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     appointments,
     ...(calendar_waitlist.length > 0 ? { calendar_waitlist } : {}),
     ...(avec_waitlist.length > 0 ? { avec_waitlist } : {}),
+    ...(gmail_messages.length > 0 ? { gmail_messages } : {}),
     sales,
     proposals,
     tasks,

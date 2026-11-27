@@ -235,6 +235,17 @@ const schema = z.object({
   // devolve 401 em toda chamada — por isso `getWacallsClient()` exige os dois.
   WACALLS_API_TOKEN: z.string().optional().default(""),
 
+  // ─── Berseba: Gmail intake, read-only (migration 9010) — OPTIONAL, OFF BY DEFAULT ───
+  //
+  // Off unless both allowlists are set; parsed by `lib/integrations/gmail/config.ts`, never here.
+  /** Comma-separated organization ids that get the e-mail screen and the intake cron. */
+  GMAIL_INTAKE_ORG_IDS: z.string().optional().default(""),
+  /** Comma-separated mailboxes that may be connected (the partners' company inboxes). */
+  GMAIL_INTAKE_ACCOUNTS: z.string().optional().default(""),
+  /** Own OAuth client; empty = the installation's Google app (the agenda's). */
+  GMAIL_INTAKE_CLIENT_ID: z.string().optional().default(""),
+  GMAIL_INTAKE_CLIENT_SECRET: z.string().optional().default(""),
+
   // ─── Berseba: avec agenda API (salon Mayara Morales) — OPTIONAL, OFF BY DEFAULT ───
   //
   // Install level, never per organization: the address is on the VPS's internal network.

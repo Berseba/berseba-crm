@@ -43,6 +43,9 @@ export const CAPACIDADES_DA_ORGANIZACAO = [
   // Berseba: the avec salon's waitlist door. Set by the layout for organizations that use avec
   // (AVEC_API_ORG_IDS, an install setting the app reads), not from `settings`.
   "lista_de_espera_avec",
+  // Berseba: the partners' e-mail screen (migration 9010). Set by the layout for organizations in
+  // GMAIL_INTAKE_ORG_IDS (an install setting), not from `settings`.
+  "emails_gmail",
 ] as const;
 export type CapacidadeDaOrganizacao = (typeof CAPACIDADES_DA_ORGANIZACAO)[number];
 
@@ -64,6 +67,7 @@ const MODULO_DA_CAPACIDADE: Record<CapacidadeDaOrganizacao, ModuloOpcional | nul
   apresentacao_do_catalogo: null,
   capacidade_do_produto: null,
   lista_de_espera_avec: null,
+  emails_gmail: null,
 };
 
 function objeto(v: unknown): Record<string, unknown> | null {
