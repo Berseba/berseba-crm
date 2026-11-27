@@ -82,17 +82,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   // The event type: an active, internal, non-service one; the one with slug `reuniao` when the
   // organization has it, else the oldest. Its own settings apply as in any booking
   // (confirmation, reminders to the contact), so the organization decides those on the type.
-  const { data: tipos } = await admin
+  const { data: tipos, error: erroDosTipos } = await admin
     .from("calendar_event_types")
-    .select("id, slug, created_at")
+    .select("id, slug, reminder_enabled, created_at")
     .eq("organization_id", org.orgId)
     .eq("is_active", true)
     .eq("service_enabled", false)
     .is("external_provider", null)
     .order("created_at", { ascending: true })
     .limit(50);
-  const lista = (tipos as Array<{ id: string; slug: string }> | null) ?? [];
-  const tipo = lista.find((x) => x.slug === "reuniao") ?? lista[0];
+  if (erroDosTipos) return voltar("reuniao=falhou&codigo=internal_error", req);
+  const lista = (tipos as Array<{ id: string; slug: string; reminder_enabled: boolean }> | null) ?? [];
+  // `reuniao` first; else one that sends the client no reminder; else the oldest.
+  const tipo = lista.find((x) => x.slug === "reuniao") ?? lista.find((x) => !x.reminder_enabled) ?? lista[0];
   if (!tipo) return voltar("reuniao=sem_tipo", req);
 
   let agendamentoId: string | null = null;

@@ -4,7 +4,7 @@ const ORG = "11111111-1111-4111-8111-111111111111";
 vi.mock("@/lib/env", () => ({ env: { MEETING_DETECTION_ORG_IDS: ` ${ORG.toUpperCase()}, lixo` } }));
 
 const { deteccaoLigada, falaDeReuniao, lerResposta, orgsComDeteccao, semCitacao, trechoDa } = await import("./deteccao");
-const { escolherCandidatas, linhaDaProposta, rodadaDeReunioes } = await import("./varredura");
+const { ehRecusaDeOrcamento, escolherCandidatas, linhaDaProposta, rodadaDeReunioes } = await import("./varredura");
 
 const AGORA = new Date("2026-11-27T12:00:00Z");
 
@@ -67,6 +67,7 @@ describe("semCitacao", () => {
     ).toBe("Confirmado!");
     expect(semCitacao("Ok\n> antiga\nAté")).toBe("Ok\nAté");
     expect(semCitacao("Sure\nOn Wed, Nov 26, 2026 at 10:00 AM Ana wrote:\nold")).toBe("Sure");
+    expect(semCitacao("Pode ser\n\nDe: Matheus <m@x.com>\nEnviado: quarta\nquinta 10h?")).toBe("Pode ser");
   });
 });
 
@@ -164,9 +165,11 @@ describe("rodadaDeReunioes", () => {
   it("a refused call (budget) stops the round and stores nothing for that message", async () => {
     const banco = bancoFalso([], [{ id: "w1", organization_id: ORG, direction: "inbound", type: "text", contact_id: "k3", body: "reunião amanhã?", media_derived_text: null, sent_at: "2026-11-27T10:00:00Z", conversations: { is_group: false, assigned_to_user_id: null } }]);
     const r = await rodadaDeReunioes(banco.admin, ORG, "America/Sao_Paulo", AGORA, async () => {
-      throw new Error("budget");
+      const e = new Error("Teto mensal da org esgotado");
+      Object.defineProperty(e, "name", { value: "llm_budget_exceeded" });
+      throw e;
     }, "sistema");
-    expect(r.erro).toBe("budget");
+    expect(r.erro).toBe("Teto mensal da org esgotado");
     expect(banco.propostas).toHaveLength(0);
   });
 
@@ -183,10 +186,30 @@ describe("rodadaDeReunioes", () => {
       return { intencao: "pede", inicio: null };
     };
     const r = await rodadaDeReunioes(banco.admin, ORG, "America/Sao_Paulo", AGORA, modelo, "sistema");
-    expect(r.classificadas).toBe(2);
+    expect(r).toMatchObject({ classificadas: 2, recusadas: 1 });
+    expect(r.erro).toBeUndefined();
     expect(banco.propostas.find((p) => p.source_id === "w1")).toMatchObject({ status: "nenhuma" });
-    expect(banco.propostas.find((p) => p.source_id === "w2")).toBeUndefined();
+    // Refused while the provider answered others: about the message itself, never paid again.
+    expect(banco.propostas.find((p) => p.source_id === "w2")).toMatchObject({ status: "nenhuma", excerpt: null });
     // An audio's transcript is read when the body is empty.
     expect(banco.propostas.find((p) => p.source_id === "w3")).toMatchObject({ status: "proposta", excerpt: "podemos marcar uma visita?" });
+  });
+
+  it("when nothing answered (provider trouble), refused messages are not settled: tried next round", async () => {
+    const banco = bancoFalso([], [
+      { id: "w1", organization_id: ORG, direction: "inbound", type: "text", contact_id: "k1", body: "reunião amanhã?", media_derived_text: null, sent_at: "2026-11-27T08:00:00Z", conversations: { is_group: false, assigned_to_user_id: null } },
+    ]);
+    const r = await rodadaDeReunioes(banco.admin, ORG, "America/Sao_Paulo", AGORA, async () => {
+      throw new Error("503");
+    }, "sistema");
+    expect(r.recusadas).toBe(1);
+    expect(banco.propostas).toHaveLength(0);
+  });
+
+  it("recognizes the budget refusal by its real name", () => {
+    const e = new Error("Teto mensal");
+    Object.defineProperty(e, "name", { value: "llm_budget_exceeded" });
+    expect(ehRecusaDeOrcamento(e)).toBe(true);
+    expect(ehRecusaDeOrcamento(new Error("content filter"))).toBe(false);
   });
 });

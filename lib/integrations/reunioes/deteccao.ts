@@ -62,6 +62,8 @@ export function semCitacao(texto: string): string {
   for (const linha of texto.split("\n")) {
     if (/^\s*(Em|On)\b.{0,200}\b(escreveu|wrote)\s*:\s*$/i.test(linha)) break;
     if (/^\s*-{2,}\s*(Mensagem original|Original Message)/i.test(linha)) break;
+    // Outlook: the quoted mail starts with its header block ("De: Fulano <x@y>").
+    if (/^\s*(De|From)\s*:\s.*@/i.test(linha)) break;
     if (/^\s*>/.test(linha)) continue;
     linhas.push(linha);
   }

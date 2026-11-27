@@ -20,9 +20,24 @@ export const JANELA_DIAS = 3;
 export const TETO_DE_CHAMADAS = 20;
 /** Consecutive failed calls that mean the provider is down: the round stops. */
 const FALHAS_SEGUIDAS = 3;
-/** `nenhuma` rows only guard the 3-day window; every row goes after 90 days. */
-const PODA_NENHUMA_DIAS = 7;
-const PODA_DIAS = 90;
+/** `nenhuma` rows only guard the 3-day window; every row goes after 90 days (any organization). */
+export const PODA_NENHUMA_DIAS = 7;
+export const PODA_DIAS = 90;
+
+/** Retention for every organization, listed or not, stopped or not (LGPD: no excerpt kept forever). */
+export async function podarPropostas(admin: SupabaseClient, agora: Date): Promise<void> {
+  const dia = 24 * 60 * 60 * 1000;
+  await admin
+    .from("meeting_proposals")
+    .delete()
+    .eq("status", "nenhuma")
+    .lt("created_at", new Date(agora.getTime() - PODA_NENHUMA_DIAS * dia).toISOString());
+  await admin
+    .from("meeting_proposals")
+    .delete()
+    .lt("created_at", new Date(agora.getTime() - PODA_DIAS * dia).toISOString());
+}
+const NADA: Proposta = { intent: "nenhuma", starts_at: null, duration_minutes: null, title: null };
 const TETO_DE_LEITURA = 300;
 
 export interface Candidata {
@@ -39,13 +54,19 @@ export type Classificar = (texto: string, sistema: string) => Promise<unknown>;
 
 /** The organization's AI budget refused the call: nothing more this round. */
 export function ehRecusaDeOrcamento(erro: unknown): boolean {
-  return erro instanceof Error && (erro.name === "LlmBudgetExceededError" || /budget|orçamento/i.test(erro.message));
+  if (!(erro instanceof Error)) return false;
+  // `LlmBudgetExceededError` (run-model-call.ts) names itself `llm_budget_exceeded`; the text test
+  // is the fallback for a wrapped error.
+  return erro.name === "llm_budget_exceeded" || erro.name === "LlmBudgetExceededError" || /budget_exceeded|orçamento/i.test(erro.message);
 }
 
 export interface ResultadoDaRodada {
   lidas: number;
   classificadas: number;
   propostas: number;
+  /** Messages the provider refused this round while it answered others (stored as `nenhuma`). */
+  recusadas?: number;
+  /** Set only when the round STOPPED early (budget, provider down, database). */
   erro?: string;
 }
 
@@ -169,18 +190,6 @@ export async function rodadaDeReunioes(
   prazo: number = Date.now() + 90_000,
   relogio: () => number = Date.now,
 ): Promise<ResultadoDaRodada> {
-  await admin
-    .from("meeting_proposals")
-    .delete()
-    .eq("organization_id", org)
-    .eq("status", "nenhuma")
-    .lt("created_at", new Date(agora.getTime() - PODA_NENHUMA_DIAS * 24 * 60 * 60 * 1000).toISOString());
-  await admin
-    .from("meeting_proposals")
-    .delete()
-    .eq("organization_id", org)
-    .lt("created_at", new Date(agora.getTime() - PODA_DIAS * 24 * 60 * 60 * 1000).toISOString());
-
   const desde = new Date(agora.getTime() - JANELA_DIAS * 24 * 60 * 60 * 1000).toISOString();
   const todas = [...(await candidatasDoEmail(admin, org, desde)), ...(await candidatasDoWhatsapp(admin, org, desde))];
   const escolhidas = escolherCandidatas(todas, await jaLidas(admin, org, todas));
@@ -189,7 +198,14 @@ export async function rodadaDeReunioes(
   let classificadas = 0;
   let propostas = 0;
   let falhasSeguidas = 0;
-  let ultimoErro: string | undefined;
+  let algumaRespondeu = false;
+  const recusadas: Candidata[] = [];
+  const guardar = async (c: Candidata, p: Proposta): Promise<string | null> => {
+    const { error } = await admin
+      .from("meeting_proposals")
+      .upsert(linhaDaProposta(org, c, p), { onConflict: "organization_id,source,source_id", ignoreDuplicates: true });
+    return error ? `gravar: ${error.message}` : null;
+  };
   for (const c of escolhidas) {
     if (relogio() > prazo) break;
     let bruto: unknown;
@@ -197,24 +213,33 @@ export async function rodadaDeReunioes(
       const enviada = `Enviada em: ${rotuloLocal(new Date(c.sent_at), fuso)}`;
       bruto = await classificar(`${enviada}\n\n${c.texto.slice(0, 2000)}`, sistemaComAgora);
       falhasSeguidas = 0;
+      algumaRespondeu = true;
     } catch (erro) {
-      ultimoErro = erro instanceof Error ? erro.message : String(erro);
+      const motivo = erro instanceof Error ? erro.message : String(erro);
       // Budget refused, or the provider is down: stop and try next round (nothing stored).
-      if (ehRecusaDeOrcamento(erro)) return { lidas: todas.length, classificadas, propostas, erro: ultimoErro };
+      if (ehRecusaDeOrcamento(erro)) return { lidas: todas.length, classificadas, propostas, erro: motivo };
       falhasSeguidas += 1;
-      if (falhasSeguidas >= FALHAS_SEGUIDAS) return { lidas: todas.length, classificadas, propostas, erro: ultimoErro };
-      // One message the provider refuses never blocks the others: skip it this round.
+      if (falhasSeguidas >= FALHAS_SEGUIDAS) return { lidas: todas.length, classificadas, propostas, erro: motivo };
+      // One message the provider refuses never blocks the others: skipped now, settled below.
+      recusadas.push(c);
       continue;
     }
     // An answer that is not the tool's shape counts as "nothing found": stored, never re-sent
     // (otherwise the same messages would be paid for every 5 minutes).
-    const p = lerResposta(bruto, agora) ?? { intent: "nenhuma" as const, starts_at: null, duration_minutes: null, title: null };
-    const { error } = await admin
-      .from("meeting_proposals")
-      .upsert(linhaDaProposta(org, c, p), { onConflict: "organization_id,source,source_id", ignoreDuplicates: true });
-    if (error) return { lidas: todas.length, classificadas, propostas, erro: `gravar: ${error.message}` };
+    const p = lerResposta(bruto, agora) ?? NADA;
+    const falha = await guardar(c, p);
+    if (falha) return { lidas: todas.length, classificadas, propostas, erro: falha };
     classificadas += 1;
     if (p.intent !== "nenhuma") propostas += 1;
   }
-  return { lidas: todas.length, classificadas, propostas, ...(ultimoErro ? { erro: ultimoErro } : {}) };
+  // The provider answered other messages this round, so these refusals are about the message
+  // itself (content filter, bad input): stored as nothing found, never paid for again.
+  if (algumaRespondeu) {
+    for (const c of recusadas) {
+      const falha = await guardar(c, NADA);
+      if (falha) return { lidas: todas.length, classificadas, propostas, erro: falha };
+    }
+  }
+  return { lidas: todas.length, classificadas, propostas, ...(recusadas.length > 0 ? { recusadas: recusadas.length } : {}) };
 }
+

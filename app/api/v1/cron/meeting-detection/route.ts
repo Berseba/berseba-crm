@@ -17,7 +17,7 @@ import { fail, ok } from "@/lib/api/wrappers";
 import { autorizaCron } from "@/lib/auth/cron-auth";
 import { env } from "@/lib/env";
 import { orgsComDeteccao, respostaDoModelo, SISTEMA_DA_DETECCAO } from "@/lib/integrations/reunioes/deteccao";
-import { rodadaDeReunioes, type Classificar } from "@/lib/integrations/reunioes/varredura";
+import { podarPropostas, rodadaDeReunioes, type Classificar } from "@/lib/integrations/reunioes/varredura";
 import { logger } from "@/lib/logger";
 import { idsDeOrgsParadas } from "@/lib/organizacao/operante";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -48,10 +48,13 @@ async function handle(req: NextRequest): Promise<Response> {
   if (!autorizaCron(req)) {
     return fail("forbidden", "Cron secret missing or invalid.", 403, { requestId });
   }
+  const admin = createAdminClient();
+  // Retention runs for every organization, even with detection off (an org taken off the list
+  // keeps no excerpt forever).
+  await podarPropostas(admin, new Date());
   const orgs = [...orgsComDeteccao()];
   if (orgs.length === 0) return ok({ rodadas: [] }, { requestId });
 
-  const admin = createAdminClient();
   const paradas = new Set(await idsDeOrgsParadas(admin));
   const agora = new Date();
   // One deadline for the whole run: the scheduler gives the cron 120 s.
