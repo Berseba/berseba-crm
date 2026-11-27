@@ -54,13 +54,15 @@ async function handle(req: NextRequest): Promise<Response> {
   const admin = createAdminClient();
   const paradas = new Set(await idsDeOrgsParadas(admin));
   const agora = new Date();
+  // One deadline for the whole run: the scheduler gives the cron 120 s.
+  const prazo = Date.now() + 90_000;
   const rodadas: Array<Record<string, unknown>> = [];
   for (const org of orgs) {
     if (paradas.has(org)) continue;
     try {
       const { data } = await admin.from("organizations").select("timezone").eq("id", org).maybeSingle();
       const fuso = (data as { timezone?: string } | null)?.timezone ?? "America/Sao_Paulo";
-      const r = await rodadaDeReunioes(admin, org, fuso, agora, classificadorDa(org), SISTEMA_DA_DETECCAO);
+      const r = await rodadaDeReunioes(admin, org, fuso, agora, classificadorDa(org), SISTEMA_DA_DETECCAO, prazo);
       if (r.erro) logger.warn("meeting_detection: round stopped", { organization_id: org, error: r.erro });
       rodadas.push({ organization_id: org, ...r, erro: r.erro ? "sim" : undefined });
     } catch (erro) {

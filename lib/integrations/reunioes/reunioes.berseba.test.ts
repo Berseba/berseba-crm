@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 const ORG = "11111111-1111-4111-8111-111111111111";
 vi.mock("@/lib/env", () => ({ env: { MEETING_DETECTION_ORG_IDS: ` ${ORG.toUpperCase()}, lixo` } }));
 
-const { deteccaoLigada, falaDeReuniao, lerResposta, orgsComDeteccao, trechoDa } = await import("./deteccao");
+const { deteccaoLigada, falaDeReuniao, lerResposta, orgsComDeteccao, semCitacao, trechoDa } = await import("./deteccao");
 const { escolherCandidatas, linhaDaProposta, rodadaDeReunioes } = await import("./varredura");
 
 const AGORA = new Date("2026-11-27T12:00:00Z");
@@ -43,6 +43,9 @@ describe("lerResposta", () => {
     });
     expect(lerResposta({ intencao: "pede", inicio: "2027-12-01T10:00:00Z" }, AGORA)!.starts_at).toBeNull();
     expect(lerResposta({ intencao: "pede", inicio: "quinta" }, AGORA)!.starts_at).toBeNull();
+    // Without an offset it would be read in the server's zone: dropped.
+    expect(lerResposta({ intencao: "pede", inicio: "2026-12-03T10:00:00" }, AGORA)!.starts_at).toBeNull();
+    expect(lerResposta({ intencao: "pede", inicio: "2026-12-03T13:00:00Z" }, AGORA)!.starts_at).toBe("2026-12-03T13:00:00.000Z");
   });
 
   it("'nenhuma' keeps nothing; an unreadable answer is null (retried)", () => {
@@ -54,6 +57,16 @@ describe("lerResposta", () => {
     });
     expect(lerResposta(null, AGORA)).toBeNull();
     expect(lerResposta({ intencao: "talvez" }, AGORA)).toBeNull();
+  });
+});
+
+describe("semCitacao", () => {
+  it("drops the quoted thread under the client's words", () => {
+    expect(
+      semCitacao("Confirmado!\n\nEm qua., 26 de nov. de 2026 às 10:00, Matheus <m@x.com> escreveu:\n> Pode quinta 10h?"),
+    ).toBe("Confirmado!");
+    expect(semCitacao("Ok\n> antiga\nAté")).toBe("Ok\nAté");
+    expect(semCitacao("Sure\nOn Wed, Nov 26, 2026 at 10:00 AM Ana wrote:\nold")).toBe("Sure");
   });
 });
 
@@ -91,16 +104,20 @@ function bancoFalso(emails: Array<Record<string, unknown>>, mensagens: Array<Rec
   const de = (tabela: string) => {
     const filtros: Array<(l: Record<string, unknown>) => boolean> = [];
     let novas: Array<Record<string, unknown>> | null = null;
+    let apagar = false;
     const q = {
       select: () => q,
       eq: (c: string, v: unknown) => (c.includes(".") ? q : (filtros.push((l) => l[c] === v), q)),
       in: (c: string, vs: unknown[]) => (filtros.push((l) => vs.includes(l[c])), q),
       is: () => q,
       gte: () => q,
+      lt: () => q,
+      delete: () => ((apagar = true), q),
       order: () => q,
       limit: () => q,
       upsert: (l: Record<string, unknown>) => ((novas = [l]), q),
       then: (ok: (r: { data: unknown; error: null }) => unknown) => {
+        if (apagar) return Promise.resolve(ok({ data: null, error: null }));
         if (novas) {
           propostas.push(...novas);
           return Promise.resolve(ok({ data: null, error: null }));
@@ -135,6 +152,8 @@ describe("rodadaDeReunioes", () => {
     expect(r).toMatchObject({ classificadas: 2, propostas: 1 });
     expect(vistos).toHaveLength(2);
     expect(vistos.some((v) => v.includes("boleto"))).toBe(false);
+    // The model counts "amanhã" from the message's own date.
+    expect(vistos.every((v) => v.startsWith("Enviada em: "))).toBe(true);
     expect(banco.propostas.find((p) => p.source_id === "e1")).toMatchObject({ status: "proposta", owner_user_id: "u1", contact_id: "k1" });
     expect(banco.propostas.find((p) => p.source_id === "w1")).toMatchObject({ status: "nenhuma", excerpt: null });
 
@@ -149,5 +168,25 @@ describe("rodadaDeReunioes", () => {
     }, "sistema");
     expect(r.erro).toBe("budget");
     expect(banco.propostas).toHaveLength(0);
+  });
+
+  it("an unreadable answer is stored once as nothing found; a provider error skips only that message", async () => {
+    const banco = bancoFalso([], [
+      { id: "w1", organization_id: ORG, direction: "inbound", type: "text", contact_id: "k1", body: "reunião amanhã?", media_derived_text: null, sent_at: "2026-11-27T08:00:00Z", conversations: { is_group: false, assigned_to_user_id: null } },
+      { id: "w2", organization_id: ORG, direction: "inbound", type: "text", contact_id: "k2", body: "call sexta 10h?", media_derived_text: null, sent_at: "2026-11-27T09:00:00Z", conversations: { is_group: false, assigned_to_user_id: null } },
+      { id: "w3", organization_id: ORG, direction: "inbound", type: "audio", contact_id: "k3", body: "", media_derived_text: "podemos marcar uma visita?", sent_at: "2026-11-27T10:00:00Z", conversations: { is_group: false, assigned_to_user_id: null } },
+    ]);
+    const modelo = async (entrada: string) => {
+      const texto = entrada.split("\n\n").slice(1).join("\n\n");
+      if (texto.includes("amanhã")) return "texto solto, sem ferramenta";
+      if (texto.includes("sexta")) throw new Error("content filter");
+      return { intencao: "pede", inicio: null };
+    };
+    const r = await rodadaDeReunioes(banco.admin, ORG, "America/Sao_Paulo", AGORA, modelo, "sistema");
+    expect(r.classificadas).toBe(2);
+    expect(banco.propostas.find((p) => p.source_id === "w1")).toMatchObject({ status: "nenhuma" });
+    expect(banco.propostas.find((p) => p.source_id === "w2")).toBeUndefined();
+    // An audio's transcript is read when the body is empty.
+    expect(banco.propostas.find((p) => p.source_id === "w3")).toMatchObject({ status: "proposta", excerpt: "podemos marcar uma visita?" });
   });
 });

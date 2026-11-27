@@ -127,6 +127,31 @@ create trigger trg_meeting_proposals_anonimizado
   after update of is_anonymized on public.contacts
   for each row execute function public.fn_meeting_proposals_anonimizado();
 
+-- LGPD: a proposal read from an e-mail goes with that e-mail, whatever removed it (the 9010
+-- anonymization by address, a disconnected mailbox's cascade), so no excerpt outlives its source.
+create or replace function public.fn_meeting_proposals_email_apagado()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  delete from public.meeting_proposals
+   where organization_id = old.organization_id
+     and source = 'email'
+     and source_id = old.id;
+  return null;
+end;
+$$;
+
+revoke all on function public.fn_meeting_proposals_email_apagado() from public;
+revoke execute on function public.fn_meeting_proposals_email_apagado() from anon, authenticated;
+
+drop trigger if exists trg_meeting_proposals_email_apagado on public.gmail_messages;
+create trigger trg_meeting_proposals_email_apagado
+  after delete on public.gmail_messages
+  for each row execute function public.fn_meeting_proposals_email_apagado();
+
 comment on table public.meeting_proposals is
   'Berseba (migration 9011): a client message (e-mail or WhatsApp) the model read for a meeting; `proposta` waits for a partner to book or dismiss it. Server-only. Deleted when the contact is anonymized.';
 

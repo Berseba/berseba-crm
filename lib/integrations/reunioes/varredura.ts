@@ -11,13 +11,18 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { renderAgora } from "@/lib/tempo/agora";
+import { renderAgora, rotuloLocal } from "@/lib/tempo/agora";
 
-import { falaDeReuniao, lerResposta, trechoDa, type Proposta } from "./deteccao";
+import { falaDeReuniao, lerResposta, semCitacao, trechoDa, type Proposta } from "./deteccao";
 
 export const JANELA_DIAS = 3;
 /** Model calls per organization per round (every 5 minutes). */
 export const TETO_DE_CHAMADAS = 20;
+/** Consecutive failed calls that mean the provider is down: the round stops. */
+const FALHAS_SEGUIDAS = 3;
+/** `nenhuma` rows only guard the 3-day window; every row goes after 90 days. */
+const PODA_NENHUMA_DIAS = 7;
+const PODA_DIAS = 90;
 const TETO_DE_LEITURA = 300;
 
 export interface Candidata {
@@ -31,6 +36,11 @@ export interface Candidata {
 
 /** The model call, injected (the cron passes `runModelCall`; tests pass a fake). */
 export type Classificar = (texto: string, sistema: string) => Promise<unknown>;
+
+/** The organization's AI budget refused the call: nothing more this round. */
+export function ehRecusaDeOrcamento(erro: unknown): boolean {
+  return erro instanceof Error && (erro.name === "LlmBudgetExceededError" || /budget|orçamento/i.test(erro.message));
+}
 
 export interface ResultadoDaRodada {
   lidas: number;
@@ -75,7 +85,7 @@ async function candidatasDoEmail(admin: SupabaseClient, org: string, desde: stri
       source_id: m.id,
       contact_id: m.contact_id,
       owner_user_id: m.gmail_mailboxes?.user_id ?? null,
-      texto: [m.subject ? `Assunto: ${m.subject}` : "", m.body_text ?? m.snippet ?? ""].filter(Boolean).join("\n"),
+      texto: [m.subject ? `Assunto: ${m.subject}` : "", semCitacao(m.body_text || m.snippet || "")].filter(Boolean).join("\n"),
       sent_at: m.sent_at,
     }));
 }
@@ -107,7 +117,7 @@ async function candidatasDoWhatsapp(admin: SupabaseClient, org: string, desde: s
       source_id: m.id,
       contact_id: m.contact_id,
       owner_user_id: m.conversations?.assigned_to_user_id ?? null,
-      texto: m.body ?? m.media_derived_text ?? "",
+      texto: m.body || m.media_derived_text || "",
       sent_at: m.sent_at,
     }))
     .filter((m) => m.texto.trim() !== "");
@@ -156,7 +166,21 @@ export async function rodadaDeReunioes(
   agora: Date,
   classificar: Classificar,
   sistema: string,
+  prazo: number = Date.now() + 90_000,
+  relogio: () => number = Date.now,
 ): Promise<ResultadoDaRodada> {
+  await admin
+    .from("meeting_proposals")
+    .delete()
+    .eq("organization_id", org)
+    .eq("status", "nenhuma")
+    .lt("created_at", new Date(agora.getTime() - PODA_NENHUMA_DIAS * 24 * 60 * 60 * 1000).toISOString());
+  await admin
+    .from("meeting_proposals")
+    .delete()
+    .eq("organization_id", org)
+    .lt("created_at", new Date(agora.getTime() - PODA_DIAS * 24 * 60 * 60 * 1000).toISOString());
+
   const desde = new Date(agora.getTime() - JANELA_DIAS * 24 * 60 * 60 * 1000).toISOString();
   const todas = [...(await candidatasDoEmail(admin, org, desde)), ...(await candidatasDoWhatsapp(admin, org, desde))];
   const escolhidas = escolherCandidatas(todas, await jaLidas(admin, org, todas));
@@ -164,17 +188,27 @@ export async function rodadaDeReunioes(
 
   let classificadas = 0;
   let propostas = 0;
+  let falhasSeguidas = 0;
+  let ultimoErro: string | undefined;
   for (const c of escolhidas) {
+    if (relogio() > prazo) break;
     let bruto: unknown;
     try {
-      bruto = await classificar(c.texto.slice(0, 2000), sistemaComAgora);
+      const enviada = `Enviada em: ${rotuloLocal(new Date(c.sent_at), fuso)}`;
+      bruto = await classificar(`${enviada}\n\n${c.texto.slice(0, 2000)}`, sistemaComAgora);
+      falhasSeguidas = 0;
     } catch (erro) {
-      // Budget refused or the provider failed: stop this organization's round; the message is
-      // read again next round (nothing was stored for it).
-      return { lidas: todas.length, classificadas, propostas, erro: erro instanceof Error ? erro.message : String(erro) };
+      ultimoErro = erro instanceof Error ? erro.message : String(erro);
+      // Budget refused, or the provider is down: stop and try next round (nothing stored).
+      if (ehRecusaDeOrcamento(erro)) return { lidas: todas.length, classificadas, propostas, erro: ultimoErro };
+      falhasSeguidas += 1;
+      if (falhasSeguidas >= FALHAS_SEGUIDAS) return { lidas: todas.length, classificadas, propostas, erro: ultimoErro };
+      // One message the provider refuses never blocks the others: skip it this round.
+      continue;
     }
-    const p = lerResposta(bruto, agora);
-    if (!p) continue;
+    // An answer that is not the tool's shape counts as "nothing found": stored, never re-sent
+    // (otherwise the same messages would be paid for every 5 minutes).
+    const p = lerResposta(bruto, agora) ?? { intent: "nenhuma" as const, starts_at: null, duration_minutes: null, title: null };
     const { error } = await admin
       .from("meeting_proposals")
       .upsert(linhaDaProposta(org, c, p), { onConflict: "organization_id,source,source_id", ignoreDuplicates: true });
@@ -182,5 +216,5 @@ export async function rodadaDeReunioes(
     classificadas += 1;
     if (p.intent !== "nenhuma") propostas += 1;
   }
-  return { lidas: todas.length, classificadas, propostas };
+  return { lidas: todas.length, classificadas, propostas, ...(ultimoErro ? { erro: ultimoErro } : {}) };
 }

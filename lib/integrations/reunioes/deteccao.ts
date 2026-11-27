@@ -50,6 +50,23 @@ export interface Proposta {
 }
 
 const ATE_DIAS = 120;
+const COM_FUSO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * The client's own words, without the quoted thread under them (lines starting with ">" and
+ * everything after "Em ... escreveu:" / "On ... wrote:"), so a partner's quoted proposal is not
+ * read again as the client's.
+ */
+export function semCitacao(texto: string): string {
+  const linhas: string[] = [];
+  for (const linha of texto.split("\n")) {
+    if (/^\s*(Em|On)\b.{0,200}\b(escreveu|wrote)\s*:\s*$/i.test(linha)) break;
+    if (/^\s*-{2,}\s*(Mensagem original|Original Message)/i.test(linha)) break;
+    if (/^\s*>/.test(linha)) continue;
+    linhas.push(linha);
+  }
+  return linhas.join("\n").trim();
+}
 
 /**
  * The model's answer as a proposal. A start that is not a real instant, is in the past, or is
@@ -60,7 +77,9 @@ export function lerResposta(bruto: unknown, agora: Date): Proposta | null {
   const r = respostaDoModelo.safeParse(bruto);
   if (!r.success) return null;
   if (r.data.intencao === "nenhuma") return { intent: "nenhuma", starts_at: null, duration_minutes: null, title: null };
-  const inicio = r.data.inicio ? new Date(r.data.inicio) : null;
+  // Only an instant with its offset (or Z): "2026-11-28T10:00:00" would be read in the server's
+  // zone and book the meeting hours off.
+  const inicio = r.data.inicio && COM_FUSO.test(r.data.inicio.trim()) ? new Date(r.data.inicio.trim()) : null;
   const valido =
     inicio !== null &&
     !Number.isNaN(inicio.getTime()) &&
@@ -86,7 +105,7 @@ export const SISTEMA_DA_DETECCAO = [
   "intencao = 'pede' quando o cliente pede ou propõe uma reunião, call, visita ou conversa marcada (com ou sem horário).",
   "intencao = 'confirma' quando o cliente confirma um dia e horário já combinados.",
   "intencao = 'nenhuma' em qualquer outro caso, inclusive quando só cita uma reunião que já aconteceu, cancela, ou fala de prazo de entrega.",
-  "inicio: o dia e horário propostos ou confirmados, em ISO 8601 com o fuso, calculado a partir de 'Agora' abaixo; null se não houver horário claro.",
+  "inicio: o dia e horário propostos ou confirmados, em ISO 8601 COM o deslocamento do fuso (ex.: 2026-12-03T10:00:00-03:00), calculado a partir de 'Enviada em' (a data da mensagem, não a de agora); null se não houver horário claro.",
   "duracao_minutos: só se o cliente disser; senão null. assunto: até 8 palavras sobre o tema da reunião, ou null.",
   "Nunca invente horário. Em dúvida entre 'pede' e 'nenhuma', escolha 'nenhuma'.",
 ].join("\n");

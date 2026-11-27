@@ -79,15 +79,20 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   }
 
   if (!proposta.starts_at) return voltar("reuniao=sem_horario", req);
+  // The event type: an active, internal, non-service one; the one with slug `reuniao` when the
+  // organization has it, else the oldest. Its own settings apply as in any booking
+  // (confirmation, reminders to the contact), so the organization decides those on the type.
   const { data: tipos } = await admin
     .from("calendar_event_types")
-    .select("id")
+    .select("id, slug, created_at")
     .eq("organization_id", org.orgId)
     .eq("is_active", true)
+    .eq("service_enabled", false)
     .is("external_provider", null)
     .order("created_at", { ascending: true })
-    .limit(1);
-  const tipo = (tipos as Array<{ id: string }> | null)?.[0];
+    .limit(50);
+  const lista = (tipos as Array<{ id: string; slug: string }> | null) ?? [];
+  const tipo = lista.find((x) => x.slug === "reuniao") ?? lista[0];
   if (!tipo) return voltar("reuniao=sem_tipo", req);
 
   let agendamentoId: string | null = null;
@@ -117,7 +122,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     return voltar(`reuniao=falhou&codigo=${encodeURIComponent(codigo)}`, req);
   }
 
-  await decidir({ status: "criada", appointment_id: agendamentoId });
+  // The appointment exists now: the proposal says so even if someone dismissed it meanwhile.
+  await admin
+    .from("meeting_proposals")
+    .update({ status: "criada", appointment_id: agendamentoId, decided_by: user.id, decided_at: new Date().toISOString() })
+    .eq("organization_id", org.orgId)
+    .eq("id", id);
+  // Other open proposals of the same contact for the same time (the request and then the
+  // confirmation) are the same meeting: closed with it.
+  if (proposta.contact_id) {
+    await admin
+      .from("meeting_proposals")
+      .update({ status: "descartada", decided_by: user.id, decided_at: new Date().toISOString() })
+      .eq("organization_id", org.orgId)
+      .eq("contact_id", proposta.contact_id)
+      .eq("status", "proposta")
+      .eq("starts_at", proposta.starts_at)
+      .neq("id", id);
+  }
   await audit({
     action: "reunioes.proposta_criada",
     organizationId: org.orgId,
