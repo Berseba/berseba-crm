@@ -27,6 +27,13 @@ export type ActivityType =
    * union at the bottom.
    */
   | "touch"
+  /**
+   * Berseba (#171, slice 4, migration 9012): an e-mail the client wrote, or one a partner sent
+   * them, read from the partners' Gmail (`lib/integrations/gmail/funil.ts`). The message text is
+   * NOT in the reason; `payload.gmail_message_id` points at it. OUR entries, at the TOP.
+   */
+  | "email_received"
+  | "email_sent"
   // Spec 17: o lead nasceu da primeira mensagem. Sem esta linha na timeline, o
   // card aparece no kanban sem que ninguém saiba de onde veio — e "apareceu
   // sozinho" é como se perde a confiança num automatismo.
@@ -285,6 +292,9 @@ export type ActivityType =
 export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   // Berseba (9005). The channel and the note come in the `reason`.
   touch: "Toque registrado",
+  // Berseba (#171, slice 4).
+  email_received: "E-mail recebido",
+  email_sent: "E-mail enviado",
   voz_call_report: "Ligação da Bia",
   cold_call_result: "Ligação de cold call",
   lead_created: "Entrou no funil",
