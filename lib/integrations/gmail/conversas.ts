@@ -22,7 +22,8 @@ export interface ConversaDeEmail {
   chave: string;
   mailbox_id: string;
   gmail_thread_id: string;
-  assunto: string;
+  /** `null` when the e-mail has no subject (the screen renders the translated placeholder). */
+  assunto: string | null;
   trecho: string | null;
   contraparte: string | null;
   nomeDaContraparte: string | null;
@@ -51,7 +52,7 @@ export function conversasDeEmail(mensagens: MensagemGuardada[]): ConversaDeEmail
       chave,
       mailbox_id: m.mailbox_id,
       gmail_thread_id: m.gmail_thread_id,
-      assunto: m.subject?.trim() || "(sem assunto)",
+      assunto: m.subject?.trim() || null,
       trecho: m.snippet,
       contraparte: m.counterpart_email,
       nomeDaContraparte: m.direction === "inbound" ? m.from_name : null,

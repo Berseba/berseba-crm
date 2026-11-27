@@ -3,6 +3,7 @@ import { notFound, redirect } from "next/navigation";
 
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
+import { rotuloDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { tagDeIdioma } from "@/lib/i18n/datas";
 import { duracaoCurta, minutosDeEspera } from "@/lib/operacao/regras";
 import { traduzir } from "@/lib/i18n/dicionario";
@@ -66,7 +67,13 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
   const tag = tagDeIdioma(user.idioma);
 
   const agora = new Date();
-  const { caixas, conversas, fila, nomes, negocios } = await lerTelaDeEmails(org.orgId, agora);
+  const { caixas, conversas, fila, filaCortada, filaFalhou, nomes, negocios } = await lerTelaDeEmails(org.orgId, agora);
+  const redes: Record<string, string> = {
+    whatsapp: t("WhatsApp"),
+    instagram: t("Instagram"),
+    facebook: t("Facebook"),
+    telegram: t("Telegram"),
+  };
   const contaDaCaixa = new Map(caixas.map((c) => [c.id, c.account_email]));
   const minhas = caixas.filter((c) => c.user_id === user.id);
   const minha = minhas.find((c) => c.status === "healthy") ?? minhas[0];
@@ -97,12 +104,22 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
           {t("Precisa responder")} <span className="text-text-muted">({fila.length})</span>
         </h2>
         <p className="mb-2 text-xs text-text-muted">
-          {t("E-mails em que o cliente escreveu por último e ninguém respondeu, e conversas de WhatsApp esperando uma pessoa. A mais antiga primeiro.")}
+          {t("Clientes que escreveram por e-mail por último sem resposta de nenhum sócio, e conversas esperando uma pessoa, pela mesma regra da Operação do dia. A mais antiga primeiro.")}
         </p>
-        {fila.length === 0 ? <p className="text-sm text-text-muted">{t("Ninguém esperando resposta.")}</p> : null}
+        {filaFalhou ? (
+          <p className="mb-2 rounded-md border border-border bg-surface px-3 py-2 text-sm" role="alert">
+            {t("Não foi possível ler toda a fila agora. Recarregue a página em instantes.")}
+          </p>
+        ) : null}
+        {filaCortada ? (
+          <p className="mb-2 text-xs text-text-muted">{t("A lista chegou ao limite de leitura: pode haver esperas mais antigas que não aparecem aqui.")}</p>
+        ) : null}
+        {fila.length === 0 && !filaFalhou ? <p className="text-sm text-text-muted">{t("Ninguém esperando resposta.")}</p> : null}
         <ul className="divide-y divide-border rounded-lg border border-border">
           {fila.map((item) => {
-            const nome = (item.contact_id && nomes.get(item.contact_id)) || item.nome;
+            const nome =
+              (item.contact_id && nomes.get(item.contact_id)) ||
+              (item.canal === "email" ? item.nome : rotuloDoContato(item.contato, t));
             const negocio = item.contact_id ? negocios.get(item.contact_id) : undefined;
             const conta = item.canal === "email" ? (contaDaCaixa.get(item.mailbox_id) ?? "") : "";
             return (
@@ -113,11 +130,11 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
                     {t("espera há")} {duracaoCurta(minutosDeEspera(item.desde, agora))}
                   </span>
                 </div>
-                {item.canal === "email" ? <p className="truncate text-sm">{item.assunto}</p> : null}
+                {item.canal === "email" ? <p className="truncate text-sm">{item.assunto ?? t("(sem assunto)")}</p> : null}
                 {item.trecho ? <p className="line-clamp-2 text-xs text-text-muted">{item.trecho}</p> : null}
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 pt-1 text-xs">
                   <span className="rounded-full border border-border px-2 py-0.5 text-text-muted">
-                    {item.canal === "email" ? t("E-mail") : t("WhatsApp")}
+                    {item.canal === "email" ? t("E-mail") : (redes[item.rede] ?? item.rede)}
                   </span>
                   {item.contact_id ? (
                     <Link href={`/app/contacts/${item.contact_id}`} className="underline">{t("Contato")}</Link>
@@ -130,7 +147,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
                       {t("Responder no Gmail")}
                     </a>
                   ) : null}
-                  {item.canal === "whatsapp" ? (
+                  {item.canal === "conversa" ? (
                     <Link href={`/app/inbox/${item.conversation_id}`} className="underline">{t("Abrir conversa")}</Link>
                   ) : null}
                 </div>
@@ -190,7 +207,7 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
                   <span className="shrink-0 text-xs text-text-muted">{quando(c.ultimaEm, tag)}</span>
                 </div>
                 <p className="truncate text-sm">
-                  {c.assunto}
+                  {c.assunto ?? t("(sem assunto)")}
                   {c.mensagens > 1 ? <span className="text-text-muted"> ({c.mensagens})</span> : null}
                 </p>
                 {c.trecho ? <p className="line-clamp-2 text-xs text-text-muted">{c.trecho}</p> : null}
