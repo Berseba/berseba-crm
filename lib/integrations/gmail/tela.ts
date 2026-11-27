@@ -66,7 +66,8 @@ const DIA_MS = 24 * 60 * 60 * 1000;
 const DIAS_DA_LISTA = 30;
 const DIAS_DA_FILA = 60;
 const TETO_DA_LISTA = 1000;
-const TETO_DA_FILA_DE_EMAIL = 3000;
+/** PostgREST answers at most `max_rows` (1000, supabase/config.toml and production): the ceiling must not pass it, or the cut is never seen. */
+const TETO_DA_FILA_DE_EMAIL = 1000;
 /** Conversations read for the queue, oldest wait first. */
 const TETO_DAS_CONVERSAS = 300;
 
