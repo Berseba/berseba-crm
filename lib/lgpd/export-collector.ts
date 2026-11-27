@@ -311,6 +311,17 @@ export interface WaitlistRow {
   updated_at: string;
 }
 
+/** Berseba (migration 9011): a meeting the model found in the contact's message. */
+export interface MeetingProposalRow {
+  source: string;
+  intent: string;
+  starts_at: string | null;
+  title: string | null;
+  excerpt: string | null;
+  status: string;
+  created_at: string;
+}
+
 /** Berseba (migration 9010): an e-mail read from a partner's Gmail, linked to the contact. */
 export interface GmailMessageRow {
   direction: string;
@@ -868,6 +879,8 @@ export interface ExportPayload {
   avec_waitlist?: AvecWaitlistRow[];
   /** Berseba (migration 9010): present only when there is a row, like `avec_waitlist`. */
   gmail_messages?: GmailMessageRow[];
+  /** Berseba (migration 9011): present only when there is a row. */
+  meeting_proposals?: MeetingProposalRow[];
   sales: SaleRow[];
   proposals: ProposalRow[];
   tasks: TaskRow[];
@@ -1982,6 +1995,29 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     }
   }
 
+  // Berseba (migration 9011): meetings found in the contact's messages. Anonymization deletes
+  // them (`trg_meeting_proposals_anonimizado`), so access delivers them; `nenhuma` rows carry no
+  // text and stay out. An install without the table yields an empty block.
+  let meeting_proposals: MeetingProposalRow[] = [];
+  if (contactId) {
+    const { data, error } = await admin
+      .from("meeting_proposals")
+      .select("source, intent, starts_at, title, excerpt, status, created_at")
+      .eq("organization_id", organizationId)
+      .eq("contact_id", contactId)
+      .order("created_at", { ascending: false })
+      .limit(500);
+    if (error) {
+      if (error.code !== "42P01" && error.code !== "PGRST205") {
+        throw new Error(`meeting_proposals_load_failed: ${error.message}`);
+      }
+    } else if (data) {
+      conferirTeto("meeting_proposals", data, 500);
+      // `nenhuma` rows carry no text: nothing of the person to deliver.
+      meeting_proposals = (data as MeetingProposalRow[]).filter((p) => p.intent !== "nenhuma");
+    }
+  }
+
   // Comandas — contact_id direto em sales (migrations 0350-0359).
   //
   // A 0359 acrescentou esta tabela à cascata de redação; este bloco é a outra
@@ -2839,6 +2875,7 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     ...(calendar_waitlist.length > 0 ? { calendar_waitlist } : {}),
     ...(avec_waitlist.length > 0 ? { avec_waitlist } : {}),
     ...(gmail_messages.length > 0 ? { gmail_messages } : {}),
+    ...(meeting_proposals.length > 0 ? { meeting_proposals } : {}),
     sales,
     proposals,
     tasks,

@@ -152,6 +152,14 @@ const DECISOES: Record<string, Decisao> = {
     caminho: "cascata",
     razao: "Passo 1 da própria cascata: nome/rótulo, email, telefone, CPF, data de nascimento, consent, source_metadata e tags; is_anonymized/anonymized_at viram o que responde ao titular.",
   },
+  meeting_proposals: {
+    decidida: "redigir",
+    caminho: "gatilho",
+    razao:
+      "Berseba (migration 9011): a proposta de reunião achada na mensagem do cliente (assunto, trecho, " +
+      "horário) não tem versão anonimizada que ainda sirva. Quem apaga é `trg_meeting_proposals_anonimizado`, " +
+      "em `contacts` AFTER UPDATE OF is_anonymized, a mesma porta de `gmail_messages`.",
+  },
   gmail_messages: {
     decidida: "redigir",
     caminho: "gatilho",

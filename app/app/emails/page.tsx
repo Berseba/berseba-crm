@@ -67,7 +67,17 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
   const tag = tagDeIdioma(user.idioma);
 
   const agora = new Date();
-  const { caixas, conversas, fila, filaCortada, filaFalhou, nomes, negocios } = await lerTelaDeEmails(org.orgId, agora);
+  const { reunioes, caixas, conversas, fila, filaCortada, filaFalhou, nomes, negocios } = await lerTelaDeEmails(org.orgId, agora);
+  const avisosDaReuniao: Record<string, string> = {
+    criada: t("Reunião criada na agenda. Ela vai para o seu Google Agenda em até 5 minutos."),
+    descartada: t("Proposta descartada."),
+    sem_horario: t("Essa proposta não tem horário: combine com o cliente e marque na Agenda."),
+    sem_tipo: t("Crie um tipo de agendamento na Agenda antes de criar reuniões por aqui."),
+    falhou: t("A agenda recusou essa reunião (horário ocupado ou fora da sua jornada). Marque pela Agenda."),
+    nao_encontrada: t("Essa proposta já foi resolvida."),
+    acao_invalida: t("Não foi possível entender o pedido. Tente de novo."),
+  };
+  const avisoDaReuniao = params.reuniao ? (avisosDaReuniao[params.reuniao] ?? null) : null;
   const redes: Record<string, string> = {
     whatsapp: t("WhatsApp"),
     instagram: t("Instagram"),
@@ -98,6 +108,58 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
         </p>
       ) : null}
       {params.ok ? <p className="rounded-md border border-border bg-surface px-3 py-2 text-sm">{t("Gmail conectado. Os e-mails chegam em até 5 minutos.")}</p> : null}
+
+      {reunioes !== null ? (
+        <section id="reunioes" className="min-w-0">
+          <h2 className="mb-1 text-sm font-semibold">
+            {t("Reuniões para confirmar")} <span className="text-text-muted">({reunioes.length})</span>
+          </h2>
+          <p className="mb-2 text-xs text-text-muted">
+            {t("Mensagens de clientes que pedem ou confirmam uma reunião. Nada é marcado sozinho: confira e crie na sua agenda.")}
+          </p>
+          {avisoDaReuniao ? <p className="mb-2 rounded-md border border-border bg-surface px-3 py-2 text-sm">{avisoDaReuniao}</p> : null}
+          {reunioes.length === 0 ? <p className="text-sm text-text-muted">{t("Nenhuma reunião para confirmar.")}</p> : null}
+          <ul className="divide-y divide-border rounded-lg border border-border">
+            {reunioes.map((r) => {
+              const nome = (r.contact_id && nomes.get(r.contact_id)) || t("Sem contato");
+              return (
+                <li key={r.id} className="space-y-1 p-3">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <span className="min-w-0 truncate text-sm font-medium">{nome}</span>
+                    <span className="shrink-0 text-xs text-text-muted">
+                      {r.intent === "confirma" ? t("Confirmou") : t("Pediu reunião")}
+                    </span>
+                  </div>
+                  <p className="text-sm">
+                    {r.starts_at ? quando(r.starts_at, tag) : t("Sem horário definido")}
+                    {r.title ? ` · ${r.title}` : ""}
+                  </p>
+                  {r.excerpt ? <p className="line-clamp-2 text-xs text-text-muted">{r.excerpt}</p> : null}
+                  <div className="flex flex-wrap items-center gap-2 pt-1 text-xs">
+                    <span className="rounded-full border border-border px-2 py-0.5 text-text-muted">
+                      {r.source === "email" ? t("E-mail") : t("WhatsApp")}
+                    </span>
+                    {r.starts_at ? (
+                      <form action={`/api/v1/reunioes/propostas/${r.id}`} method="post">
+                        <input type="hidden" name="acao" value="criar" />
+                        <button type="submit" className="inline-flex min-h-11 items-center rounded-md bg-primary px-3 text-sm font-medium text-primary-foreground">
+                          {t("Criar na agenda")}
+                        </button>
+                      </form>
+                    ) : null}
+                    <form action={`/api/v1/reunioes/propostas/${r.id}`} method="post">
+                      <input type="hidden" name="acao" value="descartar" />
+                      <button type="submit" className="inline-flex min-h-11 items-center rounded-md border border-border px-3 text-sm">
+                        {t("Descartar")}
+                      </button>
+                    </form>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
 
       <section className="min-w-0">
         <h2 className="mb-1 text-sm font-semibold">

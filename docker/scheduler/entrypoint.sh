@@ -204,6 +204,10 @@ CRONS="
 # só leitura, as caixas do Gmail conectadas. Só organizações em
 # GMAIL_INTAKE_ORG_IDS; sem a configuração a rota não consulta nada.
 */5 * * * *|120|api/v1/cron/gmail-intake
+# Berseba: REUNIÃO PEDIDA POR MENSAGEM (migration 9011). De 5 em 5 minutos lê as
+# mensagens novas dos clientes que falam de reunião e propõe o evento. Só
+# organizações em MEETING_DETECTION_ORG_IDS; sem a configuração nada é lido.
+*/5 * * * *|120|api/v1/cron/meeting-detection
 "
 
 # CRONTAB_PATH é ponto de injeção do teste (tests/shell/scheduler-entrypoint.test.sh).
