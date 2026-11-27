@@ -311,11 +311,6 @@ export interface WaitlistRow {
   updated_at: string;
 }
 
-/**
- * Berseba (migration 9007): the client's entry on the avec salon's waitlist — what she asked
- * for, when she could come, the slot she was offered and what was booked. `created_by_user_id`
- * stays out: it is the team, not her.
- */
 /** Berseba (migration 9010): an e-mail read from a partner's Gmail, linked to the contact. */
 export interface GmailMessageRow {
   direction: string;
@@ -328,6 +323,21 @@ export interface GmailMessageRow {
   sent_at: string;
 }
 
+/** PostgREST filter for the data subject's e-mails (migration 9010): linked, or by their address. */
+export function filtroDosEmailsDoTitular(contactId: string, email: string | null): string {
+  const partes = [`contact_id.eq.${contactId}`];
+  const e = (email ?? "").trim().toLowerCase();
+  if (/^[^@\s,(){}"]+@[^@\s,(){}"]+$/.test(e)) {
+    partes.push(`counterpart_email.eq.${e}`, `from_email.eq.${e}`, `to_emails.cs.{${e}}`, `cc_emails.cs.{${e}}`);
+  }
+  return partes.join(",");
+}
+
+/**
+ * Berseba (migration 9007): the client's entry on the avec salon's waitlist — what she asked
+ * for, when she could come, the slot she was offered and what was booked. `created_by_user_id`
+ * stays out: it is the team, not her.
+ */
 export interface AvecWaitlistRow {
   pedido: Json;
   data_de: string;
@@ -1949,16 +1959,17 @@ export async function collectExportData(args: CollectArgs): Promise<ExportPayloa
     }
   }
 
-  // Berseba (migration 9010): e-mails read from the partners' Gmail and linked to the contact.
-  // Anonymization deletes them (`trg_gmail_messages_anonimizado`), so access delivers them. An
-  // install without the table (42P01 / PGRST205) yields an empty block.
+  // Berseba (migration 9010): e-mails read from the partners' Gmail that are linked to the contact
+  // or carry their address as sender, recipient, copy or counterpart — exactly what anonymization
+  // deletes (`trg_gmail_messages_anonimizado`), so access delivers it. An install without the
+  // table (42P01 / PGRST205) yields an empty block.
   let gmail_messages: GmailMessageRow[] = [];
   if (contactId) {
     const { data, error } = await admin
       .from("gmail_messages")
       .select("direction, from_email, from_name, to_emails, cc_emails, subject, body_text, sent_at")
       .eq("organization_id", organizationId)
-      .eq("contact_id", contactId)
+      .or(filtroDosEmailsDoTitular(contactId, contact?.email ?? null))
       .order("sent_at", { ascending: false })
       .limit(500);
     if (error) {

@@ -93,9 +93,23 @@ export function lerEnderecos(valor: string | null): Endereco[] {
   return saida;
 }
 
-function decodificar(data: string | undefined): string {
+/** The part's charset (`Content-Type: text/plain; charset=ISO-8859-1`), else UTF-8. */
+function charsetDa(parte: GmailPart): string {
+  const tipo = cabecalho(parte.headers, "Content-Type") ?? "";
+  const m = tipo.match(/charset\s*=\s*"?([A-Za-z0-9_.:-]+)"?/i);
+  return m ? m[1]!.toLowerCase() : "utf-8";
+}
+
+/** Gmail hands the part's bytes base64url-encoded, in the part's own charset. */
+function decodificar(parte: GmailPart): string {
+  const data = parte.body?.data;
   if (!data) return "";
-  return Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+  const bytes = Buffer.from(data.replace(/-/g, "+").replace(/_/g, "/"), "base64");
+  try {
+    return new TextDecoder(charsetDa(parte)).decode(bytes);
+  } catch {
+    return new TextDecoder("utf-8").decode(bytes);
+  }
 }
 
 function todasAsPartes(parte: GmailPart | undefined): GmailPart[] {
@@ -125,7 +139,7 @@ function corpo(payload: GmailPart | undefined): string | null {
   const partes = todasAsPartes(payload).filter((p) => !p.filename);
   const plano = partes.find((p) => p.mimeType === "text/plain" && p.body?.data);
   const html = partes.find((p) => p.mimeType === "text/html" && p.body?.data);
-  const texto = plano ? decodificar(plano.body?.data).trim() : html ? textoDoHtml(decodificar(html.body?.data)) : "";
+  const texto = plano ? decodificar(plano).trim() : html ? textoDoHtml(decodificar(html)) : "";
   if (!texto) return null;
   return texto.length > TETO_DO_CORPO ? texto.slice(0, TETO_DO_CORPO) : texto;
 }
@@ -145,9 +159,19 @@ function dominio(email: string): string {
   return email.slice(email.lastIndexOf("@") + 1);
 }
 
+/** Public webmail: sharing the domain says nothing about being the same company. */
+const WEBMAIL = /^(gmail|googlemail|hotmail|outlook|live|msn|yahoo|ymail|icloud|me|aol|bol|uol|terra|ig|protonmail|proton)\.[a-z.]+$/;
+
+/** Is this address outside the mailbox's company? */
+export function deFora(email: string, contaDaCaixa: string): boolean {
+  const conta = contaDaCaixa.trim().toLowerCase();
+  const casa = dominio(conta);
+  return WEBMAIL.test(casa) ? email !== conta : dominio(email) !== casa;
+}
+
 /**
- * The message as a row, or `null` when it has no id, no sender or no date, or when nobody outside
- * the mailbox's domain is in it (mail between the partners is not a client's).
+ * The message as a row, or `null` when it has no id, no sender or no date, when it is a draft, or
+ * when nobody outside the company is in it (mail between the partners is not a client's).
  */
 export function lerEmail(msg: GmailApiMessage, contaDaCaixa: string): EmailLido | null {
   const id = msg.id?.trim();
@@ -156,18 +180,19 @@ export function lerEmail(msg: GmailApiMessage, contaDaCaixa: string): EmailLido 
   const de = lerEnderecos(cabecalho(headers, "From"))[0];
   const quando = Number(msg.internalDate);
   if (!id || !thread || !de || !Number.isFinite(quando) || quando <= 0) return null;
+  if ((msg.labelIds ?? []).includes("DRAFT")) return null;
 
   const conta = contaDaCaixa.trim().toLowerCase();
-  const casa = dominio(conta);
   const para = lerEnderecos(cabecalho(headers, "To")).map((e) => e.email);
   const copia = lerEnderecos(cabecalho(headers, "Cc")).map((e) => e.email);
   const enviada = (msg.labelIds ?? []).includes("SENT") || de.email === conta;
 
-  const contraparte = enviada
-    ? ([...para, ...copia].find((e) => dominio(e) !== casa) ?? null)
-    : dominio(de.email) !== casa
+  // The person outside: the sender of an inbound; else (our own outbound, or a partner writing
+  // with a client in To/Cc) the first outside recipient.
+  const contraparte =
+    !enviada && deFora(de.email, conta)
       ? de.email
-      : null;
+      : ([...para, ...copia].find((e) => deFora(e, conta)) ?? null);
   if (!contraparte) return null;
 
   return {
@@ -182,19 +207,21 @@ export function lerEmail(msg: GmailApiMessage, contaDaCaixa: string): EmailLido 
     snippet: msg.snippet?.trim() || null,
     body_text: corpo(msg.payload),
     has_attachments: todasAsPartes(msg.payload).some((p) => Boolean(p.filename && p.body?.attachmentId)),
-    is_automated: !enviada && automatico(headers, de.email),
+    is_automated: !enviada && deFora(de.email, conta) && automatico(headers, de.email),
     sent_at: new Date(quando).toISOString(),
     counterpart_email: contraparte,
   };
 }
 
 /**
- * The Gmail search for one run: mail after `desde` minus one hour (dedup by the unique index
- * covers the overlap), without chats, spam, trash or the promotions/social/forums tabs.
+ * The Gmail search for one time window: mail after `desde` minus one hour (the stored and the
+ * skipped ids cover the overlap) and, when given, before `ate`; without chats, drafts, spam, trash
+ * or the promotions/social/forums tabs.
  */
-export function buscaDoGmail(desde: Date): string {
-  const segundos = Math.floor((desde.getTime() - 60 * 60 * 1000) / 1000);
-  return `after:${segundos} -in:chats -category:promotions -category:social -category:forums`;
+export function buscaDoGmail(desde: Date, ate?: Date): string {
+  const depois = Math.floor((desde.getTime() - 60 * 60 * 1000) / 1000);
+  const antes = ate ? ` before:${Math.ceil(ate.getTime() / 1000)}` : "";
+  return `after:${depois}${antes} -in:chats -in:drafts -category:promotions -category:social -category:forums`;
 }
 
 /** Link to the thread in Gmail, in the mailbox's own account. */

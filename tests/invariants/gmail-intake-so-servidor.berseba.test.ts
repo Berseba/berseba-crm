@@ -10,7 +10,7 @@ import { countAs, GOV_AGENT_A, sql } from "./gov-helpers";
  * `automation-claims-so-servidor.test.ts`. Plus the LGPD door: anonymizing the contact deletes
  * the e-mails linked to them.
  */
-const TABELAS = ["gmail_mailboxes", "gmail_messages"] as const;
+const TABELAS = ["gmail_mailboxes", "gmail_messages", "gmail_skipped_messages"] as const;
 
 describe("Gmail intake: only the server passes", () => {
   for (const tabela of TABELAS) {
@@ -37,7 +37,7 @@ describe("Gmail intake: only the server passes", () => {
     });
   }
 
-  it("anonymizing the contact deletes their e-mails, and only theirs", () => {
+  it("anonymizing the contact deletes their e-mails, and only theirs, and the ids are never read again", () => {
     const out = sql(`
       create temp table resultado (v text);
       do $t$
@@ -54,21 +54,57 @@ describe("Gmail intake: only the server passes", () => {
           (v_ana, v_org, 'Ana', 'ana@cliente.test'),
           (v_bia, v_org, 'Bia', 'bia@cliente.test');
         insert into public.gmail_mailboxes (id, organization_id, user_id, account_email)
-          values (v_caixa, v_org, v_user, 'socio@empresa.test');
+          values (v_caixa, v_org, v_user, 'socio-' || v_caixa || '@empresa.test');
         insert into public.gmail_messages
           (organization_id, mailbox_id, gmail_message_id, gmail_thread_id, direction, from_email, sent_at, counterpart_email, contact_id)
         values
           (v_org, v_caixa, 'm1', 't1', 'inbound', 'ana@cliente.test', now(), 'ana@cliente.test', v_ana),
           (v_org, v_caixa, 'm2', 't2', 'inbound', 'ana@cliente.test', now(), 'ana@cliente.test', null),
           (v_org, v_caixa, 'm3', 't3', 'inbound', 'bia@cliente.test', now(), 'bia@cliente.test', v_bia);
+        -- Ana only in copy of a mail to Bia: her address and the text must go too.
+        insert into public.gmail_messages
+          (organization_id, mailbox_id, gmail_message_id, gmail_thread_id, direction, from_email, cc_emails, sent_at, counterpart_email, contact_id)
+        values
+          (v_org, v_caixa, 'm4', 't4', 'outbound', 'socio@empresa.test', array['ana@cliente.test'], now(), 'bia@cliente.test', v_bia);
         update public.contacts set is_anonymized = true, anonymized_at = now(), email = null where id = v_ana;
         insert into resultado select 'restam=' || string_agg(gmail_message_id, ',' order by gmail_message_id)
                                     from public.gmail_messages where organization_id = v_org;
+        insert into resultado select 'lapides=' || string_agg(gmail_message_id || ':' || motivo, ',' order by gmail_message_id)
+                                    from public.gmail_skipped_messages where organization_id = v_org;
       end
       $t$;
       select v from resultado;
     `);
-    expect(out).toContain("restam=m3");
+    expect(out).toContain("restam=m3\n");
+    expect(out).toContain("lapides=m1:anonimizada,m2:anonimizada,m4:anonimizada");
+  });
+
+  it("one Gmail account is connected once in the whole installation", () => {
+    const out = sql(`
+      create temp table resultado (v text);
+      do $t$
+      declare
+        v_org uuid := gen_random_uuid();
+        v_outra uuid := gen_random_uuid();
+        v_u1 uuid := gen_random_uuid();
+        v_u2 uuid := gen_random_uuid();
+      begin
+        insert into public.organizations (id, slug, legal_name, display_name) values
+          (v_org, 'gmail-c-' || substr(v_org::text, 1, 8), 'gmail-c', 'gmail-c'),
+          (v_outra, 'gmail-d-' || substr(v_outra::text, 1, 8), 'gmail-d', 'gmail-d');
+        insert into auth.users (id, email) values (v_u1, 'u1-' || v_u1 || '@x.test'), (v_u2, 'u2-' || v_u2 || '@x.test');
+        insert into public.gmail_mailboxes (organization_id, user_id, account_email) values (v_org, v_u1, 'unica-' || v_org || '@empresa.test');
+        begin
+          insert into public.gmail_mailboxes (organization_id, user_id, account_email) values (v_outra, v_u2, 'unica-' || v_org || '@empresa.test');
+          insert into resultado values ('aceitou');
+        exception when unique_violation then
+          insert into resultado values ('recusou');
+        end;
+      end
+      $t$;
+      select v from resultado;
+    `);
+    expect(out).toContain("recusou");
   });
 
   it("a message cannot point at another organization's contact", () => {
@@ -88,7 +124,7 @@ describe("Gmail intake: only the server passes", () => {
         insert into auth.users (id, email) values (v_user, 'socio-' || v_user || '@empresa.test');
         insert into public.contacts (id, organization_id, name) values (v_contato, v_outra, 'Outra');
         insert into public.gmail_mailboxes (id, organization_id, user_id, account_email)
-          values (v_caixa, v_org, v_user, 'socio@empresa.test');
+          values (v_caixa, v_org, v_user, 'socio-' || v_caixa || '@empresa.test');
         begin
           insert into public.gmail_messages
             (organization_id, mailbox_id, gmail_message_id, gmail_thread_id, direction, from_email, sent_at, contact_id)

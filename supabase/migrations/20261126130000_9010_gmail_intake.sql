@@ -1,4 +1,4 @@
--- manifest: Berseba Gmail intake, read-only: gmail_mailboxes + gmail_messages (server-only), LGPD delete on anonymization
+-- manifest: Berseba Gmail intake, read-only: gmail_mailboxes + gmail_messages + gmail_skipped_messages (server-only), LGPD delete on anonymization
 -- Berseba (migration 9010): Gmail intake, read-only.
 --
 -- The partners of the organizations listed in GMAIL_INTAKE_ORG_IDS connect their own Gmail
@@ -6,7 +6,7 @@
 -- e-mails every 5 minutes and stores them here, linked to the contact whose e-mail matches the
 -- counterpart. Nothing is ever sent from here.
 --
--- Both tables are SERVER-ONLY: RLS on with no policy, nothing granted to anon/authenticated.
+-- The three tables are SERVER-ONLY: RLS on with no policy, nothing granted to anon/authenticated.
 -- The screen (`/app/emails`) reads them through the service role after checking the session's
 -- role. Tokens are `fn_encrypt_oauth` ciphertext, like `calendar_connections`.
 
@@ -22,7 +22,8 @@ create table if not exists public.gmail_mailboxes (
   status text not null default 'healthy',
   last_sync_at timestamptz,
   last_sync_error text,
-  -- Newest `internalDate` already read; the next run asks Gmail for mail after it (minus 1 h).
+  -- Everything received before this was listed and read; the next run asks Gmail for mail after it
+  -- (minus 1 h, deduplicated by the stored and the skipped ids).
   synced_until timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
@@ -32,7 +33,12 @@ alter table public.gmail_mailboxes drop constraint if exists gmail_mailboxes_sta
 alter table public.gmail_mailboxes add constraint gmail_mailboxes_status_check
   check (status in ('healthy', 'token_expired', 'scope_missing', 'disconnected', 'error'));
 
-create unique index if not exists uniq_gmail_mailboxes_pessoa
+-- One connection per Gmail account in the whole installation (lower-cased by the callback):
+-- the same inbox can never be copied into a second organization or under a second person.
+create unique index if not exists uniq_gmail_mailboxes_conta
+  on public.gmail_mailboxes (account_email);
+
+create index if not exists idx_gmail_mailboxes_pessoa
   on public.gmail_mailboxes (organization_id, user_id);
 
 create table if not exists public.gmail_messages (
@@ -83,15 +89,39 @@ create index if not exists idx_gmail_messages_sem_contato
   on public.gmail_messages (organization_id, counterpart_email)
   where contact_id is null and counterpart_email is not null;
 
+-- Gmail ids that are never read again: mail with nobody outside the company, drafts
+-- (`motivo = 'ignorada'`, pruned after 45 days), and mail erased by a contact's anonymization
+-- (`motivo = 'anonimizada'`, kept, so the 1 h overlap of the next run never stores it again).
+-- Only ids: no address, no text.
+create table if not exists public.gmail_skipped_messages (
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  mailbox_id uuid not null references public.gmail_mailboxes(id) on delete cascade,
+  gmail_message_id text not null,
+  motivo text not null default 'ignorada',
+  created_at timestamptz not null default now(),
+  primary key (mailbox_id, gmail_message_id)
+);
+
+alter table public.gmail_skipped_messages drop constraint if exists gmail_skipped_messages_motivo_check;
+alter table public.gmail_skipped_messages add constraint gmail_skipped_messages_motivo_check
+  check (motivo in ('ignorada', 'anonimizada'));
+
+create index if not exists idx_gmail_skipped_messages_poda
+  on public.gmail_skipped_messages (created_at)
+  where motivo = 'ignorada';
+
 alter table public.gmail_mailboxes enable row level security;
 alter table public.gmail_messages enable row level security;
+alter table public.gmail_skipped_messages enable row level security;
 
 do $grants_gmail_intake$
 begin
   revoke all on table public.gmail_mailboxes from anon, authenticated, service_role;
   revoke all on table public.gmail_messages from anon, authenticated, service_role;
+  revoke all on table public.gmail_skipped_messages from anon, authenticated, service_role;
   grant select, insert, update, delete on table public.gmail_mailboxes to service_role;
   grant select, insert, update, delete on table public.gmail_messages to service_role;
+  grant select, insert, update, delete on table public.gmail_skipped_messages to service_role;
 end
 $grants_gmail_intake$;
 
@@ -124,20 +154,33 @@ create trigger trg_gmail_messages_contato_da_organizacao
   before insert or update on public.gmail_messages
   for each row execute function public.fn_gmail_messages_contato_da_organizacao();
 
--- LGPD: anonymizing the contact deletes the e-mails linked to them. Same door as
--- `avec_waitlist` (9007) and `contact_identities` (9419): the flip of `contacts.is_anonymized`.
+-- LGPD: anonymizing the contact deletes every e-mail linked to them or carrying their old address
+-- as sender, recipient, copy or counterpart, and remembers the ids so the next run's overlap never
+-- stores them again. Same door as `avec_waitlist` (9007) and `contact_identities` (9419): the
+-- flip of `contacts.is_anonymized`.
 create or replace function public.fn_gmail_messages_anonimizado()
 returns trigger
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  v_email text := lower(trim(coalesce(old.email, '')));
 begin
   if new.is_anonymized and not coalesce(old.is_anonymized, false) then
-    delete from public.gmail_messages
-     where organization_id = new.organization_id
-       and (contact_id = new.id
-            or (old.email is not null and counterpart_email = lower(trim(old.email))));
+    with apagadas as (
+      delete from public.gmail_messages m
+       where m.organization_id = new.organization_id
+         and (m.contact_id = new.id
+              or (v_email <> '' and (m.counterpart_email = v_email
+                                     or m.from_email = v_email
+                                     or v_email = any (m.to_emails)
+                                     or v_email = any (m.cc_emails))))
+      returning m.organization_id, m.mailbox_id, m.gmail_message_id
+    )
+    insert into public.gmail_skipped_messages (organization_id, mailbox_id, gmail_message_id, motivo)
+    select organization_id, mailbox_id, gmail_message_id, 'anonimizada' from apagadas
+    on conflict (mailbox_id, gmail_message_id) do update set motivo = 'anonimizada';
   end if;
   return null;
 end;
@@ -153,6 +196,8 @@ create trigger trg_gmail_messages_anonimizado
 
 comment on table public.gmail_mailboxes is
   'Berseba (migration 9010): a partner''s Gmail connected read-only (gmail.readonly). One per person per organization. Server-only; tokens ciphered by fn_encrypt_oauth.';
+comment on table public.gmail_skipped_messages is
+  'Berseba (migration 9010): Gmail ids the intake never reads again (no outside party, drafts, erased by anonymization). Ids only. Server-only.';
 comment on table public.gmail_messages is
   'Berseba (migration 9010): e-mails read from a connected Gmail, linked to the contact by the counterpart address. Server-only. Deleted when the contact is anonymized.';
 

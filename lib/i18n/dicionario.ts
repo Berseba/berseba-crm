@@ -66,6 +66,7 @@ export const DICIONARIO: Traducoes = {
   "Enviado de": { es: "Enviado desde" },
   "Abrir no Gmail": { es: "Abrir en Gmail" },
   "Lendo": { es: "Leyendo" },
+  "Esta conta de e-mail já está conectada por outra pessoa.": { es: "Esta cuenta de correo ya está conectada por otra persona." },
   "E-mails do Gmail": { es: "Correos de Gmail" },
   "Cada sócio conecta o próprio Gmail, só leitura, e os e-mails aparecem ligados ao contato e ao negócio.": { es: "Cada socio conecta su propio Gmail, solo lectura, y los correos aparecen vinculados al contacto y al negocio." },
   "Gmail:": { es: "Gmail:" },

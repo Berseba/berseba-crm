@@ -58,6 +58,21 @@ function voltar(parametro: string, req: NextRequest): NextResponse {
   return resposta;
 }
 
+/** Best effort: a refused consent should not leave a live grant on the person's Google account. */
+async function revogarNoGoogle(token: string | null): Promise<void> {
+  if (!token) return;
+  try {
+    await fetch("https://oauth2.googleapis.com/revoke", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ token }).toString(),
+      signal: AbortSignal.timeout(5_000),
+    });
+  } catch {
+    // Nothing was stored; the person can still remove the app in their Google account.
+  }
+}
+
 export async function GET(req: NextRequest): Promise<NextResponse> {
   const url = new URL(req.url);
   if (url.searchParams.get("error")) return voltar("erro=conexao_cancelada", req);
@@ -130,11 +145,27 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
     return voltar("erro=conta_indisponivel", req);
   }
-  // LGPD: only the mailboxes the installation lists. Anything else is refused, and nothing of it
-  // is stored (the tokens are dropped here).
+  // LGPD: only the mailboxes the installation lists. Anything else is refused, nothing of it is
+  // stored, and the grant Google just gave is revoked so it does not linger on that account.
   if (!contaPermitida(config, conta)) {
+    await revogarNoGoogle(token.refresh_token);
     await audit({ action: "gmail.conexao_falhou", organizationId, metadata: { reason: "conta_fora_da_lista", user_id: userId } });
     return voltar("erro=conta_nao_permitida", req);
+  }
+
+  // One connection per Gmail account in the installation (unique index): an inbox already
+  // connected by someone else, or in another organization, is never copied a second time.
+  const { data: existente, error: erroDaBusca } = await admin
+    .from("gmail_mailboxes")
+    .select("organization_id, user_id")
+    .eq("account_email", conta)
+    .maybeSingle();
+  if (erroDaBusca) return voltar("erro=gravar_falhou", req);
+  const dono = existente as { organization_id: string; user_id: string } | null;
+  if (dono && (dono.organization_id !== organizationId || dono.user_id !== userId)) {
+    await revogarNoGoogle(token.refresh_token);
+    await audit({ action: "gmail.conexao_falhou", organizationId, metadata: { reason: "conta_em_uso", user_id: userId } });
+    return voltar("erro=conta_em_uso", req);
   }
 
   const accessCifrado = await encryptWebhookSecret(admin, token.access_token);
@@ -153,7 +184,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
       status: "healthy",
       last_sync_error: null,
     },
-    { onConflict: "organization_id,user_id" },
+    { onConflict: "account_email" },
   );
   if (error) {
     await audit({ action: "gmail.conexao_falhou", organizationId, metadata: { reason: "gravar", detalhe: error.message, user_id: userId } });

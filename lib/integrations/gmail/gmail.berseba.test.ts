@@ -17,7 +17,8 @@ vi.mock("@/lib/agenda/google/config", () => ({ configuracaoDoGoogle: async () =>
 const { capacidadesDoGmail, contaPermitida, gmailIntakeConfigFor, parseGmailIntakeConfig, urlDeConsentimentoDoGmail } =
   await import("./config");
 const { buscaDoGmail, lerEmail, lerEnderecos, textoDoHtml, TETO_DO_CORPO } = await import("./message");
-const { escolherDaRodada, proximoMarco } = await import("./intake");
+const { escolherDaRodada, proximaJanela, proximoMarco } = await import("./intake");
+const { filtroDosEmailsDoTitular } = await import("@/lib/lgpd/export-collector");
 const { conversasDeEmail } = await import("./conversas");
 
 const b64 = (s: string) => Buffer.from(s, "utf8").toString("base64url");
@@ -123,6 +124,40 @@ describe("lerEmail", () => {
     expect(e.is_automated).toBe(false);
   });
 
+  it("a partner writing with a client in copy: the client is the counterpart", () => {
+    const e = lerEmail(mensagem({ from: "outro@empresa.com.br", cc: "Ana <ana@cliente.com>" }), CAIXA)!;
+    expect(e.counterpart_email).toBe("ana@cliente.com");
+    expect(e.is_automated).toBe(false);
+  });
+
+  it("drafts are never stored", () => {
+    expect(lerEmail(mensagem({ from: CAIXA, to: "ana@cliente.com", labels: ["DRAFT"] }), CAIXA)).toBeNull();
+  });
+
+  it("on a public webmail mailbox, sharing the domain is not being internal", () => {
+    const e = lerEmail(mensagem({ from: "cliente@gmail.com", to: "socio@gmail.com" }), "socio@gmail.com")!;
+    expect(e.counterpart_email).toBe("cliente@gmail.com");
+  });
+
+  it("decodes the part in its own charset", () => {
+    const latin1 = Buffer.from("Reunião às 10h", "latin1").toString("base64url");
+    const e = lerEmail(
+      mensagem({
+        payload: {
+          parts: [
+            {
+              mimeType: "text/plain",
+              headers: [{ name: "Content-Type", value: 'text/plain; charset="ISO-8859-1"' }],
+              body: { data: latin1 },
+            },
+          ],
+        },
+      }),
+      CAIXA,
+    )!;
+    expect(e.body_text).toBe("Reunião às 10h");
+  });
+
   it("mail only between the partners is not stored", () => {
     expect(lerEmail(mensagem({ from: "outro@empresa.com.br" }), CAIXA)).toBeNull();
     expect(lerEmail(mensagem({ from: CAIXA, to: "outro@empresa.com.br", labels: ["SENT"] }), CAIXA)).toBeNull();
@@ -171,11 +206,19 @@ describe("textoDoHtml", () => {
 });
 
 describe("the run", () => {
-  it("searches from one hour before the mark, without chats or the promotion tabs", () => {
-    const q = buscaDoGmail(new Date("2026-11-26T12:00:00Z"));
+  it("searches one window from one hour before the mark, without chats, drafts or the promotion tabs", () => {
+    const q = buscaDoGmail(new Date("2026-11-26T12:00:00Z"), new Date("2026-11-27T12:00:00Z"));
     expect(q).toBe(
-      `after:${Date.UTC(2026, 10, 26, 11, 0, 0) / 1000} -in:chats -category:promotions -category:social -category:forums`,
+      `after:${Date.UTC(2026, 10, 26, 11, 0, 0) / 1000} before:${Date.UTC(2026, 10, 27, 12, 0, 0) / 1000} ` +
+        "-in:chats -in:drafts -category:promotions -category:social -category:forums",
     );
+  });
+
+  it("narrows a window Gmail cut, never under one hour", () => {
+    const h = 60 * 60 * 1000;
+    expect(proximaJanela(8 * h, true)).toBe(4 * h);
+    expect(proximaJanela(8 * h, false)).toBe(8 * h);
+    expect(proximaJanela(h, true)).toBe(h);
   });
 
   it("reads the oldest new ids first, at most the cap", () => {
@@ -185,19 +228,36 @@ describe("the run", () => {
       ler: ["n1", "n2", "n3", "n4", "n5"],
       restam: false,
     });
+    expect(escolherDaRodada(listados, new Set(), 0)).toEqual({ ler: [], restam: true });
   });
 
-  it("moves the mark to now when caught up, to the newest read when capped, never back", () => {
+  it("moves the mark to the window's end when complete, to the newest read when not, never back", () => {
     const agora = new Date("2026-11-26T12:00:00Z");
-    const lido = (sent_at: string) => ({ sent_at }) as never;
-    expect(proximoMarco(null, [], false, agora)).toBe(agora.toISOString());
-    expect(proximoMarco(null, [lido("2026-11-20T00:00:00.000Z"), lido("2026-11-21T00:00:00.000Z")], true, agora)).toBe(
-      "2026-11-21T00:00:00.000Z",
+    const ate = new Date("2026-11-20T00:00:00Z");
+    const t = (iso: string) => new Date(iso).getTime();
+    // Complete window: its end, even when everything in it was skipped (no stored message).
+    expect(proximoMarco(null, ate, agora, [], true)).toBe(ate.toISOString());
+    // A window past now is capped at now.
+    expect(proximoMarco(null, new Date("2026-12-01T00:00:00Z"), agora, [], true)).toBe(agora.toISOString());
+    // Cut short: the newest message read (skipped ones count too).
+    expect(proximoMarco(null, ate, agora, [t("2026-11-15T00:00:00Z"), t("2026-11-16T00:00:00Z")], false)).toBe(
+      "2026-11-16T00:00:00.000Z",
     );
-    expect(proximoMarco("2026-11-22T00:00:00.000Z", [lido("2026-11-21T00:00:00.000Z")], true, agora)).toBe(
-      "2026-11-22T00:00:00.000Z",
+    // Cut short with nothing read: stays.
+    expect(proximoMarco("2026-11-10T00:00:00.000Z", ate, agora, [], false)).toBe("2026-11-10T00:00:00.000Z");
+    // Never back.
+    expect(proximoMarco("2026-11-22T00:00:00.000Z", ate, agora, [], true)).toBe("2026-11-22T00:00:00.000Z");
+  });
+});
+
+describe("filtroDosEmailsDoTitular", () => {
+  it("linked rows, plus the address as counterpart, sender, recipient or copy", () => {
+    expect(filtroDosEmailsDoTitular("k1", " Ana@Cliente.com ")).toBe(
+      "contact_id.eq.k1,counterpart_email.eq.ana@cliente.com,from_email.eq.ana@cliente.com," +
+        "to_emails.cs.{ana@cliente.com},cc_emails.cs.{ana@cliente.com}",
     );
-    expect(proximoMarco("2026-11-22T00:00:00.000Z", [], true, agora)).toBe("2026-11-22T00:00:00.000Z");
+    expect(filtroDosEmailsDoTitular("k1", null)).toBe("contact_id.eq.k1");
+    expect(filtroDosEmailsDoTitular("k1", "a,b@x.com")).toBe("contact_id.eq.k1");
   });
 });
 

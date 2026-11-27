@@ -11,6 +11,8 @@
  * installation's Google app (the one the agenda uses), with this module's own redirect URI.
  * Never throws.
  */
+import { createHmac } from "node:crypto";
+
 import { configuracaoDoGoogle } from "@/lib/agenda/google/config";
 import { env } from "@/lib/env";
 import type { CapacidadeDaOrganizacao } from "@/lib/organizacao/capacidades";
@@ -102,7 +104,13 @@ export function urlDeConsentimentoDoGmail(app: AppDoGmail, opcoes: { state: stri
   return `https://accounts.google.com/o/oauth2/v2/auth?${parametros.toString()}`;
 }
 
-/** The state of this flow is signed with its own key, so an agenda state never opens it. */
+/**
+ * The state of this flow is signed with its own key, derived from INTERNAL_SECRET, so an agenda
+ * state never opens it. A missing or short base secret gives "" and `emitirEstado` refuses it, as
+ * the agenda does: the derivation must never lengthen a weak secret into a valid-looking key.
+ */
 export function segredoDoEstadoDoGmail(): string {
-  return `${env.INTERNAL_SECRET}:gmail-intake`;
+  const base = (env.INTERNAL_SECRET ?? "").trim();
+  if (base.length < 16) return "";
+  return createHmac("sha256", base).update("gmail-intake").digest("hex");
 }

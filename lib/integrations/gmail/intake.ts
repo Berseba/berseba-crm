@@ -1,10 +1,14 @@
 /**
  * Berseba: one intake run over a connected Gmail (migration 9010).
  *
- * Renews the token when due, asks Gmail for the mail after `synced_until` (minus one hour), reads
- * the new ones oldest first (at most `TETO_POR_RODADA` per run), links each to the contact whose
- * e-mail is the counterpart, and stores them. Then relinks stored e-mails whose contact was
- * created since. Every chain filters by `organization_id`. Never sends anything.
+ * Renews the token when due, then walks forward from `synced_until` in time windows: each window
+ * is listed whole (narrowed when Gmail has more than `TETO_DA_LISTA` in it, so nothing older is
+ * lost), its new ids are read oldest first (at most `TETO_POR_RODADA` per run, within
+ * `PRAZO_DE_LEITURA_MS`), mail with an outside party is stored linked to the contact, and every
+ * other id read (internal mail, drafts) is remembered in `gmail_skipped_messages`, so no id is ever
+ * read twice and the mark always moves. What was read before a failure is kept. Then relinks
+ * stored e-mails whose contact was created since. Every chain filters by `organization_id`.
+ * Never sends anything.
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -20,8 +24,17 @@ import { buscaDoGmail, lerEmail, type EmailLido } from "./message";
 export const JANELA_INICIAL_DIAS = 14;
 /** Messages read per mailbox per run (one Gmail call each). */
 export const TETO_POR_RODADA = 50;
-/** Ids listed per run. */
+/** Ids listed per window; more than this narrows the window. */
 const TETO_DA_LISTA = 500;
+/** At the one-hour minimum the window cannot narrow any more: the list pages this far instead. */
+const TETO_DA_LISTA_NA_MENOR_JANELA = 5000;
+const HORA_MS = 60 * 60 * 1000;
+const JANELA_MAXIMA_MS = 7 * 24 * HORA_MS;
+const JANELAS_POR_RODADA = 20;
+/** The scheduler gives the cron 120 s; reading stops here and the rest goes to the next run. */
+const PRAZO_DE_LEITURA_MS = 60_000;
+/** Skipped ids older than this are never listed again (the mark only moves forward). */
+const PODA_DAS_IGNORADAS_DIAS = 45;
 
 export interface CaixaDoGmail {
   id: string;
@@ -53,16 +66,36 @@ export function escolherDaRodada(listados: string[], jaGuardados: ReadonlySet<st
   restam: boolean;
 } {
   const novos = listados.filter((id) => !jaGuardados.has(id));
+  if (teto <= 0) return { ler: [], restam: novos.length > 0 };
   const ler = novos.slice(-teto).reverse();
   return { ler, restam: novos.length > ler.length };
 }
 
-/** Pure: the next `synced_until`. Caught up → now; capped → the newest message read. */
-export function proximoMarco(atual: string | null, lidos: EmailLido[], restam: boolean, agora: Date): string | null {
-  if (!restam) return agora.toISOString();
-  const maisNovo = lidos.reduce<string | null>((m, e) => (m === null || e.sent_at > m ? e.sent_at : m), null);
-  if (!maisNovo) return atual;
-  return atual && atual > maisNovo ? atual : maisNovo;
+/**
+ * Pure: the next `synced_until` after one window `[.., ate)`. Complete (every listed id known or
+ * read, the list not cut) → the window's end, never past now; otherwise → the newest message read
+ * (everything older in the window was read first). Never moves back.
+ */
+export function proximoMarco(
+  atual: string | null,
+  ate: Date,
+  agora: Date,
+  lidosEm: number[],
+  completa: boolean,
+): string | null {
+  const candidato = completa
+    ? Math.min(ate.getTime(), agora.getTime())
+    : lidosEm.length > 0
+      ? Math.max(...lidosEm)
+      : null;
+  if (candidato === null) return atual;
+  const atualMs = atual ? new Date(atual).getTime() : Number.NEGATIVE_INFINITY;
+  return new Date(Math.max(atualMs, candidato)).toISOString();
+}
+
+/** Pure: the window to list next, halved when Gmail cut the list, never under one hour. */
+export function proximaJanela(janelaMs: number, truncada: boolean): number {
+  return truncada ? Math.max(HORA_MS, Math.floor(janelaMs / 2)) : janelaMs;
 }
 
 async function contatosPorEmail(admin: SupabaseClient, org: string, emails: string[]): Promise<Map<string, string>> {
@@ -85,17 +118,20 @@ async function contatosPorEmail(admin: SupabaseClient, org: string, emails: stri
   return mapa;
 }
 
-async function guardados(admin: SupabaseClient, caixa: CaixaDoGmail, ids: string[]): Promise<Set<string>> {
+/** Ids already stored or skipped in this mailbox. */
+async function conhecidos(admin: SupabaseClient, caixa: CaixaDoGmail, ids: string[]): Promise<Set<string>> {
   const existem = new Set<string>();
-  for (let i = 0; i < ids.length; i += 100) {
-    const { data, error } = await admin
-      .from("gmail_messages")
-      .select("gmail_message_id")
-      .eq("organization_id", caixa.organization_id)
-      .eq("mailbox_id", caixa.id)
-      .in("gmail_message_id", ids.slice(i, i + 100));
-    if (error) throw new Error(`gmail_intake: guardados: ${error.message}`);
-    for (const r of (data ?? []) as Array<{ gmail_message_id: string }>) existem.add(r.gmail_message_id);
+  for (const tabela of ["gmail_messages", "gmail_skipped_messages"] as const) {
+    for (let i = 0; i < ids.length; i += 100) {
+      const { data, error } = await admin
+        .from(tabela)
+        .select("gmail_message_id")
+        .eq("organization_id", caixa.organization_id)
+        .eq("mailbox_id", caixa.id)
+        .in("gmail_message_id", ids.slice(i, i + 100));
+      if (error) throw new Error(`gmail_intake: ${tabela}: ${error.message}`);
+      for (const r of (data ?? []) as Array<{ gmail_message_id: string }>) existem.add(r.gmail_message_id);
+    }
   }
   return existem;
 }
@@ -182,6 +218,7 @@ export async function lerCaixa(
   caixa: CaixaDoGmail,
   agora: Date,
   f: GmailFetch = fetch,
+  relogio: () => number = Date.now,
 ): Promise<ResultadoDaCaixa> {
   const base = { caixa: caixa.id, lidas: 0, gravadas: 0, religadas: 0, restam: false };
   const fim = async (r: ResultadoDaCaixa, marco?: string | null, renovar = false): Promise<ResultadoDaCaixa> => {
@@ -202,32 +239,90 @@ export async function lerCaixa(
   const a = await acesso(admin, app, caixa, agora);
   if (!a.ok) return fim({ ...base, status: a.status, erro: a.erro });
 
-  const desde = caixa.synced_until
+  const inicio = relogio();
+  let desde = caixa.synced_until
     ? new Date(caixa.synced_until)
-    : new Date(agora.getTime() - JANELA_INICIAL_DIAS * 24 * 60 * 60 * 1000);
-  const lista = await idsDasMensagens(a.accessToken, buscaDoGmail(desde), TETO_DA_LISTA, f);
-  if (!lista.ok) {
-    return fim({ ...base, status: statusDaRecusa(lista.status, lista.erro), erro: lista.erro }, undefined, lista.status === 401);
-  }
-
-  const { ler, restam } = escolherDaRodada(lista.dados, await guardados(admin, caixa, lista.dados));
+    : new Date(agora.getTime() - JANELA_INICIAL_DIAS * 24 * HORA_MS);
+  let janelaMs = JANELA_MAXIMA_MS;
+  let tetoDaLista = TETO_DA_LISTA;
+  let marco = caixa.synced_until;
+  let status: ResultadoDaCaixa["status"] = "healthy";
+  let erro: string | undefined;
+  let renovar = false;
+  let restam = false;
+  let lidas = 0;
   const lidos: EmailLido[] = [];
-  for (const id of ler) {
-    const m = await mensagemDoGmail(a.accessToken, id, f);
-    if (!m.ok) {
-      // A message gone between the list and the read (deleted) is skipped; anything else stops
-      // the run here, and the next run starts again from the same mark.
-      if (m.status === 404) continue;
-      return fim(
-        { ...base, lidas: lidos.length, status: statusDaRecusa(m.status, m.erro), erro: m.erro },
-        undefined,
-        m.status === 401,
-      );
+  const ignoradas: string[] = [];
+
+  for (let n = 0; n < JANELAS_POR_RODADA; n++) {
+    const ate = new Date(Math.min(desde.getTime() + janelaMs, agora.getTime()));
+    const lista = await idsDasMensagens(a.accessToken, buscaDoGmail(desde, ate), tetoDaLista, f);
+    if (!lista.ok) {
+      status = statusDaRecusa(lista.status, lista.erro);
+      erro = lista.erro;
+      renovar = lista.status === 401;
+      restam = true;
+      break;
     }
-    const e = lerEmail(m.dados, caixa.account_email);
-    if (e) lidos.push(e);
+    const { ids, truncada } = lista.dados;
+    if (truncada && janelaMs > HORA_MS) {
+      // More than the list holds: narrow the window and list again, so nothing older is lost.
+      janelaMs = proximaJanela(janelaMs, true);
+      continue;
+    }
+    if (truncada && tetoDaLista < TETO_DA_LISTA_NA_MENOR_JANELA) {
+      // Even one hour holds more than 500: page through the whole hour, oldest included.
+      tetoDaLista = TETO_DA_LISTA_NA_MENOR_JANELA;
+      continue;
+    }
+
+    const { ler, restam: sobra } = escolherDaRodada(ids, await conhecidos(admin, caixa, ids), TETO_POR_RODADA - lidas);
+    const lidosEm: number[] = [];
+    let parou = sobra;
+    for (const id of ler) {
+      if (relogio() - inicio > PRAZO_DE_LEITURA_MS) {
+        parou = true;
+        break;
+      }
+      const m = await mensagemDoGmail(a.accessToken, id, f);
+      if (!m.ok) {
+        // Gone between the list and the read: never listed again.
+        if (m.status === 404) continue;
+        status = statusDaRecusa(m.status, m.erro);
+        erro = m.erro;
+        renovar = m.status === 401;
+        parou = true;
+        break;
+      }
+      lidas += 1;
+      const quando = Number(m.dados.internalDate);
+      if (Number.isFinite(quando) && quando > 0) lidosEm.push(quando);
+      const e = lerEmail(m.dados, caixa.account_email);
+      if (e) lidos.push(e);
+      else ignoradas.push(id);
+    }
+
+    const completa = !parou && !truncada;
+    marco = proximoMarco(marco, ate, agora, lidosEm, completa);
+    if (!completa || ate.getTime() >= agora.getTime() || lidas >= TETO_POR_RODADA) {
+      restam = !completa || ate.getTime() < agora.getTime();
+      break;
+    }
+    desde = ate;
   }
 
+  // What was read is kept even when the run stopped early. The mark is written only after it.
+  if (ignoradas.length > 0) {
+    const { error } = await admin.from("gmail_skipped_messages").upsert(
+      ignoradas.map((gmail_message_id) => ({
+        organization_id: caixa.organization_id,
+        mailbox_id: caixa.id,
+        gmail_message_id,
+      })),
+      { onConflict: "mailbox_id,gmail_message_id", ignoreDuplicates: true },
+    );
+    if (error) return fim({ ...base, lidas, status, erro: `ignoradas: ${error.message}` });
+  }
   const contatos = await contatosPorEmail(
     admin,
     caixa.organization_id,
@@ -245,13 +340,18 @@ export async function lerCaixa(
       .from("gmail_messages")
       .upsert(linhas, { onConflict: "mailbox_id,gmail_message_id", ignoreDuplicates: true })
       .select("id");
-    if (error) return fim({ ...base, lidas: lidos.length, status: "healthy", erro: `gravar: ${error.message}` });
+    if (error) return fim({ ...base, lidas, status, erro: `gravar: ${error.message}` });
     gravadas = data?.length ?? 0;
   }
 
+  await admin
+    .from("gmail_skipped_messages")
+    .delete()
+    .eq("organization_id", caixa.organization_id)
+    .eq("mailbox_id", caixa.id)
+    .eq("motivo", "ignorada")
+    .lt("created_at", new Date(agora.getTime() - PODA_DAS_IGNORADAS_DIAS * 24 * HORA_MS).toISOString());
+
   const religadas = await religar(admin, caixa.organization_id);
-  return fim(
-    { caixa: caixa.id, status: "healthy", lidas: ler.length, gravadas, religadas, restam },
-    proximoMarco(caixa.synced_until, lidos, restam, agora),
-  );
+  return fim({ caixa: caixa.id, status, lidas, gravadas, religadas, restam, erro }, marco, renovar);
 }

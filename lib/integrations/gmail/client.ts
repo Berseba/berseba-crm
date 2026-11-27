@@ -6,7 +6,7 @@
 import type { GmailApiMessage } from "./message";
 
 const BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
-const PRAZO_MS = 15_000;
+const PRAZO_MS = 10_000;
 
 export type GmailFetch = typeof fetch;
 
@@ -39,24 +39,27 @@ export async function perfilDoGmail(accessToken: string, f: GmailFetch = fetch):
   return ler("/profile", accessToken, f);
 }
 
-/** Message ids matching `q`, newest first, at most `teto` (pages of 100). */
+/**
+ * Message ids matching `q`, newest first, at most `teto` (pages of up to 500). `truncada` = Gmail
+ * had more: the caller narrows the window instead of losing the older ones.
+ */
 export async function idsDasMensagens(
   accessToken: string,
   q: string,
   teto: number,
   f: GmailFetch = fetch,
-): Promise<Resposta<string[]>> {
+): Promise<Resposta<{ ids: string[]; truncada: boolean }>> {
   const ids: string[] = [];
   let pageToken: string | undefined;
   do {
-    const p = new URLSearchParams({ q, maxResults: "100" });
+    const p = new URLSearchParams({ q, maxResults: String(Math.min(500, teto)) });
     if (pageToken) p.set("pageToken", pageToken);
     const r = await ler<{ messages?: Array<{ id?: string }>; nextPageToken?: string }>(`/messages?${p}`, accessToken, f);
     if (!r.ok) return r;
     for (const m of r.dados.messages ?? []) if (m.id) ids.push(m.id);
     pageToken = r.dados.nextPageToken;
   } while (pageToken && ids.length < teto);
-  return { ok: true, dados: ids.slice(0, teto) };
+  return { ok: true, dados: { ids: ids.slice(0, teto), truncada: Boolean(pageToken) || ids.length > teto } };
 }
 
 export async function mensagemDoGmail(accessToken: string, id: string, f: GmailFetch = fetch): Promise<Resposta<GmailApiMessage>> {

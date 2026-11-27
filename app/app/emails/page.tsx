@@ -25,6 +25,7 @@ function errosDaVolta(t: (texto: string) => string): Record<string, string> {
     conta_indisponivel: t("Não foi possível ler qual é a conta do Gmail."),
     conta_nao_permitida: t("Esta conta de e-mail não está na lista das caixas permitidas."),
     cifra_indisponivel: t("Não foi possível guardar a conexão com segurança."),
+    conta_em_uso: t("Esta conta de e-mail já está conectada por outra pessoa."),
     gravar_falhou: t("Não foi possível salvar. Tente de novo."),
   };
 }
@@ -65,7 +66,8 @@ export default async function Page({ searchParams }: { searchParams: Promise<Rec
 
   const { caixas, conversas, nomes, negocios } = await lerTelaDeEmails(org.orgId, new Date());
   const contaDaCaixa = new Map(caixas.map((c) => [c.id, c.account_email]));
-  const minha = caixas.find((c) => c.user_id === user.id);
+  const minhas = caixas.filter((c) => c.user_id === user.id);
+  const minha = minhas.find((c) => c.status === "healthy") ?? minhas[0];
 
   const erros = errosDaVolta(t);
   const situacao = situacoes(t);
