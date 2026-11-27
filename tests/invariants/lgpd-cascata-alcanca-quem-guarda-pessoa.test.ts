@@ -51,6 +51,12 @@ const PADRAO_PII =
  * razão precisa dizer QUANDO sai, não só por que está.
  */
 const DIVIDA_LGPD_CONHECIDA: Record<string, string> = {
+  gmail_messages:
+    "Berseba, migration 9010: os e-mails lidos do Gmail dos sócios (assunto, corpo, endereços). " +
+    "⚠️ ELA JÁ ESTÁ PROTEGIDA: o gatilho `trg_gmail_messages_anonimizado` APAGA os e-mails do contato " +
+    "(e os ainda sem contato com o e-mail antigo dele) na virada de is_anonymized, e " +
+    "`tests/invariants/gmail-intake-so-servidor.berseba.test.ts` prova o efeito. A entrada existe só " +
+    "porque ESTE instrumento lê UMA função e não enxerga gatilho — a mesma razão de crm_tasks.",
   calendar_appointments:
     "Achado do levantamento 13 §2 (QAVivo/maestro). Guarda title e notes do compromisso. " +
     "Conserto DESPACHADO ao Arquiteto — sai desta lista no mesmo commit que acrescentar a tabela à cascata.",
