@@ -23810,7 +23810,8 @@ comment on table public.gmail_messages is
 -- ---- e-mail to funnel (migration 9012) ----
 -- Berseba. Right after the 9010 table it alters, not at the end of the file.
 alter table public.gmail_messages
-  add column if not exists funil_em timestamptz;
+  add column if not exists funil_em timestamptz,
+  add column if not exists funil_tentativas integer not null default 0;
 
 create index if not exists idx_gmail_messages_sem_funil
   on public.gmail_messages (organization_id, sent_at)
@@ -23818,6 +23819,8 @@ create index if not exists idx_gmail_messages_sem_funil
 
 comment on column public.gmail_messages.funil_em is
   'Berseba (migration 9012): when this e-mail was taken to the contact and the deal timeline; null = not yet.';
+comment on column public.gmail_messages.funil_tentativas is
+  'Berseba (migration 9012): failed attempts to take this e-mail to the funnel; after 3 it is given up (logged).';
 
 -- ---- meeting proposals (migration 9011) ----
 -- Berseba. Right after our 9010 block, not at the end of the file (upstream appends there); the

@@ -12,7 +12,7 @@ import { type NextRequest } from "next/server";
 import { fail, ok } from "@/lib/api/wrappers";
 import { autorizaCron } from "@/lib/auth/cron-auth";
 import { appDoGmail, gmailIntakeConfig } from "@/lib/integrations/gmail/config";
-import { levarEmailsAoFunil } from "@/lib/integrations/gmail/funil";
+import { enderecosDaCasa, levarEmailsAoFunil } from "@/lib/integrations/gmail/funil";
 import { COLUNAS_DA_CAIXA, lerCaixa, PRAZO_DE_LEITURA_MS, type CaixaDoGmail } from "@/lib/integrations/gmail/intake";
 import { logger } from "@/lib/logger";
 import { idsDeOrgsParadas } from "@/lib/organizacao/operante";
@@ -63,9 +63,9 @@ async function handle(req: NextRequest): Promise<Response> {
     }
     // Berseba (#171, slice 4): what was read reaches the contact and the funnel.
     try {
-      const { data: todas } = await admin.from("gmail_mailboxes").select("account_email").eq("organization_id", org);
-      const nossas = new Set(((todas ?? []) as Array<{ account_email: string }>).map((c) => c.account_email.toLowerCase()));
-      funis.push({ organization_id: org, ...(await levarEmailsAoFunil(admin, org, nossas, agora)) });
+      const nossas = await enderecosDaCasa(admin, org);
+      // The funnel step shares the run's budget: the intake's deadline plus 30 s, inside the 120 s.
+      funis.push({ organization_id: org, ...(await levarEmailsAoFunil(admin, org, nossas, agora, prazo + 30_000)) });
     } catch (erro) {
       logger.warn("gmail_intake: funnel step failed", {
         organization_id: org,
