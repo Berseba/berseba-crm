@@ -18,8 +18,14 @@ const { lerCaixa, TETO_POR_RODADA } = await import("./intake");
 type Linha = Record<string, unknown>;
 
 function bancoFalso() {
-  const tabelas: Record<string, Linha[]> = { gmail_messages: [], gmail_skipped_messages: [], gmail_mailboxes: [], contacts: [] };
-  function consulta(tabela: string) {
+  const tabelas: { gmail_messages: Linha[]; gmail_skipped_messages: Linha[]; gmail_mailboxes: Linha[]; contacts: Linha[] } = {
+    gmail_messages: [],
+    gmail_skipped_messages: [],
+    gmail_mailboxes: [],
+    contacts: [],
+  };
+  type Tabela = keyof typeof tabelas;
+  function consulta(tabela: Tabela) {
     const filtros: Array<(l: Linha) => boolean> = [];
     let acao: "select" | "update" | "delete" | "upsert" = "select";
     let dados: Linha | Linha[] | null = null;
@@ -36,7 +42,7 @@ function bancoFalso() {
       delete: () => ((acao = "delete"), q),
       upsert: (d: Linha[]) => ((acao = "upsert"), (dados = d), q),
       then: (ok: (r: { data: Linha[]; error: null }) => unknown) => {
-        const linhas = tabelas[tabela]!;
+        const linhas = tabelas[tabela];
         const casam = linhas.filter((l) => filtros.every((f) => f(l)));
         if (acao === "update") casam.forEach((l) => Object.assign(l, dados));
         if (acao === "delete") tabelas[tabela] = linhas.filter((l) => !casam.includes(l));
@@ -52,7 +58,7 @@ function bancoFalso() {
     };
     return q;
   }
-  return { tabelas, admin: { from: (t: string) => consulta(t) } as never };
+  return { tabelas, admin: { from: (t: Tabela) => consulta(t) } as never };
 }
 
 interface Msg {
