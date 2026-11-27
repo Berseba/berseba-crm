@@ -30,6 +30,8 @@ const ESCOPOS_DECLARADOS: Record<string, string> = {
   "meetings.space.created": "Google Meet:",
   adwords: "Google Ads:",
   datamanager: "Google Ads:",
+  // Berseba (migration 9010): the partners' Gmail, read-only.
+  "gmail.readonly": "Gmail:",
 };
 
 function escoposPedidosPeloCodigo(): Map<string, string[]> {

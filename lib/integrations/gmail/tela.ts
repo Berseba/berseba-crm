@@ -3,6 +3,7 @@
  * threads of the last 30 days (automated ones left out), and the names and open deals of the
  * linked contacts. Service role, always filtered by `organization_id`; the page checks the role.
  */
+import { nomeDoContato } from "@/lib/contacts/rotulo-do-contato";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 import { conversasDeEmail, type ConversaDeEmail, type MensagemGuardada } from "./conversas";
@@ -61,7 +62,7 @@ export async function lerTelaDeEmails(organizationId: string, agora: Date): Prom
         .order("updated_at", { ascending: false }),
     ]);
     for (const c of (contatos ?? []) as Array<{ id: string; name: string | null; display_name: string | null }>) {
-      nomes.set(c.id, c.display_name || c.name || "");
+      nomes.set(c.id, nomeDoContato(c) ?? "");
     }
     for (const l of (leads ?? []) as Array<{ id: string; contact_id: string }>) {
       if (!negocios.has(l.contact_id)) negocios.set(l.contact_id, l.id);

@@ -220,6 +220,12 @@ export default async function PrivacyPage() {
             )}
           </li>
           <li>
+            <strong>{t("Gmail:")}</strong>{" "}
+            {t(
+              "quando a instalação liga a leitura de e-mails e uma pessoa da equipe conecta a própria caixa, ler (sem enviar, apagar nem marcar nada) os e-mails dessa caixa para mostrá-los no CRM ligados ao contato e ao negócio; os tokens ficam cifrados no servidor do operador e a pessoa pode desconectar a qualquer momento.",
+            )}
+          </li>
+          <li>
             <strong>{t("Google Ads:")}</strong>{" "}
             {t(
               "enviar ao Google Ads as vendas que um anúncio trouxe, para que ele aprenda com elas, criar e listar ações de conversão e ler as métricas das campanhas da própria conta de anúncios.",

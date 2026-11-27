@@ -1,3 +1,4 @@
+-- manifest: Berseba Gmail intake, read-only: gmail_mailboxes + gmail_messages (server-only), LGPD delete on anonymization
 -- Berseba (migration 9010): Gmail intake, read-only.
 --
 -- The partners of the organizations listed in GMAIL_INTAKE_ORG_IDS connect their own Gmail

@@ -894,6 +894,17 @@ const HOSTS_DECLARADOS: Record<string, EntradaDeHost> = {
     categoria: "FORNECEDOR",
     motivo: "endpoint oficial da Google Data Manager API: recebe conversões e consulta o processamento na conta autorizada pela própria organização. O destino pertence ao fornecedor e não à instalação do CRM.",
   },
+  // Berseba (migration 9010): the Gmail intake.
+  "gmail.googleapis.com": {
+    categoria: "FORNECEDOR",
+    motivo:
+      "endpoint oficial da Gmail API (`lib/integrations/gmail/client.ts`): a leitura, só leitura, da caixa que a própria pessoa conectou. Destino do request, não marca.",
+  },
+  "mail.google.com": {
+    categoria: "FORNECEDOR",
+    motivo:
+      "link \"Abrir no Gmail\" que `lib/integrations/gmail/message.ts` monta com o id da conversa: o código não chama o host, o navegador da pessoa abre a caixa dela. Trocar pelo domínio do revendedor não abriria e-mail nenhum.",
+  },
   "meet.googleapis.com": {
     categoria: "FORNECEDOR",
     motivo:

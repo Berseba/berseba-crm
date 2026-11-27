@@ -229,7 +229,7 @@ export const NAV_CATALOG = [
     href: "/app/emails",
     label: "E-mails",
     description: "Os e-mails dos sócios, ligados ao contato e ao negócio.",
-    icon: "Envelope",
+    icon: "Inbox",
     group: "crm",
     section: "O dia a dia da venda",
     minRole: "admin",
