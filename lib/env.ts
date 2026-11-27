@@ -235,6 +235,12 @@ const schema = z.object({
   // devolve 401 em toda chamada — por isso `getWacallsClient()` exige os dois.
   WACALLS_API_TOKEN: z.string().optional().default(""),
 
+  // ─── Berseba: meeting detection (migration 9011) — OPTIONAL, OFF BY DEFAULT ───
+  //
+  // Spends the organization's AI budget (one small call per message that talks about meeting).
+  /** Comma-separated organization ids whose client messages are read for meetings. */
+  MEETING_DETECTION_ORG_IDS: z.string().optional().default(""),
+
   // ─── Berseba: Gmail intake, read-only (migration 9010) — OPTIONAL, OFF BY DEFAULT ───
   //
   // Off unless both allowlists are set; parsed by `lib/integrations/gmail/config.ts`, never here.

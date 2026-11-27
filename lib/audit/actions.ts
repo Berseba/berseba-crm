@@ -30,6 +30,11 @@
  */
 export const AUDIT_ACTIONS = [
   // ── Berseba ──────────────────────────────────────────────────────────────
+  // Meeting proposals (`app/api/v1/reunioes/propostas/[id]`, migration 9011): a partner booked a
+  // proposal in the agenda, dismissed it, or the booking was refused (metadata: the error code).
+  "reunioes.proposta_criada",
+  "reunioes.proposta_descartada",
+  "reunioes.proposta_falhou",
   // Gmail intake, read-only (`app/api/v1/gmail/`, migration 9010): a partner started the consent,
   // connected their mailbox, a connection was refused (metadata: the reason, never a token),
   // the partner disconnected it.

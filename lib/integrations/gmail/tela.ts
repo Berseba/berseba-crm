@@ -13,6 +13,8 @@ import { STATUS_ENCERRADOS_LISTA } from "@/lib/inbox/comando-da-conversa";
 import { esperaUmaPessoa, esperandoDesde, type ConversaParaEspera } from "@/lib/operacao/regras";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+import { deteccaoLigada } from "@/lib/integrations/reunioes/deteccao";
+
 import { conversasDeEmail, type ConversaDeEmail, type MensagemGuardada } from "./conversas";
 import { emailsAguardandoResposta, type MensagemDaFila } from "./fila";
 
@@ -50,7 +52,22 @@ export type ItemDaFila =
       contact_id: string | null;
     };
 
+/** A meeting found in a client's message, waiting for a partner (#171, slice 3, migration 9011). */
+export interface ReuniaoProposta {
+  id: string;
+  source: "email" | "whatsapp";
+  intent: "pede" | "confirma";
+  starts_at: string | null;
+  duration_minutes: number | null;
+  title: string | null;
+  excerpt: string | null;
+  contact_id: string | null;
+  created_at: string;
+}
+
 export interface TelaDeEmails {
+  /** `null` when meeting detection is off for the organization (the section is not shown). */
+  reunioes: ReuniaoProposta[] | null;
   caixas: CaixaNaTela[];
   conversas: ConversaDeEmail[];
   fila: ItemDaFila[];
@@ -89,7 +106,8 @@ function pedacos<T>(lista: T[], tamanho = 100): T[][] {
 
 export async function lerTelaDeEmails(organizationId: string, agora: Date): Promise<TelaDeEmails> {
   const admin = createAdminClient();
-  const [caixasR, listaR, filaR, conversasR] = await Promise.all([
+  const comReunioes = deteccaoLigada(organizationId);
+  const [caixasR, listaR, filaR, conversasR, reunioesR] = await Promise.all([
     admin
       .from("gmail_mailboxes")
       .select("id, user_id, account_email, status, last_sync_at, last_sync_error")
@@ -126,7 +144,18 @@ export async function lerTelaDeEmails(organizationId: string, agora: Date): Prom
       .not("status", "in", `(${STATUS_ENCERRADOS_LISTA.join(",")})`)
       .order("awaiting_since", { ascending: true, nullsFirst: false })
       .limit(TETO_DAS_CONVERSAS),
+    comReunioes
+      ? admin
+          .from("meeting_proposals")
+          .select("id, source, intent, starts_at, duration_minutes, title, excerpt, contact_id, created_at")
+          .eq("organization_id", organizationId)
+          .eq("status", "proposta")
+          .gte("created_at", new Date(agora.getTime() - DIAS_DA_LISTA * DIA_MS).toISOString())
+          .order("created_at", { ascending: true })
+          .limit(50)
+      : Promise.resolve({ data: null, error: null }),
   ]);
+  const reunioes = comReunioes ? ((reunioesR.data ?? []) as ReuniaoProposta[]) : null;
 
   const caixas = (caixasR.data ?? []) as CaixaNaTela[];
   const conversas = conversasDeEmail((listaR.data ?? []) as MensagemGuardada[]).filter((c) => !c.automatica);
@@ -167,7 +196,9 @@ export async function lerTelaDeEmails(organizationId: string, agora: Date): Prom
   const nomes = new Map<string, string>();
   const negocios = new Map<string, string>();
   let lookupsFalharam = false;
-  const contatoIds = [...new Set([...conversas, ...fila].flatMap((c) => (c.contact_id ? [c.contact_id] : [])))];
+  const contatoIds = [
+    ...new Set([...conversas, ...fila, ...(reunioes ?? [])].flatMap((c) => (c.contact_id ? [c.contact_id] : []))),
+  ];
   for (const lote of pedacos(contatoIds)) {
     const [{ data: contatos, error: e1 }, { data: leads, error: e2 }] = await Promise.all([
       admin.from("contacts").select("id, name, display_name").eq("organization_id", organizationId).in("id", lote),
@@ -189,6 +220,7 @@ export async function lerTelaDeEmails(organizationId: string, agora: Date): Prom
   }
 
   return {
+    reunioes,
     caixas,
     conversas,
     fila,

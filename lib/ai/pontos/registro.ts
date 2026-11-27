@@ -198,6 +198,20 @@ export const PONTO_TRANSCRICAO_DE_AUDIO = "transcricao_de_audio";
 export const PONTO_VISAO_DE_IMAGEM = "visao_de_imagem";
 
 export const PONTOS_DE_IA: readonly PontoDeIa[] = [
+  // Berseba (#171, slice 3, migration 9011): reads a client's e-mail or WhatsApp message for a
+  // meeting request or confirmation, for the organizations in MEETING_DETECTION_ORG_IDS.
+  {
+    id: "meeting_detection",
+    rotulo: "Achar pedido de reunião na mensagem",
+    oQueFaz:
+      "Lê a mensagem de um cliente (e-mail ou WhatsApp) que fala de reunião e diz se ele pede ou confirma uma reunião, e para quando. Vira uma proposta que um sócio cria na agenda com um clique; nada é marcado sozinho.",
+    papel: "entender",
+    exige: { tools: true },
+    emissor: "app/api/v1/cron/meeting-detection/route.ts",
+    sintomaDeFalha:
+      "A seção Reuniões para confirmar da tela E-mails fica vazia, e a reunião pedida por mensagem precisa ser marcada à mão na Agenda.",
+    registraEm: "llm_calls",
+  },
   {
     id: "agent_preview",
     rotulo: "Testar ou revisar resposta",

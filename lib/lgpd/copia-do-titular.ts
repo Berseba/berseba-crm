@@ -67,6 +67,9 @@ export const SECOES_DA_EQUIPE = {
  * `CAMPOS_DA_EQUIPE` vai sem eles.
  */
 export const O_QUE_FICA = {
+  // Berseba (migration 9011).
+  meeting_proposals:
+    "as reuniões que o CRM achou nas mensagens dele: se pediu ou confirmou, o horário, o assunto e o trecho da mensagem",
   // Berseba (migration 9010).
   gmail_messages:
     "os e-mails trocados com ele que o CRM leu do Gmail dos sócios: remetente, destinatários, assunto, texto e data",

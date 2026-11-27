@@ -51,6 +51,11 @@ const PADRAO_PII =
  * razão precisa dizer QUANDO sai, não só por que está.
  */
 const DIVIDA_LGPD_CONHECIDA: Record<string, string> = {
+  meeting_proposals:
+    "Berseba, migration 9011: a proposta de reunião (assunto, trecho da mensagem). " +
+    "⚠️ ELA JÁ ESTÁ PROTEGIDA: o gatilho `trg_meeting_proposals_anonimizado` a APAGA na virada de " +
+    "is_anonymized, e `tests/invariants/reunioes-so-servidor.berseba.test.ts` prova o efeito. A entrada " +
+    "existe só porque ESTE instrumento lê UMA função e não enxerga gatilho — a mesma razão de crm_tasks.",
   gmail_messages:
     "Berseba, migration 9010: os e-mails lidos do Gmail dos sócios (assunto, corpo, endereços). " +
     "⚠️ ELA JÁ ESTÁ PROTEGIDA: o gatilho `trg_gmail_messages_anonimizado` APAGA os e-mails do contato " +
