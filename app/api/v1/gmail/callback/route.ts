@@ -21,6 +21,7 @@ import { supportCallbackWriteAllowed } from "@/lib/impersonate/support";
 import { perfilDoGmail } from "@/lib/integrations/gmail/client";
 import {
   appDoGmail,
+  temClienteProprio,
   CAMINHO_DO_CALLBACK_GMAIL,
   contaPermitida,
   ESCOPO_GMAIL_LEITURA,
@@ -145,25 +146,30 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
     });
     return voltar("erro=conta_indisponivel", req);
   }
-  // LGPD: only the mailboxes the installation lists. Anything else is refused, nothing of it is
-  // stored, and the grant Google just gave is revoked so it does not linger on that account.
+  // LGPD: only the mailboxes the installation lists. Anything else is refused and nothing of it
+  // is stored. The grant Google just gave is revoked only when this flow has its own OAuth client:
+  // with the installation's (the agenda's) client, a revoke would also cut that person's agenda.
   if (!contaPermitida(config, conta)) {
-    await revogarNoGoogle(token.refresh_token);
+    if (temClienteProprio()) await revogarNoGoogle(token.refresh_token);
     await audit({ action: "gmail.conexao_falhou", organizationId, metadata: { reason: "conta_fora_da_lista", user_id: userId } });
     return voltar("erro=conta_nao_permitida", req);
   }
 
-  // One connection per Gmail account in the installation (unique index): an inbox already
-  // connected by someone else, or in another organization, is never copied a second time.
+  // One connection per Gmail account in the installation (unique index): an inbox connected by
+  // someone else is never copied a second time. A row left `disconnected` in this organization
+  // can be taken over (the e-mails already read stay in the same organization); a live one, or
+  // one in another organization, is refused. Nothing is revoked here: the existing connection may
+  // be using the same grant.
   const { data: existente, error: erroDaBusca } = await admin
     .from("gmail_mailboxes")
-    .select("organization_id, user_id")
+    .select("id, organization_id, user_id, status")
     .eq("account_email", conta)
     .maybeSingle();
   if (erroDaBusca) return voltar("erro=gravar_falhou", req);
-  const dono = existente as { organization_id: string; user_id: string } | null;
-  if (dono && (dono.organization_id !== organizationId || dono.user_id !== userId)) {
-    await revogarNoGoogle(token.refresh_token);
+  const atual = existente as { id: string; organization_id: string; user_id: string; status: string } | null;
+  const mesmaPessoa = atual && atual.organization_id === organizationId && atual.user_id === userId;
+  const assumivel = atual && atual.organization_id === organizationId && atual.status === "disconnected";
+  if (atual && !mesmaPessoa && !assumivel) {
     await audit({ action: "gmail.conexao_falhou", organizationId, metadata: { reason: "conta_em_uso", user_id: userId } });
     return voltar("erro=conta_em_uso", req);
   }
@@ -172,22 +178,40 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   const refreshCifrado = await encryptWebhookSecret(admin, token.refresh_token);
   if (!accessCifrado || !refreshCifrado) return voltar("erro=cifra_indisponivel", req);
 
-  const { error } = await admin.from("gmail_mailboxes").upsert(
-    {
-      organization_id: organizationId,
-      user_id: userId,
-      account_email: conta,
-      oauth_access_token_encrypted: accessCifrado,
-      oauth_refresh_token_encrypted: refreshCifrado,
-      token_expires_at: token.expira_em,
-      scopes: token.scope,
-      status: "healthy",
-      last_sync_error: null,
-    },
-    { onConflict: "account_email" },
-  );
-  if (error) {
-    await audit({ action: "gmail.conexao_falhou", organizationId, metadata: { reason: "gravar", detalhe: error.message, user_id: userId } });
+  const conexao = {
+    user_id: userId,
+    oauth_access_token_encrypted: accessCifrado,
+    oauth_refresh_token_encrypted: refreshCifrado,
+    token_expires_at: token.expira_em,
+    scopes: token.scope,
+    status: "healthy",
+    last_sync_error: null,
+  };
+  // Update only the row read above, under the same owner/state; insert otherwise. Two callbacks
+  // racing for the same account: the loser hits the unique index (23505) or updates nothing.
+  const gravacao = atual
+    ? await admin
+        .from("gmail_mailboxes")
+        .update(conexao)
+        .eq("id", atual.id)
+        .eq("organization_id", organizationId)
+        .eq("user_id", atual.user_id)
+        .eq("status", atual.status)
+        .select("id")
+    : await admin
+        .from("gmail_mailboxes")
+        .insert({ ...conexao, organization_id: organizationId, account_email: conta })
+        .select("id");
+  if (gravacao.error?.code === "23505" || (!gravacao.error && (gravacao.data?.length ?? 0) === 0)) {
+    await audit({ action: "gmail.conexao_falhou", organizationId, metadata: { reason: "conta_em_uso", user_id: userId } });
+    return voltar("erro=conta_em_uso", req);
+  }
+  if (gravacao.error) {
+    await audit({
+      action: "gmail.conexao_falhou",
+      organizationId,
+      metadata: { reason: "gravar", detalhe: gravacao.error.message, user_id: userId },
+    });
     return voltar("erro=gravar_falhou", req);
   }
   await audit({ action: "gmail.caixa_conectada", organizationId, metadata: { user_id: userId, conta } });

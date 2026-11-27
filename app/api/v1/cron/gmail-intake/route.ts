@@ -12,7 +12,7 @@ import { type NextRequest } from "next/server";
 import { fail, ok } from "@/lib/api/wrappers";
 import { autorizaCron } from "@/lib/auth/cron-auth";
 import { appDoGmail, gmailIntakeConfig } from "@/lib/integrations/gmail/config";
-import { COLUNAS_DA_CAIXA, lerCaixa, type CaixaDoGmail } from "@/lib/integrations/gmail/intake";
+import { COLUNAS_DA_CAIXA, lerCaixa, PRAZO_DE_LEITURA_MS, type CaixaDoGmail } from "@/lib/integrations/gmail/intake";
 import { logger } from "@/lib/logger";
 import { idsDeOrgsParadas } from "@/lib/organizacao/operante";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -32,6 +32,8 @@ async function handle(req: NextRequest): Promise<Response> {
   const admin = createAdminClient();
   const agora = new Date();
   const paradas = new Set(await idsDeOrgsParadas(admin));
+  // One deadline for the whole run: a second mailbox never pushes it past the scheduler's 120 s.
+  const prazo = Date.now() + PRAZO_DE_LEITURA_MS;
   const caixas: Array<Record<string, unknown>> = [];
   for (const org of config.orgIds) {
     if (paradas.has(org)) continue;
@@ -46,7 +48,7 @@ async function handle(req: NextRequest): Promise<Response> {
     }
     for (const caixa of (data ?? []) as unknown as CaixaDoGmail[]) {
       try {
-        const r = await lerCaixa(admin, app, caixa, agora);
+        const r = await lerCaixa(admin, app, caixa, agora, fetch, Date.now, prazo);
         caixas.push({ ...r, erro: r.erro ? "sim" : undefined });
       } catch (erro) {
         logger.warn("gmail_intake: mailbox run failed", {

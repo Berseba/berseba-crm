@@ -31,8 +31,12 @@ const TETO_DA_LISTA_NA_MENOR_JANELA = 5000;
 const HORA_MS = 60 * 60 * 1000;
 const JANELA_MAXIMA_MS = 7 * 24 * HORA_MS;
 const JANELAS_POR_RODADA = 20;
-/** The scheduler gives the cron 120 s; reading stops here and the rest goes to the next run. */
-const PRAZO_DE_LEITURA_MS = 60_000;
+/**
+ * The scheduler gives the cron 120 s. Gmail calls stop once this much has gone (one deadline for
+ * the whole run, every mailbox) and the rest goes to the next run; the database writes after it
+ * are quick.
+ */
+export const PRAZO_DE_LEITURA_MS = 60_000;
 /** Skipped ids older than this are never listed again (the mark only moves forward). */
 const PODA_DAS_IGNORADAS_DIAS = 45;
 
@@ -219,6 +223,8 @@ export async function lerCaixa(
   agora: Date,
   f: GmailFetch = fetch,
   relogio: () => number = Date.now,
+  /** Absolute deadline (ms) for this mailbox's Gmail calls; the cron shares one across mailboxes. */
+  prazo: number = relogio() + PRAZO_DE_LEITURA_MS,
 ): Promise<ResultadoDaCaixa> {
   const base = { caixa: caixa.id, lidas: 0, gravadas: 0, religadas: 0, restam: false };
   const fim = async (r: ResultadoDaCaixa, marco?: string | null, renovar = false): Promise<ResultadoDaCaixa> => {
@@ -239,7 +245,6 @@ export async function lerCaixa(
   const a = await acesso(admin, app, caixa, agora);
   if (!a.ok) return fim({ ...base, status: a.status, erro: a.erro });
 
-  const inicio = relogio();
   let desde = caixa.synced_until
     ? new Date(caixa.synced_until)
     : new Date(agora.getTime() - JANELA_INICIAL_DIAS * 24 * HORA_MS);
@@ -255,6 +260,10 @@ export async function lerCaixa(
   const ignoradas: string[] = [];
 
   for (let n = 0; n < JANELAS_POR_RODADA; n++) {
+    if (relogio() > prazo) {
+      restam = true;
+      break;
+    }
     const ate = new Date(Math.min(desde.getTime() + janelaMs, agora.getTime()));
     const lista = await idsDasMensagens(a.accessToken, buscaDoGmail(desde, ate), tetoDaLista, f);
     if (!lista.ok) {
@@ -280,7 +289,7 @@ export async function lerCaixa(
     const lidosEm: number[] = [];
     let parou = sobra;
     for (const id of ler) {
-      if (relogio() - inicio > PRAZO_DE_LEITURA_MS) {
+      if (relogio() > prazo) {
         parou = true;
         break;
       }

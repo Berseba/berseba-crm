@@ -74,6 +74,11 @@ export function enderecoDeRetornoDoGmail(urlDaAplicacao: string = env.NEXT_PUBLI
   return new URL(CAMINHO_DO_CALLBACK_GMAIL, urlDaAplicacao).toString();
 }
 
+/** True when the Gmail flow has its own OAuth client (not the agenda's). */
+export function temClienteProprio(): boolean {
+  return Boolean(env.GMAIL_INTAKE_CLIENT_ID.trim() && env.GMAIL_INTAKE_CLIENT_SECRET.trim());
+}
+
 /** The OAuth app for the Gmail consent, or `null` when there is none. */
 export async function appDoGmail(): Promise<AppDoGmail | null> {
   const redirectUri = enderecoDeRetornoDoGmail();
