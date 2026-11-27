@@ -33,6 +33,7 @@ function banco(inicial: { emails: Linha[]; contatos?: Linha[]; leads?: Linha[] }
     gmail_messages: inicial.emails,
     contacts: inicial.contatos ?? [],
     crm_leads: inicial.leads ?? [],
+    crm_lead_activities: [],
   };
   let seq = 0;
   const from = (tabela: string) => {

@@ -220,7 +220,18 @@ export async function levarEmailsAoFunil(
           reason: e.direction === "inbound" ? "e-mail recebido" : "e-mail enviado",
           payload: { gmail_message_id: e.id, mailbox_id: e.mailbox_id, sent_at: e.sent_at },
         });
-        if (r.ok) resultado.registrosNaTimeline += 1;
+        if (r.ok) {
+          resultado.registrosNaTimeline += 1;
+          // The line shows when the e-mail was sent, not when the CRM read it (the helper always
+          // writes "now"; a late read would put the e-mails out of order on the timeline).
+          await admin
+            .from("crm_lead_activities")
+            .update({ performed_at: new Date(e.sent_at).toISOString() })
+            .eq("organization_id", org)
+            .eq("lead_id", leadId)
+            .eq("source_module", "gmail")
+            .eq("source_id", e.id);
+        }
       }
       await admin
         .from("contacts")
